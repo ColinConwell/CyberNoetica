@@ -1,0 +1,10 @@
+{
+  "name": "@cybernoetica/renderer",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": { "test": "vitest run", "test:watch": "vitest" },
+  "dependencies": { "@cybernoetica/core": "workspace:*", "three": "^0.175.0" },
+  "devDependencies": { "@types/three": "^0.175.0", "jsdom": "^26.1.0", "typescript": "^5.8.3", "vitest": "^3.2.1" }
+}

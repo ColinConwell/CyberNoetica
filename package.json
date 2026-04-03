@@ -1,0 +1,14 @@
+{
+  "name": "cybernoetica",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter @cybernoetica/web dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
