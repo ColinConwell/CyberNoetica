@@ -1,0 +1,67 @@
+# Cybernœtica — Development Commands
+# Usage: just <command>
+
+# Default: show available commands
+default:
+    @just --list
+
+# ─── Launch ───────────────────────────────────────────────────────────
+
+# Start the dev server (Vite, port 5173)
+dev:
+    pnpm dev
+
+# Start dev server and open in default browser
+launch:
+    pnpm dev &
+    sleep 2
+    open http://localhost:5173
+
+# ─── Build ────────────────────────────────────────────────────────────
+
+# Build all packages
+build:
+    pnpm build
+
+# Build the Rust/WASM audio analysis module
+wasm:
+    cd crates/audio-analysis && wasm-pack build --target web --out-dir ../../packages/audio/wasm
+
+# ─── Test ─────────────────────────────────────────────────────────────
+
+# Run all tests
+test:
+    pnpm test
+
+# Run tests in watch mode (core + renderer + audio)
+test-watch:
+    pnpm --filter @cybernoetica/core test:watch &
+    pnpm --filter @cybernoetica/renderer test:watch &
+    pnpm --filter @cybernoetica/audio test:watch
+
+# Run only Rust tests
+test-rust:
+    cd crates/audio-analysis && cargo test
+
+# ─── Install ──────────────────────────────────────────────────────────
+
+# Install all dependencies
+install:
+    pnpm install
+
+# Full setup: install deps + build WASM
+setup:
+    pnpm install
+    just wasm
+
+# ─── Clean ────────────────────────────────────────────────────────────
+
+# Remove build artifacts and node_modules
+clean:
+    rm -rf node_modules apps/web/node_modules packages/*/node_modules
+    rm -rf apps/web/dist packages/*/dist
+    rm -rf crates/audio-analysis/target
+
+# Remove WASM build output
+clean-wasm:
+    rm -rf packages/audio/wasm
