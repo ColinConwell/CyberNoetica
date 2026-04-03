@@ -1,8 +1,9 @@
 import { MessageBus } from '@cybernoetica/core';
 import type { AudioFeatures } from '@cybernoetica/core';
 import { AudioSource, AudioProcessor, loadWasmAnalyzer } from '@cybernoetica/audio';
-import { SceneManager, MandelbrotVisualizer } from '@cybernoetica/renderer';
+import { SceneManager, MandelbrotVisualizer, OrbitalVisualizer } from '@cybernoetica/renderer';
 import { createUI } from './ui.js';
+import type { VisualizerType } from './ui.js';
 
 function fallbackFeatures(freqData: Float32Array): AudioFeatures {
   const len = freqData.length;
@@ -34,25 +35,51 @@ function bandAvg(data: Float32Array, from: number, to: number): number {
   return sum / (end - from);
 }
 
+interface Visualizer {
+  attach(scene: THREE.Scene): void;
+  tick(): void;
+  setResolution?(w: number, h: number): void;
+  dispose(): void;
+}
+
 export async function createApp(container: HTMLElement): Promise<void> {
-  // Core bus
   const bus = new MessageBus();
 
   // Scene
   const scene = new SceneManager(container.clientWidth || window.innerWidth, container.clientHeight || window.innerHeight);
   scene.attach(container);
 
-  // Visualizer
-  const mandelbrot = new MandelbrotVisualizer(bus);
-  mandelbrot.attach(scene.scene);
-  mandelbrot.setResolution(scene.width, scene.height);
+  // Visualizers (lazy-created, switched on demand)
+  let activeType: VisualizerType = 'orbital';
+  let activeViz: Visualizer | null = null;
+
+  const visualizers: Record<VisualizerType, () => Visualizer> = {
+    orbital: () => new OrbitalVisualizer(bus),
+    mandelbrot: () => new MandelbrotVisualizer(bus),
+  };
+
+  function switchVisualizer(type: VisualizerType) {
+    if (activeViz) {
+      activeViz.dispose();
+      // Clear the scene of all children
+      while (scene.scene.children.length > 0) {
+        scene.scene.remove(scene.scene.children[0]);
+      }
+    }
+    activeType = type;
+    activeViz = visualizers[type]();
+    activeViz.attach(scene.scene);
+    activeViz.setResolution?.(scene.width, scene.height);
+  }
+
+  // Start with orbital
+  switchVisualizer('orbital');
 
   // Audio
   const audioSource = new AudioSource();
   await audioSource.init();
   const audioProcessor = new AudioProcessor(bus);
 
-  // Attempt WASM analyzer load
   const wasmAnalyzer = await loadWasmAnalyzer();
   if (wasmAnalyzer) {
     console.log('CyberNoetica: WASM audio analyzer loaded');
@@ -72,6 +99,19 @@ export async function createApp(container: HTMLElement): Promise<void> {
     }
   });
 
+  ui.onTrackSelect(async (url: string, name: string) => {
+    try {
+      await audioSource.resume();
+      const response = await fetch(url);
+      const buffer = await response.arrayBuffer();
+      const blob = new Blob([buffer], { type: 'audio/mpeg' });
+      const file = new File([blob], `${name}.mp3`, { type: 'audio/mpeg' });
+      await audioSource.loadFile(file);
+    } catch (err) {
+      ui.showError(`Failed to load track: ${(err as Error).message}`);
+    }
+  });
+
   ui.onMicClick(async () => {
     try {
       await audioSource.resume();
@@ -79,6 +119,10 @@ export async function createApp(container: HTMLElement): Promise<void> {
     } catch (err) {
       ui.showError(`Microphone access denied: ${(err as Error).message}`);
     }
+  });
+
+  ui.onVisualizerChange((type: VisualizerType) => {
+    switchVisualizer(type);
   });
 
   // Spacebar toggles UI
@@ -94,10 +138,10 @@ export async function createApp(container: HTMLElement): Promise<void> {
     const w = window.innerWidth;
     const h = window.innerHeight;
     scene.resize(w, h);
-    mandelbrot.setResolution(w, h);
+    activeViz?.setResolution?.(w, h);
   });
 
-  // Render loop: audio extraction + feature push + visualizer tick
+  // Render loop
   scene.onRender(() => {
     if (wasmAnalyzer) {
       const samples = audioSource.getSamples();
@@ -117,7 +161,7 @@ export async function createApp(container: HTMLElement): Promise<void> {
             degraded: false,
           });
         } catch {
-          // WASM error — no-op this frame
+          // WASM error — skip this frame
         }
       }
     } else {
@@ -127,9 +171,8 @@ export async function createApp(container: HTMLElement): Promise<void> {
       }
     }
 
-    mandelbrot.tick();
+    activeViz?.tick();
   });
 
-  // Start rendering
   scene.start();
 }
