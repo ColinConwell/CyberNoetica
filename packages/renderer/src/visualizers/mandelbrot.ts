@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
 import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
 import { EMASmoothing } from '../smoothing.js';
+import type { Visualizer, VisualizerMetadata } from './types.js';
+import { registerVisualizer } from './registry.js';
 
 export interface MandelbrotUniforms {
   zoom: number;
@@ -37,21 +39,34 @@ const ZOOM_TARGETS = [
   { cx: -0.0452407412, cy: 0.9868162205, name: 'Star Pattern' },
 ];
 
-export class MandelbrotVisualizer {
+const mandelbrotMetadata: VisualizerMetadata = {
+  type: 'mandelbrot',
+  label: 'Mandelbrot',
+  description: 'Deep zoom into infinite fractal edges',
+  usesPerspective: false,
+  params: [
+    { key: 'zoomSpeed', label: 'Zoom Speed', min: 0.0002, max: 0.003, step: 0.0001, initial: 0.0008 },
+    { key: 'rotationSpeed', label: 'Rotation', min: 0.0, max: 0.015, step: 0.001, initial: 0.003 },
+  ],
+  viewport: { pan: true, zoom: true, orbit: false },
+};
+
+export class MandelbrotVisualizer implements Visualizer {
+  readonly metadata = mandelbrotMetadata;
+
   private unsub: Unsubscribe;
   private latestFeatures: AudioFeatures | null = null;
   private time = 0;
 
-  // Continuous zoom state
-  private zoomLevel = 0.8;        // exponential zoom (starts wide)
-  private zoomSpeed = 0.0008;     // base zoom rate per frame
-  private targetIndex = 0;        // which zoom target we're heading toward
+  private zoomLevel = 0.8;
+  private zoomSpeed = 0.0008;
+  private targetIndex = 0;
   private target = ZOOM_TARGETS[0];
   private cx: number;
   private cy: number;
-  private rotation = 0;           // camera rotation angle (radians)
-  private rotationEnabled = true; // user-toggleable
-  private rotationSpeed = 0.003;  // radians per frame base
+  private rotation = 0;
+  private rotationEnabled = true;
+  private rotationSpeed = 0.003;
 
   // Zoom cycle state: zoom in → peak → zoom out → switch target → zoom in
   private zoomDirection: 'in' | 'out' = 'in';
@@ -211,6 +226,16 @@ export class MandelbrotVisualizer {
     if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
   }
 
+  setUserParam(key: string, value: number): void {
+    switch (key) {
+      case 'zoomSpeed': this.zoomSpeed = value; break;
+      case 'rotationSpeed':
+        this.rotationSpeed = value;
+        this.rotationEnabled = value > 0;
+        break;
+    }
+  }
+
   dispose(): void {
     this.unsub();
     this.material?.dispose();
@@ -218,9 +243,10 @@ export class MandelbrotVisualizer {
   }
 }
 
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
-}
+registerVisualizer({
+  metadata: mandelbrotMetadata,
+  create: (bus) => new MandelbrotVisualizer(bus),
+});
 
 const VERTEX_SHADER = /* glsl */ `
   varying vec2 vUv;

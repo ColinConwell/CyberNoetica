@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { ViewportCapabilities } from './visualizers/types.js';
 
 export class SceneManager {
   public width: number;
@@ -6,13 +7,11 @@ export class SceneManager {
   readonly scene: THREE.Scene;
   readonly camera: THREE.OrthographicCamera;
   readonly perspCamera: THREE.PerspectiveCamera;
-  /** Which camera to use for rendering — visualizers can switch this */
   activeCamera: THREE.Camera;
   private renderer: THREE.WebGLRenderer | null = null;
   private animationId: number | null = null;
   private renderCallbacks: Array<(time: number) => void> = [];
 
-  // Viewport offset (user drag)
   private panX = 0;
   private panY = 0;
   private userZoom = 1.0;
@@ -20,10 +19,11 @@ export class SceneManager {
   private lastMouseX = 0;
   private lastMouseY = 0;
 
-  // Auto camera drift for perspective mode
+  private viewportCaps: ViewportCapabilities = { pan: true, zoom: true, orbit: false };
+
   private driftAngle = 0;
   driftEnabled = true;
-  driftSpeed = 0.08; // radians per second
+  driftSpeed = 0.08;
 
   constructor(width: number, height: number) {
     this.width = width;
@@ -64,11 +64,9 @@ export class SceneManager {
       this.lastMouseX = e.clientX;
       this.lastMouseY = e.clientY;
 
-      if (this.activeCamera === this.perspCamera) {
-        // For perspective: orbit around center
+      if (this.viewportCaps.orbit) {
         this.driftAngle += dx * 3.0;
-      } else {
-        // For ortho: pan the shader center offset
+      } else if (this.viewportCaps.pan) {
         this.panX -= dx * 2.0 / this.userZoom;
         this.panY += dy * 2.0 / this.userZoom;
       }
@@ -80,6 +78,7 @@ export class SceneManager {
     });
 
     canvas.addEventListener('wheel', (e) => {
+      if (!this.viewportCaps.zoom) return;
       e.preventDefault();
       const zoomDelta = e.deltaY > 0 ? 0.9 : 1.1;
       this.userZoom *= zoomDelta;
@@ -87,17 +86,18 @@ export class SceneManager {
     }, { passive: false });
   }
 
-  /** Get current pan offset (shader visualizers read this to offset their center) */
+  setViewportCapabilities(caps: ViewportCapabilities): void {
+    this.viewportCaps = caps;
+  }
+
   getPan(): [number, number] {
     return [this.panX, this.panY];
   }
 
-  /** Get user zoom multiplier */
   getUserZoom(): number {
     return this.userZoom;
   }
 
-  /** Reset pan/zoom to defaults */
   resetView(): void {
     this.panX = 0;
     this.panY = 0;

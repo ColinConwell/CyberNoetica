@@ -1,141 +1,62 @@
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures } from '@cybernoetica/core';
-import { AudioSource, AudioProcessor, loadWasmAnalyzer } from '@cybernoetica/audio';
-import { SceneManager, MandelbrotVisualizer, OrbitalVisualizer, WaveformVisualizer, JuliaVisualizer } from '@cybernoetica/renderer';
-import { createUI } from './ui.js';
-import type { VisualizerType } from './ui.js';
+import { SceneManager } from '@cybernoetica/renderer';
+import { createUI } from './ui/index.js';
+import type { VisualizerType } from './ui/index.js';
+import { AudioPipeline } from './managers/audio-pipeline.js';
+import { TrackManager } from './managers/track-manager.js';
+import { VisualizerManager } from './managers/visualizer-manager.js';
+import { createAppStore } from './store.js';
 
-// ── Audio fallback ──────────────────────────────────────────────────
-function fallbackFeatures(freqData: Float32Array): AudioFeatures {
-  const len = freqData.length;
-  const linear = new Float32Array(len);
-  let totalEnergy = 0;
-  for (let i = 0; i < len; i++) {
-    linear[i] = Math.max(0, (freqData[i] + 100) / 100);
-    totalEnergy += linear[i];
-  }
-  const bassEnd = Math.floor(250 / 21);
-  const midEnd = Math.floor(4000 / 21);
-  return {
-    fftBins: linear,
-    bass: bandAvg(linear, 1, bassEnd),
-    mid: bandAvg(linear, bassEnd, midEnd),
-    high: bandAvg(linear, midEnd, len),
-    spectralCentroid: totalEnergy > 0
-      ? Array.from(linear).reduce((sum, v, i) => sum + v * i, 0) / totalEnergy / len : 0,
-    spectralFlux: 0,
-    rms: totalEnergy / len,
-    beatOnset: false,
-    beatConfidence: 0,
-    degraded: true,
-  };
-}
-
-function bandAvg(data: Float32Array, from: number, to: number): number {
-  if (from >= to) return 0;
-  let sum = 0;
-  const end = Math.min(to, data.length);
-  for (let i = from; i < end; i++) sum += data[i];
-  return sum / (end - from);
-}
-
-// ── Visualizer interface ────────────────────────────────────────────
-interface Visualizer {
-  attach(scene: THREE.Scene): void;
-  tick(): void;
-  setResolution?(w: number, h: number): void;
-  /** Set viewport pan offset (for shader visualizers) */
-  setPan?(x: number, y: number): void;
-  /** Set viewport zoom multiplier (for shader visualizers) */
-  setZoom?(z: number): void;
-  dispose(): void;
-  /** If true, uses a perspective camera instead of orthographic */
-  usesPerspective?: boolean;
-}
-
-const VISUALIZER_TYPES: VisualizerType[] = ['orbital', 'waveform', 'julia', 'mandelbrot'];
-
-function pickRandom<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
-
-// ── App ─────────────────────────────────────────────────────────────
 export async function createApp(container: HTMLElement): Promise<void> {
   const bus = new MessageBus();
+  const store = createAppStore();
 
-  // Scene
+  // Expose globals for debug panel
+  (window as any).__cybernoetica = { store, bus };
+
   const scene = new SceneManager(
     container.clientWidth || window.innerWidth,
     container.clientHeight || window.innerHeight,
   );
   scene.attach(container);
 
-  // Visualizer management
-  let activeViz: Visualizer | null = null;
-  let activeVizType: VisualizerType = 'orbital';
-  let playing = false;
+  const audio = new AudioPipeline(bus);
+  await audio.init();
+  store.setState({ audio: { wasm: audio.isWasm() } });
 
-  const visualizers: Record<VisualizerType, () => Visualizer> = {
-    orbital: () => new OrbitalVisualizer(bus),
-    waveform: () => new WaveformVisualizer(bus),
-    julia: () => new JuliaVisualizer(bus),
-    mandelbrot: () => new MandelbrotVisualizer(bus),
-  };
+  const vizManager = new VisualizerManager(bus, scene);
+  const trackManager = new TrackManager(audio.source);
+  const sampleTracks = await trackManager.fetchSampleTracks();
 
-  // Per-visualizer appearance control definitions
-  interface ParamDef {
-    label: string;
-    min: number;
-    max: number;
-    step: number;
-    initial: number;
-    apply: (viz: Visualizer, value: number) => void;
+  // Restore persisted settings
+  const saved = store.getState();
+  if (saved.ui.autoPlay !== undefined || saved.ui.shuffle !== undefined) {
+    trackManager.setAutoPlay(saved.ui.autoPlay, saved.ui.shuffle);
   }
 
-  const vizParams: Partial<Record<VisualizerType, ParamDef[]>> = {
-    orbital: [
-      { label: 'Glow', min: 0.3, max: 2.5, step: 0.1, initial: 1.0,
-        apply: (v, val) => { (v as any).userParams.glowMultiplier = val; } },
-      { label: 'Gravity', min: 0.2, max: 3.0, step: 0.1, initial: 1.0,
-        apply: (v, val) => { (v as any).userParams.gravityMultiplier = val; } },
-      { label: 'Turbulence', min: 0.0, max: 3.0, step: 0.1, initial: 1.0,
-        apply: (v, val) => { (v as any).userParams.noiseMultiplier = val; } },
-    ],
-    waveform: [
-      { label: 'Bass Boost', min: 0.0, max: 1.0, step: 0.05, initial: 0.0,
-        apply: (v, val) => {
-          const mat = (v as any).material;
-          if (mat) mat.uniforms.u_bass.value = Math.max(mat.uniforms.u_bass.value, val);
-        } },
-      { label: 'Brightness', min: 0.2, max: 2.0, step: 0.1, initial: 1.0,
-        apply: (v, val) => {
-          const mat = (v as any).material;
-          if (mat) mat.uniforms.u_rms.value = Math.max(mat.uniforms.u_rms.value, val * 0.3);
-        } },
-    ],
-    mandelbrot: [
-      { label: 'Zoom Speed', min: 0.0002, max: 0.003, step: 0.0001, initial: 0.0008,
-        apply: (v, val) => { (v as any).zoomSpeed = val; } },
-      { label: 'Rotation', min: 0.0, max: 0.015, step: 0.001, initial: 0.003,
-        apply: (v, val) => { (v as any).rotationSpeed = val; (v as any).rotationEnabled = val > 0; } },
-    ],
-    julia: [
-      { label: 'Orbit Speed', min: 0.02, max: 0.5, step: 0.02, initial: 0.15,
-        apply: (v, val) => { (v as any).orbitSpeed = val; } },
-      { label: 'Orbit Radius', min: 0.01, max: 0.25, step: 0.01, initial: 0.08,
-        apply: (v, val) => { (v as any).orbitRadius = val; } },
-      { label: 'Morph Speed', min: 2, max: 20, step: 1, initial: 8,
-        apply: (v, val) => { (v as any).transitionDuration = val; } },
-    ],
-  };
+  let playing = false;
 
-  function updateAppearanceControls(type: VisualizerType) {
-    const params = vizParams[type];
-    if (!params || params.length === 0) {
+  // Auto-play: when a track ends, play the next
+  audio.source.onEnded(() => {
+    if (trackManager.isAutoPlayEnabled() && playing) {
+      const next = trackManager.getNextTrack();
+      if (next) {
+        trackManager.loadTrack(next.url)
+          .then(() => ui.setActiveTrack(next.name))
+          .catch(err => ui.showError(`Failed to load track: ${(err as Error).message}`));
+      }
+    }
+  });
+
+  // Appearance controls: reads params from active visualizer metadata
+  function updateAppearanceControls() {
+    const viz = vizManager.getActive();
+    if (!viz || viz.metadata.params.length === 0) {
       ui.setAppearanceRenderer(null);
       return;
     }
-    ui.setAppearanceRenderer((container: HTMLElement) => {
+    const params = viz.metadata.params;
+    ui.setAppearanceRenderer((ctr: HTMLElement) => {
       for (const param of params) {
         const row = document.createElement('div');
         Object.assign(row.style, {
@@ -147,7 +68,10 @@ export async function createApp(container: HTMLElement): Promise<void> {
         const right = document.createElement('div');
         Object.assign(right.style, { display: 'flex', alignItems: 'center', gap: '8px' });
         const slider = document.createElement('input');
-        Object.assign(slider, { type: 'range', min: String(param.min), max: String(param.max), step: String(param.step), value: String(param.initial) });
+        Object.assign(slider, {
+          type: 'range', min: String(param.min), max: String(param.max),
+          step: String(param.step), value: String(param.initial),
+        });
         Object.assign(slider.style, { width: '90px', accentColor: 'rgba(140, 160, 255, 0.6)' });
         const num = document.createElement('span');
         Object.assign(num.style, { fontSize: '10px', color: 'rgba(255,255,255,0.3)', minWidth: '36px', textAlign: 'right' });
@@ -155,143 +79,88 @@ export async function createApp(container: HTMLElement): Promise<void> {
         slider.addEventListener('input', () => {
           const val = Number(slider.value);
           num.textContent = val < 0.01 ? val.toExponential(1) : String(Math.round(val * 1000) / 1000);
-          if (activeViz) param.apply(activeViz, val);
+          viz.setUserParam(param.key, val);
         });
         right.append(slider, num);
         row.append(label, right);
-        container.appendChild(row);
+        ctr.appendChild(row);
       }
     });
   }
 
-  function switchVisualizer(type: VisualizerType) {
-    if (activeViz) {
-      activeViz.dispose();
-      while (scene.scene.children.length > 0) scene.scene.remove(scene.scene.children[0]);
-    }
-    activeVizType = type;
-    activeViz = visualizers[type]();
-    activeViz.attach(scene.scene);
-    activeViz.setResolution?.(scene.width, scene.height);
-    // Switch camera and reset viewport
-    scene.activeCamera = activeViz.usesPerspective ? scene.perspCamera : scene.camera;
-    scene.resetView();
-    ui.setActiveVisualizer(type);
-    updateAppearanceControls(type);
-  }
-
-  // Audio
-  const audioSource = new AudioSource();
-  await audioSource.init();
-  const audioProcessor = new AudioProcessor(bus);
-  const wasmAnalyzer = await loadWasmAnalyzer();
-  if (wasmAnalyzer) console.log('CyberNoetica: WASM audio analyzer loaded');
-
-  // Auto-play: when a track ends, play the next one
-  audioSource.onEnded(() => {
-    if (autoPlayEnabled && playing) {
-      loadNextTrack();
-    }
-  });
-
-  // Load sample track list
-  let sampleTracks: string[] = [];
-  try {
-    const res = await fetch('/sample-music/__list');
-    sampleTracks = await res.json();
-  } catch { /* no samples available */ }
-
-  // Track loading helper
-  async function loadTrack(url: string, name: string) {
-    try {
-      await audioSource.resume();
-      const response = await fetch(url);
-      const buffer = await response.arrayBuffer();
-      const blob = new Blob([buffer], { type: 'audio/mpeg' });
-      const file = new File([blob], `${name}.mp3`, { type: 'audio/mpeg' });
-      await audioSource.loadFile(file);
-      ui.setActiveTrack(name);
-    } catch (err) {
-      ui.showError(`Failed to load track: ${(err as Error).message}`);
-    }
-  }
-
-  // Auto-play state
-  let autoPlayEnabled = true;
-  let shuffleEnabled = true;
-  let trackIndex = 0;
-  let playedTracks: Set<number> = new Set();
-
-  function loadRandomTrack() {
-    if (sampleTracks.length === 0) return;
-    const track = pickRandom(sampleTracks);
-    const name = track.split('/').pop()?.replace(/\.[^.]+$/, '') || track;
-    trackIndex = sampleTracks.indexOf(track);
-    loadTrack(`/sample-music/${track}`, name);
-  }
-
-  function loadNextTrack() {
-    if (sampleTracks.length === 0) return;
-    if (shuffleEnabled) {
-      // Pick random unplayed track; reset when all played
-      if (playedTracks.size >= sampleTracks.length) playedTracks.clear();
-      let idx: number;
-      do { idx = Math.floor(Math.random() * sampleTracks.length); } while (playedTracks.has(idx) && playedTracks.size < sampleTracks.length);
-      playedTracks.add(idx);
-      trackIndex = idx;
-    } else {
-      trackIndex = (trackIndex + 1) % sampleTracks.length;
-    }
-    const track = sampleTracks[trackIndex];
-    const name = track.split('/').pop()?.replace(/\.[^.]+$/, '') || track;
-    loadTrack(`/sample-music/${track}`, name);
-  }
-
-  // ── UI ──────────────────────────────────────────────────────────
+  // UI
   const ui = createUI();
   ui.setSampleTracks(sampleTracks);
 
-  // Start: pick random viz + random track, begin
   ui.onStart(() => {
-    const vizType = pickRandom(VISUALIZER_TYPES);
-    switchVisualizer(vizType);
-    loadRandomTrack();
+    const viz = vizManager.switchRandom();
+    updateAppearanceControls();
+    const type = vizManager.getActiveType();
+    ui.setActiveVisualizer(type as VisualizerType);
+    store.setState({ visualizer: { type, userParams: {} } });
+    const track = trackManager.getRandomTrack();
+    if (track) {
+      trackManager.loadTrack(track.url)
+        .then(() => {
+          ui.setActiveTrack(track.name);
+          store.setState({ audio: { trackName: track.name, source: 'file' } });
+        })
+        .catch(err => ui.showError(`Failed to load track: ${(err as Error).message}`));
+    }
     playing = true;
     ui.setPlaying(true);
+    store.setState({ audio: { playing: true } });
     scene.start();
   });
 
   ui.onPause(() => {
     playing = false;
-    audioSource.suspend();
+    audio.source.suspend();
     ui.setPlaying(false);
-    // Visual continues ticking but we could add collapse here
+    store.setState({ audio: { playing: false } });
   });
 
   ui.onResume(() => {
     playing = true;
-    audioSource.resume();
+    audio.source.resume();
     ui.setPlaying(true);
+    store.setState({ audio: { playing: true } });
   });
 
   ui.onVisualizerChange((type) => {
-    switchVisualizer(type);
+    vizManager.switchTo(type);
+    updateAppearanceControls();
+    ui.setActiveVisualizer(type);
+    store.setState({ visualizer: { type, userParams: {} } });
   });
 
   ui.onRandomVisualizer(() => {
-    const other = VISUALIZER_TYPES.filter(t => t !== activeVizType);
-    const type = other.length > 0 ? pickRandom(other) : pickRandom(VISUALIZER_TYPES);
-    switchVisualizer(type);
+    vizManager.switchRandom(vizManager.getActiveType());
+    updateAppearanceControls();
+    const type = vizManager.getActiveType();
+    ui.setActiveVisualizer(type as VisualizerType);
+    store.setState({ visualizer: { type, userParams: {} } });
   });
 
-  ui.onTrackSelect((url, name) => loadTrack(url, name));
+  ui.onTrackSelect((url, name) => {
+    trackManager.loadTrack(url)
+      .then(() => ui.setActiveTrack(name))
+      .catch(err => ui.showError(`Failed to load track: ${(err as Error).message}`));
+  });
 
-  ui.onRandomTrack(loadRandomTrack);
+  ui.onRandomTrack(() => {
+    const track = trackManager.getRandomTrack();
+    if (track) {
+      trackManager.loadTrack(track.url)
+        .then(() => ui.setActiveTrack(track.name))
+        .catch(err => ui.showError(`Failed to load track: ${(err as Error).message}`));
+    }
+  });
 
   ui.onFileSelect(async (file) => {
     try {
-      await audioSource.resume();
-      await audioSource.loadFile(file);
+      await audio.source.resume();
+      await audio.source.loadFile(file);
       ui.setActiveTrack(file.name.replace(/\.[^.]+$/, ''));
     } catch (err) {
       ui.showError(`Failed to load audio: ${(err as Error).message}`);
@@ -300,8 +169,8 @@ export async function createApp(container: HTMLElement): Promise<void> {
 
   ui.onMicClick(async () => {
     try {
-      await audioSource.resume();
-      await audioSource.useMicrophone();
+      await audio.source.resume();
+      await audio.source.useMicrophone();
       ui.setActiveTrack('Microphone');
     } catch (err) {
       ui.showError(`Microphone access denied: ${(err as Error).message}`);
@@ -309,76 +178,60 @@ export async function createApp(container: HTMLElement): Promise<void> {
   });
 
   ui.onAutoPlayChange((enabled, shuffle) => {
-    autoPlayEnabled = enabled;
-    shuffleEnabled = shuffle;
+    trackManager.setAutoPlay(enabled, shuffle);
+    store.setState({ ui: { autoPlay: enabled, shuffle } });
   });
 
   ui.onSystemAudio(async () => {
     try {
-      await audioSource.resume();
-      await audioSource.useSystemAudio();
+      await audio.source.resume();
+      await audio.source.useSystemAudio();
       ui.setActiveTrack('System Audio');
     } catch (err) {
       ui.showError(`System audio capture failed: ${(err as Error).message}`);
     }
   });
 
-  // Resize
   window.addEventListener('resize', () => {
     const w = window.innerWidth;
     const h = window.innerHeight;
     scene.resize(w, h);
-    activeViz?.setResolution?.(w, h);
+    vizManager.resize(w, h);
   });
 
-  // Render loop (always runs once started)
-  let pauseFade = 1.0; // 1.0 = full, fading toward 0 when paused
+  // Render loop with debug info
+  let pauseFade = 1.0;
+  let lastFrameTime = performance.now();
+  let frameCount = 0;
+  let fps = 0;
+  let fpsTimer = performance.now();
+
   scene.onRender(() => {
+    const now = performance.now();
+    frameCount++;
+    if (now - fpsTimer >= 1000) {
+      fps = frameCount;
+      frameCount = 0;
+      fpsTimer = now;
+    }
+    const frameTime = now - lastFrameTime;
+    lastFrameTime = now;
+
     if (playing) {
-      // Push audio features
-      if (wasmAnalyzer) {
-        const samples = audioSource.getSamples();
-        if (samples) {
-          try {
-            const f = wasmAnalyzer.analyze(samples);
-            audioProcessor.pushFeatures({
-              fftBins: new Float32Array(0),
-              bass: f.bass, mid: f.mid, high: f.high,
-              spectralCentroid: f.spectral_centroid,
-              spectralFlux: f.spectral_flux,
-              rms: f.rms,
-              beatOnset: f.beat_onset,
-              beatConfidence: f.beat_confidence,
-              degraded: false,
-            });
-          } catch { /* skip frame */ }
-        }
-      } else {
-        const freqData = audioSource.getFrequencyData();
-        if (freqData) audioProcessor.pushFeatures(fallbackFeatures(freqData));
-      }
-      pauseFade = Math.min(1.0, pauseFade + 0.02); // fade back in
-      // Pass viewport pan/zoom to shader visualizers
-      const [px, py] = scene.getPan();
-      activeViz?.setPan?.(px, py);
-      activeViz?.setZoom?.(scene.getUserZoom());
-      activeViz?.tick();
+      audio.pushFrame();
+      pauseFade = Math.min(1.0, pauseFade + 0.02);
     } else {
-      // Paused: push silent features to let visualizer fade to baseline
-      pauseFade = Math.max(0.0, pauseFade - 0.008); // slow fade out
-      audioProcessor.pushFeatures({
-        fftBins: new Float32Array(0),
-        bass: 0, mid: 0, high: 0,
-        spectralCentroid: 0.5, spectralFlux: 0,
-        rms: pauseFade * 0.05, // tiny amount to keep minimal glow
-        beatOnset: false, beatConfidence: 0, degraded: true,
-      });
-      const [px2, py2] = scene.getPan();
-      activeViz?.setPan?.(px2, py2);
-      activeViz?.setZoom?.(scene.getUserZoom());
-      activeViz?.tick(); // keep ticking so it can fade smoothly
+      pauseFade = Math.max(0.0, pauseFade - 0.008);
+      audio.pushSilent(pauseFade * 0.05);
+    }
+    vizManager.tick();
+
+    // Update debug info (sampled — not every frame)
+    if (frameCount % 6 === 0) {
+      (window as any).__cybernoetica_debug = {
+        fps, frameTime: Math.round(frameTime * 10) / 10,
+        vizType: vizManager.getActiveType(),
+      };
     }
   });
-
-  // Don't start the render loop yet — wait for Start button
 }

@@ -2,14 +2,35 @@ import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
 import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
 import { EMASmoothing } from '../smoothing.js';
+import type { Visualizer, VisualizerMetadata } from './types.js';
+import { registerVisualizer } from './registry.js';
 
 const NUM_LAYERS = 5;
 const FFT_SIZE = 1024;
 
-export class WaveformVisualizer {
+const waveformMetadata: VisualizerMetadata = {
+  type: 'waveform',
+  label: 'Waveform',
+  description: 'Neon soundwaves flowing through space',
+  usesPerspective: false,
+  params: [
+    { key: 'bassBoost', label: 'Bass Boost', min: 0.0, max: 1.0, step: 0.05, initial: 0.0 },
+    { key: 'brightness', label: 'Brightness', min: 0.2, max: 2.0, step: 0.1, initial: 1.0 },
+  ],
+  viewport: { pan: false, zoom: false, orbit: false },
+};
+
+export class WaveformVisualizer implements Visualizer {
+  readonly metadata = waveformMetadata;
+
   private unsub: Unsubscribe;
   private latestFeatures: AudioFeatures | null = null;
   private time = 0;
+
+  userParams: Record<string, number> = {
+    bassBoost: 0.0,
+    brightness: 1.0,
+  };
 
   private smoothers = {
     bass: new EMASmoothing(0.15),
@@ -98,10 +119,10 @@ export class WaveformVisualizer {
 
     if (this.material) {
       this.material.uniforms.u_time.value = this.time;
-      this.material.uniforms.u_bass.value = this.smoothers.bass.value;
+      this.material.uniforms.u_bass.value = Math.min(this.smoothers.bass.value + this.userParams.bassBoost, 1.0);
       this.material.uniforms.u_mid.value = this.smoothers.mid.value;
       this.material.uniforms.u_high.value = this.smoothers.high.value;
-      this.material.uniforms.u_rms.value = this.smoothers.rms.value;
+      this.material.uniforms.u_rms.value = this.smoothers.rms.value * this.userParams.brightness;
       this.material.uniforms.u_spectralCentroid.value = this.smoothers.spectralCentroid.value;
       this.material.uniforms.u_beatPulse.value = this.smoothers.beatPulse.value;
     }
@@ -117,6 +138,12 @@ export class WaveformVisualizer {
     }
   }
 
+  setUserParam(key: string, value: number): void {
+    if (key in this.userParams) {
+      this.userParams[key] = value;
+    }
+  }
+
   dispose(): void {
     this.unsub();
     this.material?.dispose();
@@ -124,6 +151,11 @@ export class WaveformVisualizer {
     this.fftTexture?.dispose();
   }
 }
+
+registerVisualizer({
+  metadata: waveformMetadata,
+  create: (bus) => new WaveformVisualizer(bus),
+});
 
 const VERTEX_SHADER = /* glsl */ `
   varying vec2 vUv;

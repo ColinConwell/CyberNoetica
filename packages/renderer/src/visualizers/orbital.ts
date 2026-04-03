@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
 import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
 import { EMASmoothing } from '../smoothing.js';
+import type { Visualizer, VisualizerMetadata } from './types.js';
+import { registerVisualizer } from './registry.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -159,15 +161,33 @@ const PARTICLE_FRAGMENT_SHADER = /* glsl */ `
 `;
 
 // ---------------------------------------------------------------------------
+// Metadata
+// ---------------------------------------------------------------------------
+
+const orbitalMetadata: VisualizerMetadata = {
+  type: 'orbital',
+  label: 'Orbital',
+  description: 'Particle vortex with comet attractors',
+  usesPerspective: true,
+  params: [
+    { key: 'glowMultiplier', label: 'Glow', min: 0.3, max: 2.5, step: 0.1, initial: 1.0 },
+    { key: 'gravityMultiplier', label: 'Gravity', min: 0.2, max: 3.0, step: 0.1, initial: 1.0 },
+    { key: 'noiseMultiplier', label: 'Turbulence', min: 0.0, max: 3.0, step: 0.1, initial: 1.0 },
+  ],
+  viewport: { pan: false, zoom: true, orbit: true },
+};
+
+// ---------------------------------------------------------------------------
 // OrbitalVisualizer
 // ---------------------------------------------------------------------------
 
-export class OrbitalVisualizer {
-  /** This visualizer uses 3D particle positions and needs a perspective camera */
+export class OrbitalVisualizer implements Visualizer {
+  readonly metadata = orbitalMetadata;
+
+  /** Backward-compat: SceneManager reads this directly until Phase 3 refactor */
   readonly usesPerspective = true;
 
-  /** User-adjustable parameters (set by appearance controls) */
-  userParams = {
+  userParams: Record<string, number> = {
     glowMultiplier: 1.0,
     gravityMultiplier: 1.0,
     noiseMultiplier: 1.0,
@@ -432,6 +452,12 @@ export class OrbitalVisualizer {
     return this.activeCount;
   }
 
+  setUserParam(key: string, value: number): void {
+    if (key in this.userParams) {
+      this.userParams[key] = value;
+    }
+  }
+
   dispose(): void {
     this.unsub();
     this.particleMaterial?.dispose();
@@ -475,6 +501,7 @@ export class OrbitalVisualizer {
   }
 
   /** Emit a single particle from a specific emitter */
+
   private _emitParticle(
     i: number,
     emitterIdx: number,
@@ -515,3 +542,8 @@ export class OrbitalVisualizer {
     this.emitterIndex[i] = emitterIdx;
   }
 }
+
+registerVisualizer({
+  metadata: orbitalMetadata,
+  create: (bus) => new OrbitalVisualizer(bus),
+});

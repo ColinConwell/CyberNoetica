@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
 import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
 import { EMASmoothing } from '../smoothing.js';
+import type { Visualizer, VisualizerMetadata } from './types.js';
+import { registerVisualizer } from './registry.js';
 
 /**
  * Julia Set visualizer — the Mandelbrot's shape-shifting sibling.
@@ -26,14 +28,28 @@ const JULIA_ORBITS = [
   { cx: -1.037, cy: 0.17 },      // Near period-3 bulb
 ];
 
-export class JuliaVisualizer {
+const juliaMetadata: VisualizerMetadata = {
+  type: 'julia',
+  label: 'Julia Set',
+  description: 'Shape-shifting fractal morphology',
+  usesPerspective: false,
+  params: [
+    { key: 'orbitSpeed', label: 'Orbit Speed', min: 0.02, max: 0.5, step: 0.02, initial: 0.15 },
+    { key: 'orbitRadius', label: 'Orbit Radius', min: 0.01, max: 0.25, step: 0.01, initial: 0.08 },
+    { key: 'transitionDuration', label: 'Morph Speed', min: 2, max: 20, step: 1, initial: 8 },
+  ],
+  viewport: { pan: false, zoom: true, orbit: false },
+};
+
+export class JuliaVisualizer implements Visualizer {
+  readonly metadata = juliaMetadata;
+
   private unsub: Unsubscribe;
   private latestFeatures: AudioFeatures | null = null;
   private time = 0;
 
-  // Julia c-parameter orbits slowly through interesting values
   private orbitPhase = Math.random() * Math.PI * 2;
-  private orbitSpeed = 0.15; // radians per second
+  private orbitSpeed = 0.15;
   private orbitRadius = 0.08;
   private baseCx: number;
   private baseCy: number;
@@ -178,12 +194,25 @@ export class JuliaVisualizer {
     if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
   }
 
+  setUserParam(key: string, value: number): void {
+    switch (key) {
+      case 'orbitSpeed': this.orbitSpeed = value; break;
+      case 'orbitRadius': this.orbitRadius = value; break;
+      case 'transitionDuration': this.transitionDuration = value; break;
+    }
+  }
+
   dispose(): void {
     this.unsub();
     this.material?.dispose();
     this.mesh?.geometry.dispose();
   }
 }
+
+registerVisualizer({
+  metadata: juliaMetadata,
+  create: (bus) => new JuliaVisualizer(bus),
+});
 
 const VERTEX_SHADER = /* glsl */ `
   varying vec2 vUv;

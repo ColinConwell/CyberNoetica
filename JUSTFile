@@ -1,4 +1,4 @@
-# Cybernœtica — Development Commands
+# Cybernoetica -- Development Commands
 # Usage: just <command>
 
 # Default: show available commands
@@ -10,6 +10,10 @@ default:
 # Start the dev server (Vite, port 5173)
 dev:
     pnpm dev
+
+# Start dev server with debug panel enabled
+dev-debug:
+    pnpm dev -- --open "http://localhost:5173?debug"
 
 # Start dev server and open in default browser
 launch:
@@ -29,7 +33,7 @@ wasm:
 
 # ─── Test ─────────────────────────────────────────────────────────────
 
-# Run all tests
+# Run all tests (26 Vitest + Rust)
 test:
     pnpm test
 
