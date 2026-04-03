@@ -3,6 +3,7 @@ export class AudioSource {
   private analyserNode: AnalyserNode | null = null;
   private sourceNode: AudioNode | null = null;
   private timeDomainData: Float32Array | null = null;
+  private onEndedCallback: (() => void) | null = null;
 
   async init(): Promise<void> {
     this.audioContext = new AudioContext();
@@ -21,6 +22,7 @@ export class AudioSource {
     this.analyserNode.connect(this.audioContext.destination);
     if (this.sourceNode && 'stop' in this.sourceNode) (this.sourceNode as AudioBufferSourceNode).stop();
     this.sourceNode = source;
+    source.onended = () => { if (this.onEndedCallback) this.onEndedCallback(); };
     source.start();
   }
 
@@ -29,6 +31,30 @@ export class AudioSource {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const source = this.audioContext.createMediaStreamSource(stream);
     source.connect(this.analyserNode);
+    this.sourceNode = source;
+  }
+
+  /**
+   * Capture system audio using getDisplayMedia (macOS ScreenCaptureKit).
+   * This prompts the user to share a screen/window with audio enabled.
+   * The video track is discarded — only the audio is used for analysis.
+   */
+  async useSystemAudio(): Promise<void> {
+    if (!this.audioContext || !this.analyserNode) throw new Error('AudioSource not initialized');
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      audio: true,
+      video: true, // required by API, but we discard it
+    });
+    // Stop video tracks immediately — we only want audio
+    for (const track of stream.getVideoTracks()) {
+      track.stop();
+    }
+    if (stream.getAudioTracks().length === 0) {
+      throw new Error('No audio track captured. Make sure to enable audio sharing.');
+    }
+    const source = this.audioContext.createMediaStreamSource(stream);
+    source.connect(this.analyserNode);
+    // Don't connect to destination — we don't want to play system audio back through speakers
     this.sourceNode = source;
   }
 
@@ -47,6 +73,14 @@ export class AudioSource {
 
   async resume(): Promise<void> {
     if (this.audioContext?.state === 'suspended') await this.audioContext.resume();
+  }
+
+  async suspend(): Promise<void> {
+    if (this.audioContext?.state === 'running') await this.audioContext.suspend();
+  }
+
+  onEnded(callback: () => void): void {
+    this.onEndedCallback = callback;
   }
 
   destroy(): void {
