@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import { VitePWA } from 'vite-plugin-pwa';
 import { resolve } from 'path';
 import { readdirSync, statSync, existsSync, createReadStream } from 'fs';
 
@@ -33,6 +34,36 @@ export default defineConfig({
     exclude: ['@cybernoetica/audio'],
   },
   plugins: [
+    VitePWA({
+      registerType: 'autoUpdate',
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,wasm}'],
+        navigateFallback: 'index.html',
+        runtimeCaching: [
+          {
+            urlPattern: /\/sample-music\/.*/,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'audio-cache',
+              expiration: { maxEntries: 50, maxAgeSeconds: 7 * 24 * 60 * 60 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+        ],
+      },
+      manifest: {
+        name: 'Cybernoetica',
+        short_name: 'Cybernoetica',
+        description: 'GPU-accelerated audio-reactive visualizer',
+        theme_color: '#000000',
+        background_color: '#000000',
+        display: 'standalone',
+        orientation: 'any',
+        icons: [
+          { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+        ],
+      },
+    }),
     {
       name: 'sample-music',
       configureServer(server) {

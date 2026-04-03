@@ -1,0 +1,14 @@
+node_modules/
+dist/
+data/
+.git/
+.cursor/
+.claude/
+.vscode/
+.DS_Store
+scratch/
+docs/superpowers/
+crates/audio-analysis/target/
+coverage/
+*.log
+*.tsbuildinfo

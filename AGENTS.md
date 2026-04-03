@@ -10,6 +10,10 @@
 CyberNoetica/
 ├── apps/
 │   └── web/                          # Vite SPA entry point (port 5173)
+│       ├── server.ts                 # Express production server (Railway)
+│       ├── auth-page.html            # Glass-morphism login gate
+│       ├── public/
+│       │   └── icon.svg              # PWA icon
 │       └── src/
 │           ├── main.ts               # Bootstrap
 │           ├── app.ts                # Thin coordinator (~185 lines):
@@ -84,11 +88,15 @@ CyberNoetica/
 ├── guidebook/
 │   ├── README.md
 │   └── Design-Principles.md         # Core design philosophy (READ THIS)
+├── scripts/
+│   └── upload-audio.sh              # Helper: upload audio to Railway volume
+├── Dockerfile                        # Multi-stage Docker build for Railway
+├── .dockerignore
 ├── package.json                      # Root workspace scripts
 ├── pnpm-workspace.yaml
 ├── pnpm-lock.yaml
 ├── tsconfig.base.json
-├── JUSTFile                          # Development commands (just <cmd>)
+├── JUSTFile                          # Development + deployment commands (just <cmd>)
 ├── TODO.md                           # Next-session task list
 └── .claude/
     ├── launch.json                   # Dev server config for preview
@@ -106,6 +114,8 @@ CyberNoetica/
 | 3D rendering     | Three.js (r175+), GLSL shaders                       |
 | Testing          | Vitest (jsdom for renderer tests)                    |
 | Rust / WASM      | Cargo, wasm-bindgen, rustfft; built via wasm-pack    |
+| Deployment       | Railway (Docker), Express 5 production server        |
+| PWA              | vite-plugin-pwa, Workbox service worker               |
 | Planned          | Tauri desktop shell, WebGPU path, Python sidecar     |
 
 ## Architecture
@@ -177,6 +187,38 @@ See `guidebook/Design-Principles.md` for the full philosophy. Key points:
 5. Add `import './my-viz.js'` to `packages/renderer/src/visualizers/index.ts`
 
 The UI, control panels, and appearance sliders automatically pick up the new visualizer from the registry.
+
+## Deployment (Railway)
+
+The app deploys to Railway as a Dockerized Express server serving the Vite SPA build.
+
+**Architecture:**
+- Single Railway service (`cybernoetica-web`) in the `Demo` environment
+- Express 5 server (`apps/web/server.ts`) handles static files, audio streaming, auth, and COOP/COEP headers
+- Railway volume mounted at `/data/audio` stores sample music (~458MB, 84 tracks)
+- PWA service worker (Workbox) pre-caches JS/CSS/WASM for faster revisits
+- Auth gate: pre-approved email whitelist + universal password, cookie-session based
+
+**Environment variables (Railway):**
+- `AUDIO_DIR` -- volume mount path (`/data/audio`)
+- `NODE_ENV` -- `production`
+- `SESSION_SECRET` -- random hex for cookie signing
+- `GATE_PASSWORD` -- universal access password (auth disabled when unset)
+- `APPROVED_EMAILS` -- comma-separated email whitelist
+
+**Key commands:**
+```bash
+just deploy              # Deploy to Railway via CLI
+just deploy-auth "a@b.com,c@d.com" "password"  # Set auth gate
+just deploy-status       # View status and logs
+just deploy-vars         # List environment variables
+```
+
+**Custom domain:** `app.imbasso.com` (CNAME to Railway) + apex redirect from `imbasso.com`. SSL auto-provisioned via Let's Encrypt.
+
+**Audio upload:** Run `railway ssh` in an interactive terminal, then transfer files to `/data/audio` via tar pipe or scp. See `scripts/upload-audio.sh`.
+
+**Docker build:** Multi-stage Dockerfile at repo root. Build stage: pnpm install + vite build + esbuild server compilation. Runtime stage: Node 20 Alpine + Express/compression/cookie-session + dist/ + server.mjs. WASM is stubbed at build time (JS fallback used in production).
 
 ## Known Issues
 

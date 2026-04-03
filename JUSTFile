@@ -58,12 +58,49 @@ setup:
     pnpm install
     just wasm
 
+# ─── Deploy ──────────────────────────────────────────────────────────
+
+# Build the production Express server
+build-server:
+    pnpm --filter @cybernoetica/web build:server
+
+# Build SPA + server for production
+build-prod:
+    pnpm build
+    just build-server
+
+# Run the production server locally (build first with `just build-prod`)
+serve:
+    cd apps/web && node server.mjs
+
+# Deploy to Railway
+deploy:
+    railway up
+
+# Show Railway deployment status and logs
+deploy-status:
+    railway status
+    @echo ""
+    railway logs
+
+# Set Railway auth gate (provide email list and password)
+deploy-auth emails password:
+    railway variable set "APPROVED_EMAILS={{emails}}" "GATE_PASSWORD={{password}}" --skip-deploys
+
+# List Railway environment variables
+deploy-vars:
+    railway variable list
+
+# Open Railway dashboard in browser
+deploy-open:
+    railway open
+
 # ─── Clean ────────────────────────────────────────────────────────────
 
 # Remove build artifacts and node_modules
 clean:
     rm -rf node_modules apps/web/node_modules packages/*/node_modules
-    rm -rf apps/web/dist packages/*/dist
+    rm -rf apps/web/dist packages/*/dist apps/web/server.mjs
     rm -rf crates/audio-analysis/target
 
 # Remove WASM build output
