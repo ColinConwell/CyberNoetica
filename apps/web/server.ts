@@ -1,9 +1,10 @@
 import express from 'express';
 import compression from 'compression';
 import cookieSession from 'cookie-session';
-import { resolve, dirname } from 'path';
+import multer from 'multer';
+import { resolve, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
-import { readdirSync, statSync, existsSync, createReadStream } from 'fs';
+import { readdirSync, statSync, existsSync, createReadStream, mkdirSync, renameSync } from 'fs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -16,6 +17,9 @@ const APPROVED_EMAILS = (process.env.APPROVED_EMAILS || '')
   .split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
 const GATE_PASSWORD = process.env.GATE_PASSWORD || '';
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret-change-me';
+
+const GITHUB_REPO = 'ColinConwell/CyberNoetica';
+const AUDIO_EXTENSIONS = /\.(mp3|wav|ogg|flac|aac|m4a)$/i;
 
 function scanAudioFiles(dir: string, base = ''): string[] {
   const results: string[] = [];
@@ -91,6 +95,69 @@ app.post('/api/logout', (req, res) => {
   res.json({ success: true });
 });
 
+// -- Admin (GitHub collaborator auth: push access to GITHUB_REPO) --
+
+async function verifyRepoPushAccess(token: string): Promise<boolean> {
+  try {
+    const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+    });
+    if (!res.ok) return false;
+    const data = await res.json() as { permissions?: { push?: boolean } };
+    return data.permissions?.push === true;
+  } catch { return false; }
+}
+
+async function requireAdmin(req: express.Request, res: express.Response): Promise<boolean> {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith('Bearer ')) {
+    res.status(401).json({ error: 'Bearer token required' });
+    return false;
+  }
+  if (!await verifyRepoPushAccess(auth.slice(7))) {
+    res.status(403).json({ error: 'Requires push access to ' + GITHUB_REPO });
+    return false;
+  }
+  return true;
+}
+
+const upload = multer({
+  dest: '/tmp/uploads',
+  limits: { fileSize: 100 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    cb(null, AUDIO_EXTENSIONS.test(file.originalname));
+  },
+});
+
+app.post('/api/admin/upload', upload.single('file'), async (req, res) => {
+  if (!await requireAdmin(req, res)) return;
+
+  if (!req.file) {
+    res.status(400).json({ error: 'No valid audio file provided' });
+    return;
+  }
+
+  const subdir = typeof req.body?.subdir === 'string' ? req.body.subdir.replace(/[^a-zA-Z0-9_-]/g, '') : '';
+  const targetDir = subdir ? resolve(AUDIO_DIR, subdir) : AUDIO_DIR;
+  const safeName = basename(req.file.originalname).replace(/[^a-zA-Z0-9._-]/g, '_');
+  const targetPath = resolve(targetDir, safeName);
+
+  if (!targetPath.startsWith(AUDIO_DIR)) {
+    res.status(403).json({ error: 'Invalid path' });
+    return;
+  }
+
+  mkdirSync(targetDir, { recursive: true });
+  renameSync(req.file.path, targetPath);
+
+  res.json({ success: true, path: subdir ? `${subdir}/${safeName}` : safeName });
+});
+
+app.get('/api/admin/tracks', async (req, res) => {
+  if (!await requireAdmin(req, res)) return;
+  res.json({ tracks: scanAudioFiles(AUDIO_DIR), dir: AUDIO_DIR });
+});
+
 // -- Auth guard --
 app.use((req, res, next) => {
   if (!GATE_PASSWORD) return next();
@@ -158,4 +225,5 @@ app.listen(PORT, () => {
   console.log(`Cybernoetica server on port ${PORT}`);
   console.log(`  Audio: ${AUDIO_DIR}`);
   console.log(`  Auth: ${GATE_PASSWORD ? 'enabled' : 'disabled (no GATE_PASSWORD)'}`);
+  console.log(`  Admin: push access to ${GITHUB_REPO}`);
 });

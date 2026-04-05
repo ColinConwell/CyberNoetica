@@ -92,6 +92,7 @@ CyberNoetica/
 │   └── upload-audio.sh              # Helper: upload audio to Railway volume
 ├── Dockerfile                        # Multi-stage Docker build for Railway
 ├── .dockerignore
+├── .env.example                      # Optional local dev overrides template
 ├── package.json                      # Root workspace scripts
 ├── pnpm-workspace.yaml
 ├── pnpm-lock.yaml
@@ -206,17 +207,21 @@ The app deploys to Railway as a Dockerized Express server serving the Vite SPA b
 - `GATE_PASSWORD` -- universal access password (auth disabled when unset)
 - `APPROVED_EMAILS` -- comma-separated email whitelist
 
+**Admin auth (zero-config):** The admin upload endpoint (`/api/admin/upload`) requires a GitHub token with push access to `ColinConwell/CyberNoetica`. No env var needed -- the repo is hardcoded in `server.ts`. Any repo owner or collaborator is automatically authorized. The JUSTFile resolves the token via `gh auth token` automatically.
+
+**Local dev overrides:** Optional `.env.local` file (gitignored). See `.env.example` for available variables. The JUSTFile loads it via `set dotenv-filename`.
+
 **Key commands:**
 ```bash
 just deploy              # Deploy to Railway via CLI
 just deploy-auth "a@b.com,c@d.com" "password"  # Set auth gate
 just deploy-status       # View status and logs
-just deploy-vars         # List environment variables
+just upload file.mp3     # Upload audio (uses gh token automatically)
+just upload-dir data/sample-music Sympoetic-Techno-Jazz  # Bulk upload
+just list-tracks         # List tracks on deployed server
 ```
 
 **Custom domain:** `app.imbasso.com` (CNAME to Railway) + apex redirect from `imbasso.com`. SSL auto-provisioned via Let's Encrypt.
-
-**Audio upload:** Run `railway ssh` in an interactive terminal, then transfer files to `/data/audio` via tar pipe or scp. See `scripts/upload-audio.sh`.
 
 **Docker build:** Multi-stage Dockerfile at repo root. Build stage: pnpm install + vite build + esbuild server compilation. Runtime stage: Node 20 Alpine + Express/compression/cookie-session + dist/ + server.mjs. WASM is stubbed at build time (JS fallback used in production).
 

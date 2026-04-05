@@ -29,7 +29,7 @@ COPY --from=builder /app/apps/web/dist ./dist
 COPY --from=builder /app/apps/web/server.mjs ./server.mjs
 COPY --from=builder /app/apps/web/auth-page.html ./auth-page.html
 
-RUN npm install --no-save express compression cookie-session
+RUN npm install --no-save express compression cookie-session multer
 
 ENV NODE_ENV=production
 EXPOSE 3000

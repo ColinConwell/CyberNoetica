@@ -1,6 +1,11 @@
 # Cybernoetica -- Development Commands
 # Usage: just <command>
 
+set dotenv-filename := ".env.local"
+
+github_token := env("GITHUB_TOKEN", `gh auth token 2>/dev/null || echo ""`)
+deploy_host  := env("DEPLOY_HOST", "https://app.imbasso.com")
+
 # Default: show available commands
 default:
     @just --list
@@ -94,6 +99,32 @@ deploy-vars:
 # Open Railway dashboard in browser
 deploy-open:
     railway open
+
+# ─── Audio Upload ────────────────────────────────────────────────────
+
+# Upload a single audio file (uses gh CLI token automatically)
+upload file:
+    curl -X POST "{{deploy_host}}/api/admin/upload" \
+        -H "Authorization: Bearer {{github_token}}" \
+        -F "file=@{{file}}"
+
+# Upload all audio files from a directory
+upload-dir dir subdir="":
+    #!/usr/bin/env bash
+    for f in "{{dir}}"/**/*.{mp3,wav,ogg,flac,aac,m4a}; do \
+        [ -f "$f" ] || continue; \
+        echo "Uploading: $(basename "$f")"; \
+        curl -s -X POST "{{deploy_host}}/api/admin/upload" \
+            -H "Authorization: Bearer {{github_token}}" \
+            -F "file=@$f" \
+            -F "subdir={{subdir}}"; \
+        echo ""; \
+    done
+
+# List tracks on the deployed server
+list-tracks:
+    curl -s "{{deploy_host}}/api/admin/tracks" \
+        -H "Authorization: Bearer {{github_token}}" | python3 -m json.tool
 
 # ─── Clean ────────────────────────────────────────────────────────────
 
