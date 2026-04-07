@@ -103,28 +103,78 @@ deploy-open:
 # ─── Audio Upload ────────────────────────────────────────────────────
 
 # Upload a single audio file (uses gh CLI token automatically)
-upload file:
-    curl -X POST "{{deploy_host}}/api/admin/upload" \
+upload file subdir="":
+    #!/usr/bin/env bash
+    name=$(basename "{{file}}")
+    printf "\033[1m%s\033[0m " "$name"
+    resp=$(curl -s -w "\n%{http_code}" -X POST "{{deploy_host}}/api/admin/upload" \
         -H "Authorization: Bearer {{github_token}}" \
-        -F "file=@{{file}}"
+        -F "file=@{{file}}" \
+        -F "subdir={{subdir}}")
+    code=$(echo "$resp" | tail -1)
+    body=$(echo "$resp" | sed '$d')
+    if [ "$code" = "200" ]; then
+        printf "\033[32mok\033[0m\n"
+    else
+        printf "\033[31mfailed (%s)\033[0m %s\n" "$code" "$body"
+    fi
 
 # Upload all audio files from a directory
 upload-dir dir subdir="":
     #!/usr/bin/env bash
-    for f in "{{dir}}"/**/*.{mp3,wav,ogg,flac,aac,m4a}; do \
-        [ -f "$f" ] || continue; \
-        echo "Uploading: $(basename "$f")"; \
-        curl -s -X POST "{{deploy_host}}/api/admin/upload" \
+    shopt -s nullglob globstar
+    files=()
+    for f in "{{dir}}"/**/*.{mp3,wav,ogg,flac,aac,m4a}; do
+        [ -f "$f" ] && files+=("$f")
+    done
+    total=${#files[@]}
+    if [ "$total" -eq 0 ]; then
+        echo "No audio files found in {{dir}}"
+        exit 0
+    fi
+    echo "Uploading $total files to {{deploy_host}}"
+    echo ""
+    ok=0; fail=0
+    for i in "${!files[@]}"; do
+        f="${files[$i]}"
+        n=$((i + 1))
+        name=$(basename "$f")
+        pct=$((n * 100 / total))
+        filled=$((pct / 2))
+        empty=$((50 - filled))
+        bar=$(printf '%0.s#' $(seq 1 $filled 2>/dev/null) || true)
+        gap=$(printf '%0.s-' $(seq 1 $empty 2>/dev/null) || true)
+        printf "\r[%-50s] %3d%% (%d/%d) %s" "$bar$gap" "$pct" "$n" "$total" "$name"
+        resp=$(curl -s -w "\n%{http_code}" -X POST "{{deploy_host}}/api/admin/upload" \
             -H "Authorization: Bearer {{github_token}}" \
             -F "file=@$f" \
-            -F "subdir={{subdir}}"; \
-        echo ""; \
+            -F "subdir={{subdir}}")
+        code=$(echo "$resp" | tail -1)
+        if [ "$code" = "200" ]; then
+            ok=$((ok + 1))
+        else
+            fail=$((fail + 1))
+            body=$(echo "$resp" | sed '$d')
+            printf "\n  \033[31mfailed (%s)\033[0m %s\n" "$code" "$body"
+        fi
     done
+    printf "\r[%-50s] 100%% (%d/%d)\n" "$(printf '%0.s#' $(seq 1 50))" "$total" "$total"
+    echo ""
+    echo "Done: $ok succeeded, $fail failed"
 
 # List tracks on the deployed server
 list-tracks:
-    curl -s "{{deploy_host}}/api/admin/tracks" \
-        -H "Authorization: Bearer {{github_token}}" | python3 -m json.tool
+    #!/usr/bin/env bash
+    resp=$(curl -s -w "\n%{http_code}" "{{deploy_host}}/api/admin/tracks" \
+        -H "Authorization: Bearer {{github_token}}")
+    code=$(echo "$resp" | tail -1)
+    body=$(echo "$resp" | sed '$d')
+    if [ "$code" = "200" ]; then
+        echo "$body" | python3 -m json.tool
+    else
+        echo "Error ($code): $body" >&2
+        exit 1
+    fi
 
 # ─── Clean ────────────────────────────────────────────────────────────
 

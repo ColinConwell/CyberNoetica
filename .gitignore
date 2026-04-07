@@ -1,8 +1,9 @@
 # Scratch
 scratch/
+xyzopts/
 
 # dev-ops
-goal.md
+GOAL.md
 TODO.md
 
 # Data
@@ -12,6 +13,7 @@ data/
 .vscode/
 .claude/
 .cursor/
+.claudeignore
 .cursorignore
 .superpowers/
 docs/superpowers/
