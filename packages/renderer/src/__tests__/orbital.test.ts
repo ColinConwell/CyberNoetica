@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { OrbitalVisualizer } from '../visualizers/orbital.js';
+import { OrbitalVisualizer } from '../visualizers/orbital/v01-alpha.js';
 import { MessageBus } from '@cybernoetica/core';
 import type { AudioFeatures } from '@cybernoetica/core';
 

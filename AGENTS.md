@@ -2,106 +2,100 @@
 
 ## Overview
 
-**Cybernoetica** is a high-aesthetic, GPU-accelerated audio-reactive visualizer and knowledge portal. It currently delivers 4 visualizer modes driven by real-time audio analysis, with a glass-morphism control interface.
+**Cybernoetica** is a high-aesthetic, GPU-accelerated audio-reactive visualizer and knowledge portal. It delivers 4 visualizer families (each with versioned subvariants) driven by real-time audio analysis, with a glass-morphism control interface and formal playback state management.
 
 ## Directory Structure
 
 ```
 CyberNoetica/
 ├── apps/
-│   └── web/                          # Vite SPA entry point (port 5173)
-│       ├── server.ts                 # Express production server (Railway)
-│       ├── auth-page.html            # Glass-morphism login gate
+│   └── web/                              # Vite SPA entry point (port 5173)
+│       ├── server.ts                     # Express production server (Railway)
+│       ├── auth-page.html                # Glass-morphism login gate
+│       ├── vitest.config.ts              # Vitest config (jsdom)
 │       ├── public/
-│       │   └── icon.svg              # PWA icon
+│       │   └── icon.svg                  # PWA icon
 │       └── src/
-│           ├── main.ts               # Bootstrap
-│           ├── app.ts                # Thin coordinator (~185 lines):
-│           │                         #   wires bus, store, managers, UI
-│           ├── store.ts              # AppState + createAppStore()
-│           │                         #   localStorage persistence
+│           ├── main.ts                   # Bootstrap (loads settings, creates app)
+│           ├── app.ts                    # Coordinator: wires bus, store, managers, UI
+│           ├── store.ts                  # AppState + createAppStore()
+│           ├── settings-loader.ts        # Dev settings from settings.json overrides
 │           ├── managers/
-│           │   ├── audio-pipeline.ts  # WASM/JS audio analysis, feature push
-│           │   ├── track-manager.ts   # Track loading, auto-play, shuffle
-│           │   └── visualizer-manager.ts  # Switching, camera, viewport delegation
-│           └── ui/
-│               ├── index.ts          # createUI() compositor, UIControls
-│               ├── styles.ts         # Glass-morphism constants, AppSettings
-│               ├── components.ts     # el(), glassButton(), sectionLabel()
-│               ├── start-screen.ts   # Start overlay with pulsing button
-│               ├── control-bar.ts    # 4-button bar (Pause/Visual/Sound/Control)
-│               ├── fade-manager.ts   # Auto-fade timer, mouse/key re-show
-│               └── panels/
-│                   ├── visual-panel.ts   # Visualizer picker (reads from registry)
-│                   │                     #   + appearance controls
-│                   ├── sound-panel.ts    # Sources, track list, auto-play/shuffle
-│                   ├── control-panel.ts  # Settings, keyboard shortcuts
-│                   └── debug-panel.ts    # Dev-mode panel: FPS, audio features,
-│                                         #   visualizer params, state dump, bus monitor
+│           │   ├── audio-pipeline.ts     # WASM/JS audio analysis, feature push
+│           │   ├── track-manager.ts      # Track loading (generation counter), auto-play
+│           │   ├── visualizer-manager.ts  # Switching, camera, viewport delegation
+│           │   └── playback-state.ts     # Formal playback state machine
+│           ├── utils/
+│           │   └── track-display.ts      # Track name formatting, folder grouping
+│           ├── ui/
+│           │   ├── index.ts              # createUI() compositor, UIControls
+│           │   ├── styles.ts             # Theme system, glass-morphism constants
+│           │   ├── components.ts         # el(), glassButton(), toggleSwitch(), etc.
+│           │   ├── start-screen.ts       # Start overlay with pulsing button
+│           │   ├── control-bar.ts        # 4-button bar (Pause/Visual/Sound/Control)
+│           │   ├── fade-manager.ts       # Auto-fade timer, mouse/key re-show
+│           │   ├── log-display.ts        # Log capture + 3 display modes
+│           │   └── panels/
+│           │       ├── visual-panel.ts   # Visualizer picker + categorized controls
+│           │       ├── sound-panel.ts    # Sources, hierarchical track list, toggles
+│           │       ├── control-panel.ts  # Settings, keyboard shortcuts
+│           │       └── debug-panel.ts    # Dev panel: FPS, audio, state, bus, logs
+│           └── __tests__/
+│               ├── playback-state.test.ts
+│               ├── settings-loader.test.ts
+│               └── track-display.test.ts
 ├── packages/
-│   ├── core/                         # @cybernoetica/core
+│   ├── core/                             # @cybernoetica/core
 │   │   └── src/
 │   │       ├── index.ts
-│   │       ├── message-bus.ts        # Typed pub/sub with wildcards + replay
-│   │       ├── store.ts              # Generic reactive Store<T> with
-│   │       │                         #   deep merge, select(), serialize/deserialize
-│   │       └── types.ts              # AudioFeatures, ChannelMap, shared types
-│   ├── renderer/                     # @cybernoetica/renderer
+│   │       ├── message-bus.ts            # Typed pub/sub with wildcards + replay
+│   │       ├── store.ts                  # Generic reactive Store<T>
+│   │       ├── types.ts                  # AudioFeatures, ChannelMap, shared types
+│   │       └── __tests__/
+│   │           ├── message-bus.test.ts
+│   │           └── store.test.ts
+│   ├── renderer/                         # @cybernoetica/renderer
 │   │   └── src/
 │   │       ├── index.ts
-│   │       ├── scene-manager.ts      # Three.js lifecycle, dual camera (ortho + persp),
-│   │       │                         #   viewport drag/zoom based on ViewportCapabilities
-│   │       ├── smoothing.ts          # EMA smoothing for audio-reactive params
+│   │       ├── scene-manager.ts          # Three.js lifecycle, pointer+touch viewport
+│   │       ├── smoothing.ts              # EMA smoothing for audio-reactive params
+│   │       ├── __tests__/
 │   │       └── visualizers/
-│   │           ├── types.ts          # Visualizer interface, VisualizerMetadata,
-│   │           │                     #   VisualizerParam, ViewportCapabilities
-│   │           ├── registry.ts       # VisualizerEntry, registerVisualizer(),
-│   │           │                     #   getVisualizerEntry(), listVisualizers()
-│   │           ├── index.ts          # Side-effect imports trigger registration,
-│   │           │                     #   barrel re-exports
-│   │           ├── orbital.ts        # 5K particle system, self-registering
-│   │           ├── waveform.ts       # Neon waveforms, userParams multiplier fix
-│   │           ├── julia.ts          # Julia set morph, self-registering
-│   │           └── mandelbrot.ts     # Deep zoom, self-registering
-│   └── audio/                        # @cybernoetica/audio
+│   │           ├── types.ts              # Visualizer interface, param taxonomy
+│   │           ├── registry.ts           # VisualizerEntry, registerVisualizer()
+│   │           ├── index.ts              # Barrel imports from subfolder barrels
+│   │           ├── orbital/
+│   │           │   ├── v01-alpha.ts      # 5K particle system
+│   │           │   └── index.ts
+│   │           ├── mandelbrot/
+│   │           │   ├── v01-alpha.ts      # Deep fractal zoom
+│   │           │   └── index.ts
+│   │           ├── julia/
+│   │           │   ├── v01-alpha.ts      # Shape-shifting Julia set
+│   │           │   └── index.ts
+│   │           └── waveform/
+│   │               ├── v01-alpha.ts      # Neon soundwaves
+│   │               └── index.ts
+│   └── audio/                            # @cybernoetica/audio
 │       ├── src/
-│       │   ├── index.ts              # Exports + loadWasmAnalyzer() helper
-│       │   ├── audio-source.ts       # Web Audio capture: file, mic, system audio
-│       │   └── audio-processor.ts    # Publishes AudioFeatures to bus
-│       └── wasm/                     # wasm-pack output (built from crates/)
+│       │   ├── index.ts
+│       │   ├── audio-source.ts           # Web Audio: file, mic, system (with cleanup)
+│       │   └── audio-processor.ts        # Publishes AudioFeatures to bus
+│       └── wasm/
 ├── crates/
-│   └── audio-analysis/               # Rust crate -> WASM via wasm-pack
-│       ├── Cargo.toml
-│       ├── src/
-│       │   ├── lib.rs                # AudioAnalyzer: FFT, bands, spectral features,
-│       │   │                         #   beat detection
-│       │   └── features.rs           # Serializable AudioFeatures struct
-│       └── tests/
-│           └── analysis_test.rs      # 3 tests: sine wave, silence, transient
+│   └── audio-analysis/                   # Rust -> WASM via wasm-pack
 ├── data/
-│   └── sample-music/                 # .gitignored audio tracks for demos/testing
-│       └── Sympoetic-Techno-Jazz/    # 84 .mp3 sample tracks
-├── docs/
-│   └── superpowers/
-│       ├── specs/                    # Architecture design spec
-│       └── plans/                    # Implementation plans
+│   └── sample-music/                     # .gitignored audio tracks
 ├── guidebook/
 │   ├── README.md
-│   └── Design-Principles.md         # Core design philosophy (READ THIS)
-├── scripts/
-│   └── upload-audio.sh              # Helper: upload audio to Railway volume
-├── Dockerfile                        # Multi-stage Docker build for Railway
-├── .dockerignore
-├── .env.example                      # Optional local dev overrides template
-├── package.json                      # Root workspace scripts
+│   └── Design-Principles.md             # Core design philosophy
+├── settings.json                         # Dev overrides (title, theme, track display)
+├── CLAUDE.md                             # Claude Code project instructions
+├── JUSTFile                              # Development + deployment commands
+├── Dockerfile
+├── package.json
 ├── pnpm-workspace.yaml
-├── pnpm-lock.yaml
-├── tsconfig.base.json
-├── JUSTFile                          # Development + deployment commands (just <cmd>)
-├── TODO.md                           # Next-session task list
-└── .claude/
-    ├── launch.json                   # Dev server config for preview
-    └── start-dev.sh                  # Dev server startup script
+└── tsconfig.base.json
 ```
 
 ## Tech Stack
@@ -113,60 +107,105 @@ CyberNoetica/
 | Package manager  | pnpm workspaces                                      |
 | Bundler          | Vite 6.x                                             |
 | 3D rendering     | Three.js (r175+), GLSL shaders                       |
-| Testing          | Vitest (jsdom for renderer tests)                    |
+| Testing          | Vitest (jsdom for renderer + web app tests)          |
 | Rust / WASM      | Cargo, wasm-bindgen, rustfft; built via wasm-pack    |
 | Deployment       | Railway (Docker), Express 5 production server        |
 | PWA              | vite-plugin-pwa, Workbox service worker               |
-| Planned          | Tauri desktop shell, WebGPU path, Python sidecar     |
 
 ## Architecture
 
-**Message-bus-centric.** `MessageBus` (in `packages/core`) is the connective tissue: components publish and subscribe to typed channels (`audio:features`, `audio:error`). Wildcard subscriptions (`audio:*`) and last-message replay are supported.
+**Message-bus-centric.** `MessageBus` (in `packages/core`) is the connective tissue: components publish and subscribe to typed channels (`audio:features`, `playback:state`). Wildcard subscriptions (`audio:*`) and last-message replay are supported.
 
 **Centralized state.** `Store<T>` (in `packages/core`) provides reactive state management with deep merge, selector-based subscriptions, and JSON serialization. The web app uses it as `AppState` with localStorage persistence for user preferences.
 
+**Playback state machine.** `PlaybackStateMachine` (in `managers/playback-state.ts`) is the single source of truth for playback state. It enforces valid transitions (idle -> loading -> playing -> paused, etc.), prevents race conditions, and emits changes via the message bus. The closure variable `playing` has been eliminated; `app.ts` reads `playback.isPlaying` instead.
+
+**Track loading sequencing.** `TrackManager.loadTrack()` uses a generation counter to handle rapid track switching. If a newer load request arrives while a previous one is in flight, the older one returns `false` and is silently discarded.
+
+**Audio source cleanup.** `AudioSource` now calls `stopCurrentSource()` before switching to any new source, properly stopping `MediaStream` tracks (mic/system) and disconnecting nodes. This prevents stream leaks when switching from mic/system audio to file playback.
+
 **Data flow:**
 1. `AudioSource` captures audio (file, microphone, or system audio via getDisplayMedia)
-2. `AudioPipeline` extracts features (via Rust/WASM FFT or JS fallback) and publishes them via `AudioProcessor` on `audio:features`
-3. Visualizers subscribe to audio features and modulate their parameters (shader uniforms, particle physics, etc.)
-4. `SceneManager` drives the Three.js render loop with dual camera support and capability-based viewport interaction
+2. `AudioPipeline` extracts features (via Rust/WASM FFT or JS fallback) and publishes via `AudioProcessor` on `audio:features`
+3. Visualizers subscribe to audio features and modulate their parameters
+4. `SceneManager` drives the Three.js render loop with pointer/touch viewport interaction
 
-**Visualizer system:** Self-registering visualizers. Each implements the `Visualizer` interface and exports a `VisualizerMetadata` describing its type, params, and viewport capabilities. A central `registry` auto-discovers them. Adding a new visualizer means creating one file + one import line in the barrel.
+**Visualizer system:** Self-registering visualizers organized in versioned folders. Each family (orbital, mandelbrot, julia, waveform) has a folder with `v{NN}-{greek}.ts` files. Parameters are categorized as `'appearance'` or `'audio-mapping'`. The UI groups controls accordingly.
 
-**Manager pattern:** `app.ts` is a thin coordinator (~185 lines) that wires three focused managers:
-- `AudioPipeline` — WASM/fallback analysis, frame pushing
-- `TrackManager` — sample track list, auto-play queue, shuffle
-- `VisualizerManager` — switching, camera mode, viewport delegation
-
-**UI system:** Modular structure under `apps/web/src/ui/`. Start screen -> 4-button control bar -> slide-up panels. Auto-fades after configurable delay, reappears on mouse/key. Visual panel reads visualizer options from the registry. Debug panel (dev mode) shows FPS, audio features, state dump, bus activity.
+**Settings override system.** `settings.json` at repo root provides dev-time overrides (app title, UI theme, track display format). The `settings-loader.ts` module loads it via fetch with graceful fallback to defaults.
 
 ## Development
 
 ```bash
-# Prerequisites: Volta (node/pnpm), Rust toolchain (~/.cargo/bin)
 export PATH="$HOME/.volta/bin:$HOME/.cargo/bin:$PATH"
 
 pnpm install          # Install all workspace dependencies
 pnpm dev              # Start Vite dev server (apps/web, port 5173)
-pnpm test             # Run all Vitest suites (26 tests)
+pnpm test             # Run all Vitest suites (79 tests)
 pnpm build            # Build all packages
 ```
 
-### Building WASM (optional -- JS fallback works without it)
+### Debug Panel and Logging
 
-```bash
-export PATH="$HOME/.cargo/bin:$PATH"
-cd crates/audio-analysis
-wasm-pack build --target web --out-dir ../../packages/audio/wasm
+In dev mode or with `?debug` URL parameter, the Control panel shows:
+- FPS, frame time, playback state
+- Live audio feature bars
+- Visualizer params and state dump
+- Bus message rate
+- Log display with level filtering and 3 display modes:
+  - **Stream** -- Star Wars-style fading text overlay
+  - **Floating** -- draggable modal window
+  - **Docked** -- panel locked to bottom/left/right edge
+
+### Settings Override (settings.json)
+
+The `settings.json` file at the repo root provides dev-time overrides. If absent or if a key is missing, defaults apply. Overrides are transient/experimental -- do not update docs or other files based on settings.json values.
+
+```json
+{
+  "app_title": "Imbasso Cybernoetica",
+  "ui_theme": "glass-dark",
+  "track_display": {
+    "format": "track-number",
+    "show_folder_name": true
+  }
+}
 ```
 
-### Sample Music
+Available themes: `glass-dark` (default), `glass-light`, `minimal`.
+Track formats: `raw`, `hyphen-to-space`, `parenthetical`, `track-number`.
 
-The Vite dev server serves audio files from `data/sample-music/` via a custom plugin. The `/__list` endpoint returns a JSON array of available tracks.
+## Adding a New Visualizer
 
-### Debug Panel
+### Creating a new visualizer in an existing family
 
-In dev mode (Vite dev server) or with `?debug` URL parameter, the Control panel shows a debug section with FPS, live audio feature bars, visualizer params, full state JSON dump, and bus message rate.
+1. Create `packages/renderer/src/visualizers/{family}/v{NN}-{greek}.ts` (e.g., `orbital/v02-beta.ts`)
+2. Define `VisualizerMetadata` with unique `type` (e.g., `'orbital-beta'`), label, description, and categorized params
+3. Implement the `Visualizer` interface
+4. Call `registerVisualizer(...)` at module scope
+5. Add `import './v02-beta.js'` to the family's `index.ts`
+
+### Creating a new visualizer family
+
+1. Create folder `packages/renderer/src/visualizers/{family}/`
+2. Create `v01-alpha.ts` with the visualizer implementation
+3. Create `index.ts` barrel: `import './v01-alpha.js'; export { MyVisualizer } from './v01-alpha.js';`
+4. Add `import './{family}/index.js'` to `packages/renderer/src/visualizers/index.ts`
+
+### Parameter taxonomy
+
+Each `VisualizerParam` has an optional `category` field:
+- `'appearance'` (default) -- controls general visual properties (e.g., glow, gravity, zoom speed)
+- `'audio-mapping'` -- controls the strength of audio-to-visual mappings (e.g., bass-to-gravity multiplier)
+
+Audio-mapping params act as multipliers on the existing audio-driven computations in `tick()`. The Visual Panel groups these into "Appearance" and "Audio Response" sections.
+
+### Versioning scheme
+
+- Files: `v{NN}-{greek}.ts` (e.g., `v01-alpha.ts`, `v02-beta.ts`)
+- Registry type: `'{family}'` for v01, `'{family}-{greek}'` for subsequent versions
+- Greek sequence: alpha, beta, gamma, delta, epsilon, zeta, eta, theta
+- The UI shows greek labels only when a family has multiple registered versions
 
 ## Design Principles
 
@@ -179,56 +218,29 @@ See `guidebook/Design-Principles.md` for the full philosophy. Key points:
 - **Verifiability** -- Extensive programmatic and manual testing at all levels
 - **Parsimony** -- Maximal performance with minimal complexity
 
-## Adding a New Visualizer
-
-1. Create `packages/renderer/src/visualizers/my-viz.ts`
-2. Define a `VisualizerMetadata` with type, label, description, params, viewport capabilities
-3. Implement the `Visualizer` interface (attach, tick, setResolution, dispose, setUserParam)
-4. Call `registerVisualizer({ metadata, create: (bus) => new MyViz(bus) })` at module scope
-5. Add `import './my-viz.js'` to `packages/renderer/src/visualizers/index.ts`
-
-The UI, control panels, and appearance sliders automatically pick up the new visualizer from the registry.
-
 ## Deployment (Railway)
 
 The app deploys to Railway as a Dockerized Express server serving the Vite SPA build.
 
-**Architecture:**
 - Single Railway service (`cybernoetica-web`) in the `Demo` environment
-- Express 5 server (`apps/web/server.ts`) handles static files, audio streaming, auth, and COOP/COEP headers
-- Railway volume mounted at `/data/audio` stores sample music (~458MB, 84 tracks)
-- PWA service worker (Workbox) pre-caches JS/CSS/WASM for faster revisits
-- Auth gate: pre-approved email whitelist + universal password, cookie-session based
-
-**Environment variables (Railway):**
-- `AUDIO_DIR` -- volume mount path (`/data/audio`)
-- `NODE_ENV` -- `production`
-- `SESSION_SECRET` -- random hex for cookie signing
-- `GATE_PASSWORD` -- universal access password (auth disabled when unset)
-- `APPROVED_EMAILS` -- comma-separated email whitelist
-
-**Admin auth (zero-config):** The admin upload endpoint (`/api/admin/upload`) requires a GitHub token with push access to `ColinConwell/CyberNoetica`. No env var needed -- the repo is hardcoded in `server.ts`. Any repo owner or collaborator is automatically authorized. The JUSTFile resolves the token via `gh auth token` automatically.
-
-**Local dev overrides:** Optional `.env.local` file (gitignored). See `.env.example` for available variables. The JUSTFile loads it via `set dotenv-filename`.
+- Express 5 server handles static files, audio streaming, auth, and COOP/COEP headers
+- Railway volume at `/data/audio` stores sample music (~458MB, 84 tracks)
+- PWA service worker pre-caches JS/CSS/WASM
+- Auth gate: email whitelist + universal password, cookie-session based
 
 **Key commands:**
 ```bash
-just deploy              # Deploy to Railway via CLI
-just deploy-auth "a@b.com,c@d.com" "password"  # Set auth gate
-just deploy-status       # View status and logs
-just upload file.mp3     # Upload audio (uses gh token automatically)
-just upload-dir data/sample-music Sympoetic-Techno-Jazz  # Bulk upload
-just list-tracks         # List tracks on deployed server
+just deploy              # Deploy to Railway
+just deploy-auth "a@b.com,c@d.com" "password"
+just upload file.mp3     # Upload audio
+just list-tracks         # List deployed tracks
 ```
 
-**Custom domain:** `app.imbasso.com` (CNAME to Railway) + apex redirect from `imbasso.com`. SSL auto-provisioned via Let's Encrypt.
-
-**Docker build:** Multi-stage Dockerfile at repo root. Build stage: pnpm install + vite build + esbuild server compilation. Runtime stage: Node 20 Alpine + Express/compression/cookie-session + dist/ + server.mjs. WASM is stubbed at build time (JS fallback used in production).
+**Custom domain:** `app.imbasso.com` (CNAME to Railway).
 
 ## Known Issues
 
 - **No integration tests** or visual regression tests yet
 - **Waveform vertical positioning** -- bass layer creates visual weight imbalance
-- **Orbital brightness** -- needs testing in full-size window with real audio
 - **Knowledge portal** (GOAL.md Purpose 3) is entirely future work
 - **Cross-modal inputs** (webcam, wearables, gestures) not yet implemented

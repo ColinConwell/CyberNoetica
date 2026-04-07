@@ -1,3 +1,8 @@
 {
-    "app_title": "Imbasso Cybernoetica"
+    "app_title": "Imbasso Cybernoetica",
+    "ui_theme": "glass-dark",
+    "track_display": {
+        "format": "track-number",
+        "show_folder_name": true
+    }
 }

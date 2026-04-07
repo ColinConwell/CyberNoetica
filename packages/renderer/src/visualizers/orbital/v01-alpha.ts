@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
 import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../smoothing.js';
-import type { Visualizer, VisualizerMetadata } from './types.js';
-import { registerVisualizer } from './registry.js';
+import { EMASmoothing } from '../../smoothing.js';
+import type { Visualizer, VisualizerMetadata } from '../types.js';
+import { registerVisualizer } from '../registry.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -170,9 +170,14 @@ const orbitalMetadata: VisualizerMetadata = {
   description: 'Particle vortex with comet attractors',
   usesPerspective: true,
   params: [
-    { key: 'glowMultiplier', label: 'Glow', min: 0.3, max: 2.5, step: 0.1, initial: 1.0 },
-    { key: 'gravityMultiplier', label: 'Gravity', min: 0.2, max: 3.0, step: 0.1, initial: 1.0 },
-    { key: 'noiseMultiplier', label: 'Turbulence', min: 0.0, max: 3.0, step: 0.1, initial: 1.0 },
+    // Appearance
+    { key: 'glowMultiplier', label: 'Glow', min: 0.3, max: 2.5, step: 0.1, initial: 1.0, category: 'appearance' },
+    { key: 'gravityMultiplier', label: 'Gravity', min: 0.2, max: 3.0, step: 0.1, initial: 1.0, category: 'appearance' },
+    { key: 'noiseMultiplier', label: 'Turbulence', min: 0.0, max: 3.0, step: 0.1, initial: 1.0, category: 'appearance' },
+    // Audio mapping strengths
+    { key: 'bassToGravity', label: 'Bass \u2192 Gravity', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly bass affects gravitational pull' },
+    { key: 'midToSpeed', label: 'Mid \u2192 Speed', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly mids affect emitter orbit speed' },
+    { key: 'rmsToGlow', label: 'RMS \u2192 Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly overall volume affects glow intensity' },
   ],
   viewport: { pan: false, zoom: true, orbit: true },
 };
@@ -191,6 +196,9 @@ export class OrbitalVisualizer implements Visualizer {
     glowMultiplier: 1.0,
     gravityMultiplier: 1.0,
     noiseMultiplier: 1.0,
+    bassToGravity: 1.0,
+    midToSpeed: 1.0,
+    rmsToGlow: 1.0,
   };
 
   private unsub: Unsubscribe;
@@ -303,13 +311,16 @@ export class OrbitalVisualizer implements Visualizer {
     const rms = this.smoothRms.update(f.rms);
     const centroid = this.smoothCentroid.update(f.spectralCentroid);
 
-    // Derived parameters (incorporating user multipliers)
-    const gravStrength = BASE_G * (0.5 + bass * 1.5) * this.userParams.gravityMultiplier;
-    const emitterSpeedMul = 0.5 + mid * 2.0;
-    const radiusBreath = (bass - 0.3) * 2.0;
+    // Derived parameters (incorporating user multipliers + audio mapping strengths)
+    const bToG = this.userParams.bassToGravity;
+    const mToS = this.userParams.midToSpeed;
+    const rToG = this.userParams.rmsToGlow;
+    const gravStrength = BASE_G * (0.5 + bass * 1.5 * bToG) * this.userParams.gravityMultiplier;
+    const emitterSpeedMul = 0.5 + mid * 2.0 * mToS;
+    const radiusBreath = (bass - 0.3) * 2.0 * bToG;
     const noiseStrength = BASE_NOISE_STRENGTH * (0.3 + high * 2.0) * this.userParams.noiseMultiplier;
     const spawnVelocityVariance = 0.2 + high * 1.5;
-    const glowIntensity = (0.8 + rms * 1.0) * this.userParams.glowMultiplier;
+    const glowIntensity = (0.8 + rms * 1.0 * rToG) * this.userParams.glowMultiplier;
     const hueShift = centroid; // 0 = deep blue, 1 = warm gold
     const emissionRate = Math.floor(BASE_EMISSION_RATE + bass * 6);
 

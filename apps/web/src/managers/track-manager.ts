@@ -6,6 +6,7 @@ export class TrackManager {
   private shuffleEnabled = true;
   private trackIndex = 0;
   private playedTracks = new Set<number>();
+  private loadGeneration = 0;
 
   constructor(private audioSource: AudioSource) {}
 
@@ -19,14 +20,27 @@ export class TrackManager {
 
   getSampleTracks(): string[] { return this.sampleTracks; }
 
-  async loadTrack(url: string): Promise<void> {
+  /**
+   * Load and start a track. Returns false if the request was superseded
+   * by a newer loadTrack call (generation counter prevents race conditions).
+   */
+  async loadTrack(url: string): Promise<boolean> {
+    const gen = ++this.loadGeneration;
     await this.audioSource.resume();
     const response = await fetch(url);
+    if (gen !== this.loadGeneration) return false;
     const buffer = await response.arrayBuffer();
+    if (gen !== this.loadGeneration) return false;
     const blob = new Blob([buffer], { type: 'audio/mpeg' });
     const name = url.split('/').pop() || 'track.mp3';
     const file = new File([blob], name, { type: 'audio/mpeg' });
     await this.audioSource.loadFile(file);
+    if (gen !== this.loadGeneration) return false;
+    return true;
+  }
+
+  cancelPendingLoad(): void {
+    this.loadGeneration++;
   }
 
   getRandomTrack(): { url: string; name: string } | null {

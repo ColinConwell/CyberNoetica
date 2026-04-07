@@ -16,14 +16,17 @@ export class SceneManager {
   private panY = 0;
   private userZoom = 1.0;
   private dragging = false;
-  private lastMouseX = 0;
-  private lastMouseY = 0;
+  private lastPointerX = 0;
+  private lastPointerY = 0;
 
   private viewportCaps: ViewportCapabilities = { pan: true, zoom: true, orbit: false };
 
   private driftAngle = 0;
   driftEnabled = true;
   driftSpeed = 0.08;
+
+  /** Multiplier to scale pan sensitivity for visualizers with their own zoom (e.g. Mandelbrot) */
+  private panSensitivityScale = 1.0;
 
   constructor(width: number, height: number) {
     this.width = width;
@@ -45,49 +48,94 @@ export class SceneManager {
     this.renderer.domElement.style.zIndex = '0';
     container.appendChild(this.renderer.domElement);
 
-    // Viewport interaction: drag to pan, scroll to zoom
     const canvas = this.renderer.domElement;
 
-    canvas.addEventListener('mousedown', (e) => {
-      if (e.button === 0) { // left click
-        this.dragging = true;
-        this.lastMouseX = e.clientX;
-        this.lastMouseY = e.clientY;
-        canvas.style.cursor = 'grabbing';
-      }
-    });
+    // ── Pointer events (unified mouse + touch) ────────────────────
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.button !== 0 && e.pointerType === 'mouse') return;
+      if (!this.viewportCaps.pan && !this.viewportCaps.orbit && !this.viewportCaps.zoom) return;
+      this.dragging = true;
+      this.lastPointerX = e.clientX;
+      this.lastPointerY = e.clientY;
+      canvas.style.cursor = 'grabbing';
+      canvas.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    };
 
-    window.addEventListener('mousemove', (e) => {
+    const onPointerMove = (e: PointerEvent) => {
       if (!this.dragging) return;
-      const dx = (e.clientX - this.lastMouseX) / this.width;
-      const dy = (e.clientY - this.lastMouseY) / this.height;
-      this.lastMouseX = e.clientX;
-      this.lastMouseY = e.clientY;
+      const dx = (e.clientX - this.lastPointerX) / this.width;
+      const dy = (e.clientY - this.lastPointerY) / this.height;
+      this.lastPointerX = e.clientX;
+      this.lastPointerY = e.clientY;
 
       if (this.viewportCaps.orbit) {
         this.driftAngle += dx * 3.0;
       } else if (this.viewportCaps.pan) {
-        this.panX -= dx * 2.0 / this.userZoom;
-        this.panY += dy * 2.0 / this.userZoom;
+        const scale = 2.0 * this.panSensitivityScale / this.userZoom;
+        this.panX -= dx * scale;
+        this.panY += dy * scale;
       }
-    });
+    };
 
-    window.addEventListener('mouseup', () => {
+    const onPointerUp = (e: PointerEvent) => {
+      if (!this.dragging) return;
       this.dragging = false;
       canvas.style.cursor = '';
+      canvas.releasePointerCapture(e.pointerId);
+    };
+
+    canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('pointermove', onPointerMove);
+    canvas.addEventListener('pointerup', onPointerUp);
+    canvas.addEventListener('pointercancel', onPointerUp);
+
+    // ── Double-click to reset viewport ────────────────────────────
+    canvas.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      this.resetView();
     });
 
+    // ── Scroll to zoom ────────────────────────────────────────────
     canvas.addEventListener('wheel', (e) => {
       if (!this.viewportCaps.zoom) return;
       e.preventDefault();
       const zoomDelta = e.deltaY > 0 ? 0.9 : 1.1;
       this.userZoom *= zoomDelta;
-      this.userZoom = Math.max(0.2, Math.min(10.0, this.userZoom));
+      this.userZoom = Math.max(0.1, Math.min(20.0, this.userZoom));
     }, { passive: false });
+
+    // ── Touch pinch-to-zoom ───────────────────────────────────────
+    let lastPinchDist = 0;
+    canvas.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 2) {
+        const t = e.touches;
+        lastPinchDist = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+      }
+    }, { passive: true });
+
+    canvas.addEventListener('touchmove', (e) => {
+      if (e.touches.length === 2 && this.viewportCaps.zoom) {
+        const t = e.touches;
+        const dist = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+        if (lastPinchDist > 0) {
+          const scale = dist / lastPinchDist;
+          this.userZoom *= scale;
+          this.userZoom = Math.max(0.1, Math.min(20.0, this.userZoom));
+        }
+        lastPinchDist = dist;
+      }
+    }, { passive: true });
+
+    canvas.addEventListener('touchend', () => { lastPinchDist = 0; }, { passive: true });
   }
 
   setViewportCapabilities(caps: ViewportCapabilities): void {
     this.viewportCaps = caps;
+  }
+
+  setPanSensitivityScale(scale: number): void {
+    this.panSensitivityScale = scale;
   }
 
   getPan(): [number, number] {
@@ -114,7 +162,6 @@ export class SceneManager {
     const loop = (time: number) => {
       this.animationId = requestAnimationFrame(loop);
 
-      // Auto-drift for perspective camera (orbital visualizer)
       if (this.activeCamera === this.perspCamera && this.driftEnabled && !this.dragging) {
         this.driftAngle += this.driftSpeed / 60;
       }
@@ -122,7 +169,7 @@ export class SceneManager {
         const dist = 12;
         this.perspCamera.position.set(
           Math.sin(this.driftAngle) * dist,
-          2.0 * Math.sin(this.driftAngle * 0.3), // gentle vertical bob
+          2.0 * Math.sin(this.driftAngle * 0.3),
           Math.cos(this.driftAngle) * dist,
         );
         this.perspCamera.lookAt(0, 0, 0);

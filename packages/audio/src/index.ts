@@ -1,5 +1,6 @@
 export { AudioProcessor } from './audio-processor.js';
 export { AudioSource } from './audio-source.js';
+export type { AudioSourceType } from './audio-source.js';
 
 export async function loadWasmAnalyzer(): Promise<any | null> {
   try {

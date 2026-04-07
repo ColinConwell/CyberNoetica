@@ -65,6 +65,21 @@ export default defineConfig({
       },
     }),
     {
+      name: 'dev-settings',
+      configureServer(server) {
+        const settingsPath = resolve(__dirname, '../../settings.json');
+        server.middlewares.use('/settings.json', (_req, res, next) => {
+          if (!existsSync(settingsPath)) {
+            res.setHeader('Content-Type', 'application/json');
+            res.end('{}');
+            return;
+          }
+          res.setHeader('Content-Type', 'application/json');
+          createReadStream(settingsPath).pipe(res);
+        });
+      },
+    },
+    {
       name: 'sample-music',
       configureServer(server) {
         const musicDir = resolve(__dirname, '../../data/sample-music');

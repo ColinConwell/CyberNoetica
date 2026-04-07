@@ -35,6 +35,9 @@ export class VisualizerManager {
       ? this.scene.perspCamera : this.scene.camera;
     this.scene.resetView();
     this.scene.setViewportCapabilities(this.activeViz.metadata.viewport);
+    // Fractal visualizers have their own auto-zoom; boost pan sensitivity accordingly
+    const hasFractalZoom = type === 'mandelbrot' || type === 'julia';
+    this.scene.setPanSensitivityScale(hasFractalZoom ? 50.0 : 1.0);
 
     return this.activeViz;
   }

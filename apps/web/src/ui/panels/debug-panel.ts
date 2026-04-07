@@ -1,6 +1,13 @@
-import { el, sectionLabel } from '../components.js';
+import { el, sectionLabel, glassButton } from '../components.js';
 import { ACCENT, FONT, GLASS_BORDER, TEXT_DIM, TEXT_PRIMARY, TEXT_SECONDARY } from '../styles.js';
 import type { MessageBus, AudioFeatures, BusMessage, Store } from '@cybernoetica/core';
+import {
+  installLogInterceptor,
+  createLogDisplay,
+  type LogLevel,
+  type LogDisplayMode,
+  type LogDisplay,
+} from '../log-display.js';
 
 interface CyberNoeticaGlobals {
   store: Store<any>;
@@ -11,7 +18,7 @@ function getGlobals(): CyberNoeticaGlobals | null {
   return (window as any).__cybernoetica ?? null;
 }
 
-function getDebugInfo(): { fps: number; frameTime: number; vizType: string } | null {
+function getDebugInfo(): { fps: number; frameTime: number; vizType: string; playbackState?: string } | null {
   return (window as any).__cybernoetica_debug ?? null;
 }
 
@@ -25,8 +32,9 @@ export function renderDebugPanel(container: HTMLElement): () => void {
   }
 
   const { store, bus } = globals;
+  installLogInterceptor();
 
-  // Performance section
+  // ── Performance ─────────────────────────────────────────────────
   container.appendChild(sectionLabel('Performance'));
   const perfGrid = el('div', {
     display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 12px',
@@ -39,7 +47,7 @@ export function renderDebugPanel(container: HTMLElement): () => void {
   perfGrid.append(fpsRow, ftRow);
   container.appendChild(perfGrid);
 
-  // Audio section
+  // ── Audio ───────────────────────────────────────────────────────
   container.appendChild(sectionLabel('Audio'));
   const audioGrid = el('div', {
     display: 'grid', gridTemplateColumns: '60px 1fr', gap: '4px 8px',
@@ -64,14 +72,12 @@ export function renderDebugPanel(container: HTMLElement): () => void {
   }
   container.appendChild(audioGrid);
 
-  const wasmBadge = el('div', {
-    fontSize: '10px', color: TEXT_DIM, marginBottom: '14px',
-  });
+  const wasmBadge = el('div', { fontSize: '10px', color: TEXT_DIM, marginBottom: '14px' });
   const state = store.getState();
   wasmBadge.textContent = `Analyzer: ${state.audio?.wasm ? 'WASM' : 'JS fallback'}`;
   container.appendChild(wasmBadge);
 
-  // Visualizer section
+  // ── Visualizer ──────────────────────────────────────────────────
   container.appendChild(sectionLabel('Visualizer'));
   const vizInfo = el('div', {
     fontSize: '11px', color: TEXT_SECONDARY, marginBottom: '14px',
@@ -79,7 +85,7 @@ export function renderDebugPanel(container: HTMLElement): () => void {
   });
   container.appendChild(vizInfo);
 
-  // State section
+  // ── State ───────────────────────────────────────────────────────
   container.appendChild(sectionLabel('State'));
   const stateBox = el('pre', {
     fontSize: '10px', color: TEXT_DIM, fontFamily: 'monospace',
@@ -105,27 +111,104 @@ export function renderDebugPanel(container: HTMLElement): () => void {
   });
   container.appendChild(exportBtn);
 
-  // Bus monitor
+  // ── Bus ─────────────────────────────────────────────────────────
   container.appendChild(el('div', { height: '10px' }));
   container.appendChild(sectionLabel('Bus'));
   const busInfo = el('div', {
-    fontSize: '11px', color: TEXT_DIM, fontFamily: 'monospace',
+    fontSize: '11px', color: TEXT_DIM, fontFamily: 'monospace', marginBottom: '14px',
   });
   container.appendChild(busInfo);
 
-  // Audio subscription for live features
+  // ── Log Display Controls ────────────────────────────────────────
+  container.appendChild(sectionLabel('Logs'));
+
+  let activeLogDisplay: LogDisplay | null = null;
+  let currentLogFilter: LogLevel | 'all' = 'all';
+  let currentLogMode: LogDisplayMode = 'stream';
+
+  const logControlRow = el('div', {
+    display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px',
+  });
+
+  // Level filter
+  const levelSelect = el('select', {
+    padding: '4px 8px', fontSize: '10px', fontFamily: FONT,
+    background: 'rgba(255,255,255,0.06)', color: TEXT_SECONDARY,
+    border: `1px solid ${GLASS_BORDER}`, borderRadius: '6px',
+    cursor: 'pointer', outline: 'none',
+  }) as HTMLSelectElement;
+  for (const level of ['all', 'debug', 'info', 'warn', 'error'] as const) {
+    const opt = document.createElement('option');
+    opt.value = level;
+    opt.textContent = level;
+    opt.style.background = '#111';
+    levelSelect.appendChild(opt);
+  }
+  levelSelect.value = currentLogFilter;
+  levelSelect.addEventListener('change', () => {
+    currentLogFilter = levelSelect.value as LogLevel | 'all';
+    reopenLogDisplay();
+  });
+  logControlRow.appendChild(levelSelect);
+
+  // Mode buttons
+  const modes: { label: string; mode: LogDisplayMode }[] = [
+    { label: 'Stream', mode: 'stream' },
+    { label: 'Float', mode: 'floating' },
+    { label: 'Bottom', mode: 'docked-bottom' },
+    { label: 'Left', mode: 'docked-left' },
+    { label: 'Right', mode: 'docked-right' },
+  ];
+
+  const modeButtons: HTMLButtonElement[] = [];
+  for (const m of modes) {
+    const btn = glassButton(m.label, { active: currentLogMode === m.mode });
+    btn.style.fontSize = '10px';
+    btn.style.padding = '4px 10px';
+    btn.addEventListener('click', () => {
+      if (currentLogMode === m.mode && activeLogDisplay) {
+        closeLogDisplay();
+        return;
+      }
+      currentLogMode = m.mode;
+      reopenLogDisplay();
+      for (const b of modeButtons) {
+        b.dataset.active = String(false);
+        b.style.background = 'rgba(255,255,255,0.06)';
+        b.style.borderColor = GLASS_BORDER;
+      }
+      btn.dataset.active = String(true);
+      btn.style.background = 'rgba(255,255,255,0.18)';
+      btn.style.borderColor = 'rgba(255,255,255,0.3)';
+    });
+    modeButtons.push(btn);
+    logControlRow.appendChild(btn);
+  }
+  container.appendChild(logControlRow);
+
+  function closeLogDisplay() {
+    if (activeLogDisplay) {
+      activeLogDisplay.cleanup();
+      activeLogDisplay = null;
+    }
+  }
+
+  function reopenLogDisplay() {
+    closeLogDisplay();
+    activeLogDisplay = createLogDisplay(currentLogMode, currentLogFilter);
+  }
+
+  // ── Live Data Subscriptions ─────────────────────────────────────
   let latestFeatures: AudioFeatures | null = null;
   const unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
     latestFeatures = msg.payload;
   });
 
-  // Bus message counter
   let busMessageCount = 0;
   let busRate = 0;
   let lastBusCheck = performance.now();
   const busSub = bus.subscribe('audio:*', () => { busMessageCount++; });
 
-  // Periodic update
   const interval = setInterval(() => {
     const debug = getDebugInfo();
     if (debug) {
@@ -151,7 +234,8 @@ export function renderDebugPanel(container: HTMLElement): () => void {
     }
 
     const s = store.getState();
-    vizInfo.textContent = `Type: ${s.visualizer?.type || '—'}\nParams: ${JSON.stringify(s.visualizer?.userParams || {}, null, 1)}`;
+    const playbackState = debug?.playbackState || '?';
+    vizInfo.textContent = `Type: ${s.visualizer?.type || '\u2014'}\nPlayback: ${playbackState}\nParams: ${JSON.stringify(s.visualizer?.userParams || {}, null, 1)}`;
     stateBox.textContent = JSON.stringify(s, null, 2);
     busInfo.textContent = `audio:features ${busRate} msg/s`;
   }, 200);
@@ -160,6 +244,7 @@ export function renderDebugPanel(container: HTMLElement): () => void {
     clearInterval(interval);
     unsub();
     busSub();
+    closeLogDisplay();
   };
 }
 

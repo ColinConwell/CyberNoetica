@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
 import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../smoothing.js';
-import type { Visualizer, VisualizerMetadata } from './types.js';
-import { registerVisualizer } from './registry.js';
+import { EMASmoothing } from '../../smoothing.js';
+import type { Visualizer, VisualizerMetadata } from '../types.js';
+import { registerVisualizer } from '../registry.js';
 
 /**
  * Julia Set visualizer — the Mandelbrot's shape-shifting sibling.
@@ -34,9 +34,14 @@ const juliaMetadata: VisualizerMetadata = {
   description: 'Shape-shifting fractal morphology',
   usesPerspective: false,
   params: [
-    { key: 'orbitSpeed', label: 'Orbit Speed', min: 0.02, max: 0.5, step: 0.02, initial: 0.15 },
-    { key: 'orbitRadius', label: 'Orbit Radius', min: 0.01, max: 0.25, step: 0.01, initial: 0.08 },
-    { key: 'transitionDuration', label: 'Morph Speed', min: 2, max: 20, step: 1, initial: 8 },
+    // Appearance
+    { key: 'orbitSpeed', label: 'Orbit Speed', min: 0.02, max: 0.5, step: 0.02, initial: 0.15, category: 'appearance' },
+    { key: 'orbitRadius', label: 'Orbit Radius', min: 0.01, max: 0.25, step: 0.01, initial: 0.08, category: 'appearance' },
+    { key: 'transitionDuration', label: 'Morph Speed', min: 2, max: 20, step: 1, initial: 8, category: 'appearance' },
+    // Audio mapping strengths
+    { key: 'bassToOrbit', label: 'Bass \u2192 Orbit', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly bass pushes the c-parameter orbit' },
+    { key: 'midToZoom', label: 'Mid \u2192 Zoom', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly mids drive zoom breathing' },
+    { key: 'rmsToBrightness', label: 'RMS \u2192 Brightness', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly volume affects brightness' },
   ],
   viewport: { pan: false, zoom: true, orbit: false },
 };
@@ -66,10 +71,16 @@ export class JuliaVisualizer implements Visualizer {
     beatPulse: new EMASmoothing(0.5),
   };
 
+  private audioMapStrengths: Record<string, number> = {
+    bassToOrbit: 1.0,
+    midToZoom: 1.0,
+    rmsToBrightness: 1.0,
+  };
+
   private material: THREE.ShaderMaterial | null = null;
   private mesh: THREE.Mesh | null = null;
   private transitionTime = 0;
-  private transitionDuration = 8; // seconds to lerp between orbit targets
+  private transitionDuration = 8;
 
   constructor(private bus: MessageBus) {
     this.targetIdx = Math.floor(Math.random() * JULIA_ORBITS.length);
@@ -134,18 +145,17 @@ export class JuliaVisualizer implements Visualizer {
 
     if (this.latestFeatures) {
       const f = this.latestFeatures;
-      // Audio modulates the orbit — bass pushes the c parameter further from base
-      const audioRadius = this.orbitRadius * (0.5 + f.bass * 1.5);
+      const am = this.audioMapStrengths;
+      const audioRadius = this.orbitRadius * (0.5 + f.bass * 1.5 * am.bassToOrbit);
       const cx = this.baseCx + Math.cos(this.orbitPhase) * audioRadius;
       const cy = this.baseCy + Math.sin(this.orbitPhase) * audioRadius;
 
       this.smoothers.cx.update(cx);
       this.smoothers.cy.update(cy);
-      // Mid drives zoom: gentle breathing
-      this.smoothers.zoom.update(1.0 + f.mid * 0.8);
+      this.smoothers.zoom.update(1.0 + f.mid * 0.8 * am.midToZoom);
       this.smoothers.colorSpeed.update(0.3 + f.mid * 2.0);
       this.smoothers.iterations.update(150 + f.high * 350);
-      this.smoothers.brightness.update(0.5 + f.rms * 0.8);
+      this.smoothers.brightness.update(0.5 + f.rms * 0.8 * am.rmsToBrightness);
       this.smoothers.colorWarmth.update(f.spectralCentroid);
       this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
 
@@ -199,6 +209,11 @@ export class JuliaVisualizer implements Visualizer {
       case 'orbitSpeed': this.orbitSpeed = value; break;
       case 'orbitRadius': this.orbitRadius = value; break;
       case 'transitionDuration': this.transitionDuration = value; break;
+      default:
+        if (key in this.audioMapStrengths) {
+          this.audioMapStrengths[key] = value;
+        }
+        break;
     }
   }
 

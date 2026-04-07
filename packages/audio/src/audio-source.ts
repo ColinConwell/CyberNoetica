@@ -1,15 +1,35 @@
+export type AudioSourceType = 'none' | 'file' | 'mic' | 'system';
+
 export class AudioSource {
   private audioContext: AudioContext | null = null;
   private analyserNode: AnalyserNode | null = null;
   private sourceNode: AudioNode | null = null;
+  private activeStream: MediaStream | null = null;
   private timeDomainData: Float32Array | null = null;
   private onEndedCallback: (() => void) | null = null;
+  private _sourceType: AudioSourceType = 'none';
+
+  get sourceType(): AudioSourceType { return this._sourceType; }
 
   async init(): Promise<void> {
     this.audioContext = new AudioContext();
     this.analyserNode = this.audioContext.createAnalyser();
     this.analyserNode.fftSize = 2048;
     this.timeDomainData = new Float32Array(this.analyserNode.fftSize);
+  }
+
+  private stopCurrentSource(): void {
+    if (this.sourceNode) {
+      if ('stop' in this.sourceNode) {
+        try { (this.sourceNode as AudioBufferSourceNode).stop(); } catch { /* already stopped */ }
+      }
+      try { this.sourceNode.disconnect(); } catch { /* already disconnected */ }
+      this.sourceNode = null;
+    }
+    if (this.activeStream) {
+      for (const track of this.activeStream.getTracks()) track.stop();
+      this.activeStream = null;
+    }
   }
 
   async loadFile(file: File): Promise<void> {
@@ -20,42 +40,53 @@ export class AudioSource {
     source.buffer = audioBuffer;
     source.connect(this.analyserNode);
     this.analyserNode.connect(this.audioContext.destination);
-    if (this.sourceNode && 'stop' in this.sourceNode) (this.sourceNode as AudioBufferSourceNode).stop();
+    this.stopCurrentSource();
     this.sourceNode = source;
+    this._sourceType = 'file';
     source.onended = () => { if (this.onEndedCallback) this.onEndedCallback(); };
     source.start();
   }
 
   async useMicrophone(): Promise<void> {
     if (!this.audioContext || !this.analyserNode) throw new Error('AudioSource not initialized');
+    this.stopCurrentSource();
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const source = this.audioContext.createMediaStreamSource(stream);
     source.connect(this.analyserNode);
     this.sourceNode = source;
+    this.activeStream = stream;
+    this._sourceType = 'mic';
   }
 
   /**
-   * Capture system audio using getDisplayMedia (macOS ScreenCaptureKit).
-   * This prompts the user to share a screen/window with audio enabled.
-   * The video track is discarded — only the audio is used for analysis.
+   * Capture system audio via getDisplayMedia. Uses systemAudio: "include"
+   * on supporting browsers to offer tab/window audio without requiring
+   * a visible video preview. Video tracks are discarded immediately.
    */
   async useSystemAudio(): Promise<void> {
     if (!this.audioContext || !this.analyserNode) throw new Error('AudioSource not initialized');
-    const stream = await navigator.mediaDevices.getDisplayMedia({
+    this.stopCurrentSource();
+
+    const constraints: DisplayMediaStreamOptions = {
       audio: true,
-      video: true, // required by API, but we discard it
-    });
-    // Stop video tracks immediately — we only want audio
-    for (const track of stream.getVideoTracks()) {
-      track.stop();
+      video: true,
+    };
+    // Chrome 105+ supports systemAudio and preferCurrentTab
+    if ('getDisplayMedia' in navigator.mediaDevices) {
+      (constraints as any).systemAudio = 'include';
+      (constraints as any).preferCurrentTab = true;
     }
+
+    const stream = await navigator.mediaDevices.getDisplayMedia(constraints);
+    for (const track of stream.getVideoTracks()) track.stop();
     if (stream.getAudioTracks().length === 0) {
       throw new Error('No audio track captured. Make sure to enable audio sharing.');
     }
     const source = this.audioContext.createMediaStreamSource(stream);
     source.connect(this.analyserNode);
-    // Don't connect to destination — we don't want to play system audio back through speakers
     this.sourceNode = source;
+    this.activeStream = stream;
+    this._sourceType = 'system';
   }
 
   getSamples(): Float32Array | null {
@@ -84,9 +115,10 @@ export class AudioSource {
   }
 
   destroy(): void {
+    this.stopCurrentSource();
     this.audioContext?.close();
     this.audioContext = null;
     this.analyserNode = null;
-    this.sourceNode = null;
+    this._sourceType = 'none';
   }
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { WaveformVisualizer } from '../visualizers/waveform.js';
+import { WaveformVisualizer } from '../visualizers/waveform/v01-alpha.js';
 import { MessageBus } from '@cybernoetica/core';
 import type { AudioFeatures } from '@cybernoetica/core';
 

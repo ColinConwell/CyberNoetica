@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { JuliaVisualizer } from '../visualizers/julia.js';
+import { JuliaVisualizer } from '../visualizers/julia/v01-alpha.js';
 import { MessageBus } from '@cybernoetica/core';
 import type { AudioFeatures } from '@cybernoetica/core';
 

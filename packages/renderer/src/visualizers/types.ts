@@ -7,6 +7,8 @@ export interface VisualizerParam {
   max: number;
   step: number;
   initial: number;
+  category?: 'appearance' | 'audio-mapping';
+  description?: string;
 }
 
 export interface ViewportCapabilities {

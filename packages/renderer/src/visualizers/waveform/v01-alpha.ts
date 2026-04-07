@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
 import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../smoothing.js';
-import type { Visualizer, VisualizerMetadata } from './types.js';
-import { registerVisualizer } from './registry.js';
+import { EMASmoothing } from '../../smoothing.js';
+import type { Visualizer, VisualizerMetadata } from '../types.js';
+import { registerVisualizer } from '../registry.js';
 
 const NUM_LAYERS = 5;
 const FFT_SIZE = 1024;
@@ -14,8 +14,12 @@ const waveformMetadata: VisualizerMetadata = {
   description: 'Neon soundwaves flowing through space',
   usesPerspective: false,
   params: [
-    { key: 'bassBoost', label: 'Bass Boost', min: 0.0, max: 1.0, step: 0.05, initial: 0.0 },
-    { key: 'brightness', label: 'Brightness', min: 0.2, max: 2.0, step: 0.1, initial: 1.0 },
+    // Appearance
+    { key: 'bassBoost', label: 'Bass Boost', min: 0.0, max: 1.0, step: 0.05, initial: 0.0, category: 'appearance' },
+    { key: 'brightness', label: 'Brightness', min: 0.2, max: 2.0, step: 0.1, initial: 1.0, category: 'appearance' },
+    // Audio mapping strengths
+    { key: 'bassToAmplitude', label: 'Bass \u2192 Amplitude', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly bass affects wave amplitude' },
+    { key: 'rmsToGlow', label: 'RMS \u2192 Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly volume affects glow intensity' },
   ],
   viewport: { pan: false, zoom: false, orbit: false },
 };
@@ -30,6 +34,8 @@ export class WaveformVisualizer implements Visualizer {
   userParams: Record<string, number> = {
     bassBoost: 0.0,
     brightness: 1.0,
+    bassToAmplitude: 1.0,
+    rmsToGlow: 1.0,
   };
 
   private smoothers = {
@@ -119,10 +125,12 @@ export class WaveformVisualizer implements Visualizer {
 
     if (this.material) {
       this.material.uniforms.u_time.value = this.time;
-      this.material.uniforms.u_bass.value = Math.min(this.smoothers.bass.value + this.userParams.bassBoost, 1.0);
+      const bToA = this.userParams.bassToAmplitude;
+      const rToG = this.userParams.rmsToGlow;
+      this.material.uniforms.u_bass.value = Math.min(this.smoothers.bass.value * bToA + this.userParams.bassBoost, 1.0);
       this.material.uniforms.u_mid.value = this.smoothers.mid.value;
       this.material.uniforms.u_high.value = this.smoothers.high.value;
-      this.material.uniforms.u_rms.value = this.smoothers.rms.value * this.userParams.brightness;
+      this.material.uniforms.u_rms.value = this.smoothers.rms.value * this.userParams.brightness * rToG;
       this.material.uniforms.u_spectralCentroid.value = this.smoothers.spectralCentroid.value;
       this.material.uniforms.u_beatPulse.value = this.smoothers.beatPulse.value;
     }

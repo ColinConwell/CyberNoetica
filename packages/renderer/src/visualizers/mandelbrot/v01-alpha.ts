@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
 import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../smoothing.js';
-import type { Visualizer, VisualizerMetadata } from './types.js';
-import { registerVisualizer } from './registry.js';
+import { EMASmoothing } from '../../smoothing.js';
+import type { Visualizer, VisualizerMetadata } from '../types.js';
+import { registerVisualizer } from '../registry.js';
 
 export interface MandelbrotUniforms {
   zoom: number;
@@ -45,8 +45,13 @@ const mandelbrotMetadata: VisualizerMetadata = {
   description: 'Deep zoom into infinite fractal edges',
   usesPerspective: false,
   params: [
-    { key: 'zoomSpeed', label: 'Zoom Speed', min: 0.0002, max: 0.003, step: 0.0001, initial: 0.0008 },
-    { key: 'rotationSpeed', label: 'Rotation', min: 0.0, max: 0.015, step: 0.001, initial: 0.003 },
+    // Appearance
+    { key: 'zoomSpeed', label: 'Zoom Speed', min: 0.0002, max: 0.003, step: 0.0001, initial: 0.0008, category: 'appearance' },
+    { key: 'rotationSpeed', label: 'Rotation', min: 0.0, max: 0.015, step: 0.001, initial: 0.003, category: 'appearance' },
+    // Audio mapping strengths
+    { key: 'bassToZoom', label: 'Bass \u2192 Zoom', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly bass drives zoom speed' },
+    { key: 'rmsToBrightness', label: 'RMS \u2192 Brightness', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly volume affects brightness' },
+    { key: 'centroidToWarmth', label: 'Centroid \u2192 Warmth', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly spectral centroid shifts color temperature' },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
 };
@@ -67,6 +72,12 @@ export class MandelbrotVisualizer implements Visualizer {
   private rotation = 0;
   private rotationEnabled = true;
   private rotationSpeed = 0.003;
+
+  private audioMapStrengths: Record<string, number> = {
+    bassToZoom: 1.0,
+    rmsToBrightness: 1.0,
+    centroidToWarmth: 1.0,
+  };
 
   // Zoom cycle state: zoom in → peak → zoom out → switch target → zoom in
   private zoomDirection: 'in' | 'out' = 'in';
@@ -132,17 +143,12 @@ export class MandelbrotVisualizer implements Visualizer {
 
     if (this.latestFeatures) {
       const f = this.latestFeatures;
-      // Bass controls zoom speed — more bass = faster dive
-      this.smoothers.zoomRate.update(0.2 + f.bass * 0.8);
-      // Mid controls color cycling
+      const am = this.audioMapStrengths;
+      this.smoothers.zoomRate.update(0.2 + f.bass * 0.8 * am.bassToZoom);
       this.smoothers.colorSpeed.update(0.3 + f.mid * 2.0);
-      // High controls detail (iterations increase as we zoom deeper)
       this.smoothers.iterations.update(150 + f.high * 350);
-      // RMS controls brightness
-      this.smoothers.brightness.update(0.5 + f.rms * 0.8);
-      // Spectral centroid controls color warmth
-      this.smoothers.colorWarmth.update(f.spectralCentroid);
-      // Beat onset creates a brief brightness pulse
+      this.smoothers.brightness.update(0.5 + f.rms * 0.8 * am.rmsToBrightness);
+      this.smoothers.colorWarmth.update(f.spectralCentroid * am.centroidToWarmth);
       this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
     } else {
       // Idle: gentle defaults
@@ -232,6 +238,11 @@ export class MandelbrotVisualizer implements Visualizer {
       case 'rotationSpeed':
         this.rotationSpeed = value;
         this.rotationEnabled = value > 0;
+        break;
+      default:
+        if (key in this.audioMapStrengths) {
+          this.audioMapStrengths[key] = value;
+        }
         break;
     }
   }

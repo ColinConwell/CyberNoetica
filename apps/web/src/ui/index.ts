@@ -12,6 +12,7 @@ import { createFadeManager } from './fade-manager.js';
 import { renderVisualPanel } from './panels/visual-panel.js';
 import { renderSoundPanel } from './panels/sound-panel.js';
 import { renderControlPanel } from './panels/control-panel.js';
+import { getSetting } from '../settings-loader.js';
 
 export type VisualizerType = string;
 
@@ -85,7 +86,7 @@ export function createUI(): UIControls {
     pointerEvents: 'none', userSelect: 'none', zIndex: '100',
     transition: 'opacity 0.5s ease',
   });
-  title.textContent = 'Cybernoetica';
+  title.textContent = getSetting('app_title', 'Cybernoetica');
   document.body.appendChild(title);
 
   // Start screen

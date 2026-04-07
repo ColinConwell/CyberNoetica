@@ -1,4 +1,4 @@
-import { el, sectionLabel } from '../components.js';
+import { el, sectionLabel, sectionDivider } from '../components.js';
 import { ACCENT, GLASS_BG, GLASS_BORDER, TEXT_DIM, TEXT_SECONDARY } from '../styles.js';
 import type { AppSettings } from '../styles.js';
 import { isDebugEnabled, renderDebugPanel } from './debug-panel.js';
@@ -59,7 +59,7 @@ export function renderControlPanel(panel: HTMLElement, opts: ControlPanelOpts): 
   opacRow.append(opacLabel, opacValue);
   panel.appendChild(opacRow);
 
-  // Keyboard shortcuts
+  panel.appendChild(sectionDivider());
   panel.appendChild(sectionLabel('Keyboard'));
   const shortcuts = el('div', { fontSize: '12px', color: TEXT_DIM, lineHeight: '1.8' });
   shortcuts.innerHTML = `
@@ -68,13 +68,10 @@ export function renderControlPanel(panel: HTMLElement, opts: ControlPanelOpts): 
   `;
   panel.appendChild(shortcuts);
 
-  // Debug panel (dev mode or ?debug=true)
   if (isDebugEnabled()) {
-    panel.appendChild(el('div', { height: '12px' }));
+    panel.appendChild(sectionDivider());
     const debugSection = el('div', {
-      borderTop: `1px solid ${GLASS_BORDER}`,
-      paddingTop: '14px',
-      marginTop: '4px',
+      paddingTop: '4px',
     });
     const cleanup = renderDebugPanel(debugSection);
     if (opts.onDebugCleanup) opts.onDebugCleanup(cleanup);

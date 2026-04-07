@@ -1,5 +1,8 @@
-import { el, glassButton, sectionLabel } from '../components.js';
-import { GLASS_BORDER, TEXT_PRIMARY, TEXT_SECONDARY, ACCENT } from '../styles.js';
+import { el, glassButton, sectionLabel, toggleSwitch } from '../components.js';
+import { GLASS_BORDER, TEXT_PRIMARY, TEXT_SECONDARY, ACCENT, TEXT_DIM } from '../styles.js';
+import { formatTrackName, formatFolderName, groupTracksByFolder, trackFileName } from '../../utils/track-display.js';
+import { getSetting } from '../../settings-loader.js';
+import type { TrackDisplayFormat } from '../../utils/track-display.js';
 
 export interface SoundPanelOpts {
   activeTrackName: string;
@@ -19,6 +22,10 @@ export interface SoundPanelOpts {
 
 export function renderSoundPanel(panel: HTMLElement, opts: SoundPanelOpts): void {
   panel.innerHTML = '';
+
+  const trackSettings = getSetting('track_display', { format: 'track-number' as const, show_folder_name: true });
+  const displayFormat: TrackDisplayFormat = trackSettings.format ?? 'track-number';
+  const showFolders = trackSettings.show_folder_name !== false;
 
   if (opts.activeTrackName) {
     const nowPlaying = el('div', {
@@ -63,36 +70,55 @@ export function renderSoundPanel(panel: HTMLElement, opts: SoundPanelOpts): void
   sourceRow.append(sysBtn, loadBtn, micBtn, sampleToggle);
   panel.appendChild(sourceRow);
 
+  // ── Track list (hierarchical by folder) ─────────────────────────
   if (opts.trackListExpanded && opts.sampleTracks.length > 0) {
     const trackList = el('div', {
-      maxHeight: '180px', overflowY: 'auto', marginBottom: '14px',
+      maxHeight: '220px', overflowY: 'auto', marginBottom: '14px',
       padding: '4px 0',
       borderTop: `1px solid ${GLASS_BORDER}`,
       borderBottom: `1px solid ${GLASS_BORDER}`,
     });
-    for (const file of opts.sampleTracks) {
-      const name = file.split('/').pop()?.replace(/\.[^.]+$/, '') || file;
-      const isActive = name === opts.activeTrackName;
-      const item = el('div', {
-        padding: '6px 10px', fontSize: '11px',
-        color: isActive ? TEXT_PRIMARY : TEXT_SECONDARY,
-        cursor: 'pointer', transition: 'background 0.15s', borderRadius: '6px',
-        background: isActive ? 'rgba(140, 160, 255, 0.1)' : 'transparent',
-      });
-      item.textContent = name;
-      item.addEventListener('mouseenter', () => { item.style.background = 'rgba(255,255,255,0.08)'; });
-      item.addEventListener('mouseleave', () => {
-        item.style.background = isActive ? 'rgba(140, 160, 255, 0.1)' : 'transparent';
-      });
-      item.addEventListener('click', () => {
-        if (opts.onTrackSelect) opts.onTrackSelect(`/sample-music/${file}`, name);
-        opts.onClose();
-      });
-      trackList.appendChild(item);
+
+    const groups = groupTracksByFolder(opts.sampleTracks);
+
+    for (const [folder, tracks] of groups) {
+      if (showFolders && folder) {
+        const folderHeader = el('div', {
+          fontSize: '10px', fontWeight: '500', letterSpacing: '0.12em',
+          textTransform: 'uppercase', color: TEXT_DIM,
+          padding: '8px 10px 4px', marginTop: '4px',
+        });
+        folderHeader.textContent = formatFolderName(folder);
+        trackList.appendChild(folderHeader);
+      }
+
+      for (const file of tracks) {
+        const rawName = trackFileName(file);
+        const displayName = formatTrackName(rawName, displayFormat);
+        const isActive = rawName === opts.activeTrackName || displayName === opts.activeTrackName;
+        const item = el('div', {
+          padding: '6px 10px', paddingLeft: showFolders && folder ? '20px' : '10px',
+          fontSize: '11px',
+          color: isActive ? TEXT_PRIMARY : TEXT_SECONDARY,
+          cursor: 'pointer', transition: 'background 0.15s', borderRadius: '6px',
+          background: isActive ? 'rgba(140, 160, 255, 0.1)' : 'transparent',
+        });
+        item.textContent = displayName;
+        item.addEventListener('mouseenter', () => { item.style.background = 'rgba(255,255,255,0.08)'; });
+        item.addEventListener('mouseleave', () => {
+          item.style.background = isActive ? 'rgba(140, 160, 255, 0.1)' : 'transparent';
+        });
+        item.addEventListener('click', () => {
+          if (opts.onTrackSelect) opts.onTrackSelect(`/sample-music/${file}`, displayName);
+          opts.onClose();
+        });
+        trackList.appendChild(item);
+      }
     }
     panel.appendChild(trackList);
   }
 
+  // ── Playback controls ───────────────────────────────────────────
   panel.appendChild(sectionLabel('Playback'));
   const playbackRow = el('div', {
     display: 'flex', gap: '12px', alignItems: 'center', fontSize: '12px', color: TEXT_SECONDARY,
@@ -101,28 +127,24 @@ export function renderSoundPanel(panel: HTMLElement, opts: SoundPanelOpts): void
   let autoPlay = opts.autoPlay;
   let shuffleMode = opts.shuffleMode;
 
-  const autoLabel = el('label', { display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' });
-  const autoCheck = el('input', { accentColor: ACCENT }, { type: 'checkbox' }) as HTMLInputElement;
-  autoCheck.checked = autoPlay;
-  autoCheck.addEventListener('change', () => {
-    autoPlay = autoCheck.checked;
-    if (opts.onAutoPlayChange) opts.onAutoPlayChange(autoPlay, shuffleMode);
+  const autoToggle = toggleSwitch({
+    checked: autoPlay,
+    label: 'Auto-play',
+    onChange(checked) {
+      autoPlay = checked;
+      if (opts.onAutoPlayChange) opts.onAutoPlayChange(autoPlay, shuffleMode);
+    },
   });
-  const autoText = el('span', {});
-  autoText.textContent = 'Auto-play';
-  autoLabel.append(autoCheck, autoText);
 
-  const shuffLabel = el('label', { display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' });
-  const shuffCheck = el('input', { accentColor: ACCENT }, { type: 'checkbox' }) as HTMLInputElement;
-  shuffCheck.checked = shuffleMode;
-  shuffCheck.addEventListener('change', () => {
-    shuffleMode = shuffCheck.checked;
-    if (opts.onAutoPlayChange) opts.onAutoPlayChange(autoPlay, shuffleMode);
+  const shuffToggle = toggleSwitch({
+    checked: shuffleMode,
+    label: 'Shuffle',
+    onChange(checked) {
+      shuffleMode = checked;
+      if (opts.onAutoPlayChange) opts.onAutoPlayChange(autoPlay, shuffleMode);
+    },
   });
-  const shuffText = el('span', {});
-  shuffText.textContent = 'Shuffle';
-  shuffLabel.append(shuffCheck, shuffText);
 
-  playbackRow.append(autoLabel, shuffLabel);
+  playbackRow.append(autoToggle, shuffToggle);
   panel.appendChild(playbackRow);
 }

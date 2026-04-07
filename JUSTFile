@@ -38,7 +38,7 @@ wasm:
 
 # ─── Test ─────────────────────────────────────────────────────────────
 
-# Run all tests (26 Vitest + Rust)
+# Run all tests (79 Vitest + Rust)
 test:
     pnpm test
 

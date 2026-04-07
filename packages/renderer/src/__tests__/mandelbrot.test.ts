@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { MandelbrotVisualizer } from '../visualizers/mandelbrot.js';
+import { MandelbrotVisualizer } from '../visualizers/mandelbrot/v01-alpha.js';
 import { MessageBus } from '@cybernoetica/core';
 import type { AudioFeatures } from '@cybernoetica/core';
 
