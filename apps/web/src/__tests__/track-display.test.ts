@@ -67,6 +67,28 @@ describe('groupTracksByFolder', () => {
   });
 });
 
+describe('groupTracksByFolder edge cases', () => {
+  it('handles empty array', () => {
+    const groups = groupTracksByFolder([]);
+    expect(groups.size).toBe(0);
+  });
+
+  it('handles deeply nested paths using first slash', () => {
+    const groups = groupTracksByFolder(['a/b/track.mp3']);
+    expect(groups.get('a')).toEqual(['a/b/track.mp3']);
+  });
+});
+
+describe('formatTrackName edge cases', () => {
+  it('handles name that is only digits', () => {
+    expect(formatTrackName('001', 'track-number')).toBe('001');
+  });
+
+  it('handles name with no hyphens or numbers', () => {
+    expect(formatTrackName('Groove', 'hyphen-to-space')).toBe('Groove');
+  });
+});
+
 describe('trackFileName', () => {
   it('extracts filename without folder and extension', () => {
     expect(trackFileName('Sympoetic-Techno-Jazz/Track-001.mp3')).toBe('Track-001');

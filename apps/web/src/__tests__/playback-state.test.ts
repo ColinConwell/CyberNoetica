@@ -273,6 +273,107 @@ describe('PlaybackStateMachine', () => {
     }
   });
 
+  // ─── Extended rejection matrix ──────────────────────────────────
+
+  it('rejects ERROR from playing state', () => {
+    const sm = new PlaybackStateMachine();
+    sm.dispatch({ type: 'START' });
+    sm.dispatch({ type: 'LOADED' });
+    expect(sm.dispatch({ type: 'ERROR' })).toBe(false);
+    expect(sm.state).toBe('playing');
+  });
+
+  it('rejects ERROR from paused state', () => {
+    const sm = new PlaybackStateMachine();
+    sm.dispatch({ type: 'START' });
+    sm.dispatch({ type: 'LOADED' });
+    sm.dispatch({ type: 'PAUSE' });
+    expect(sm.dispatch({ type: 'ERROR' })).toBe(false);
+    expect(sm.state).toBe('paused');
+  });
+
+  it('rejects START from non-idle states', () => {
+    const sm = new PlaybackStateMachine();
+    sm.dispatch({ type: 'START' });
+    expect(sm.dispatch({ type: 'START' })).toBe(false);
+    sm.dispatch({ type: 'LOADED' });
+    expect(sm.dispatch({ type: 'START' })).toBe(false);
+  });
+
+  it('rejects SOURCE_READY from playing', () => {
+    const sm = new PlaybackStateMachine();
+    sm.dispatch({ type: 'START' });
+    sm.dispatch({ type: 'LOADED' });
+    expect(sm.dispatch({ type: 'SOURCE_READY' })).toBe(false);
+  });
+
+  it('rejects SWITCH_SOURCE from idle', () => {
+    const sm = new PlaybackStateMachine();
+    expect(sm.dispatch({ type: 'SWITCH_SOURCE', source: 'mic' })).toBe(false);
+    expect(sm.state).toBe('idle');
+  });
+
+  it('rejects SWITCH_SOURCE from loading', () => {
+    const sm = new PlaybackStateMachine();
+    sm.dispatch({ type: 'START' });
+    expect(sm.dispatch({ type: 'SWITCH_SOURCE', source: 'mic' })).toBe(false);
+    expect(sm.state).toBe('loading');
+  });
+
+  // ─── canDispatch comprehensive ─────────────────────────────────
+
+  it('canDispatch is correct for all states', () => {
+    const sm = new PlaybackStateMachine();
+    // idle
+    expect(sm.canDispatch('START')).toBe(true);
+    expect(sm.canDispatch('PAUSE')).toBe(false);
+    expect(sm.canDispatch('SWITCH_SOURCE')).toBe(false);
+
+    sm.dispatch({ type: 'START' });
+    // loading
+    expect(sm.canDispatch('LOADED')).toBe(true);
+    expect(sm.canDispatch('ERROR')).toBe(true);
+    expect(sm.canDispatch('SELECT_TRACK')).toBe(true);
+    expect(sm.canDispatch('PAUSE')).toBe(false);
+    expect(sm.canDispatch('START')).toBe(false);
+
+    sm.dispatch({ type: 'LOADED' });
+    // playing
+    expect(sm.canDispatch('PAUSE')).toBe(true);
+    expect(sm.canDispatch('SELECT_TRACK')).toBe(true);
+    expect(sm.canDispatch('NEXT_TRACK')).toBe(true);
+    expect(sm.canDispatch('SWITCH_SOURCE')).toBe(true);
+    expect(sm.canDispatch('RESUME')).toBe(false);
+    expect(sm.canDispatch('ERROR')).toBe(false);
+
+    sm.dispatch({ type: 'PAUSE' });
+    // paused
+    expect(sm.canDispatch('RESUME')).toBe(true);
+    expect(sm.canDispatch('SELECT_TRACK')).toBe(true);
+    expect(sm.canDispatch('SWITCH_SOURCE')).toBe(true);
+    expect(sm.canDispatch('PAUSE')).toBe(false);
+    expect(sm.canDispatch('NEXT_TRACK')).toBe(false);
+
+    sm.dispatch({ type: 'SWITCH_SOURCE', source: 'mic' });
+    // switching-source
+    expect(sm.canDispatch('SOURCE_READY')).toBe(true);
+    expect(sm.canDispatch('ERROR')).toBe(true);
+    expect(sm.canDispatch('PAUSE')).toBe(false);
+    expect(sm.canDispatch('SELECT_TRACK')).toBe(false);
+  });
+
+  // ─── Reset does not notify ─────────────────────────────────────
+
+  it('reset does not notify listeners', () => {
+    const sm = new PlaybackStateMachine();
+    sm.dispatch({ type: 'START' });
+    sm.dispatch({ type: 'LOADED' });
+    const listener = vi.fn();
+    sm.onChange(listener);
+    sm.reset();
+    expect(listener).not.toHaveBeenCalled();
+  });
+
   // ─── Message bus integration ────────────────────────────────────
 
   it('publishes state changes to message bus', () => {

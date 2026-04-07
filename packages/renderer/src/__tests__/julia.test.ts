@@ -55,6 +55,16 @@ describe('JuliaVisualizer', () => {
     expect(vs.zoom).toBeCloseTo(2.5, 1);
   });
 
+  it('setViewState partial update preserves other fields', () => {
+    const bus = new MessageBus();
+    const viz = new JuliaVisualizer(bus);
+    const before = viz.getViewState();
+    viz.setViewState({ zoom: 3.0 });
+    const after = viz.getViewState();
+    expect(after.zoom).toBeCloseTo(3.0, 1);
+    expect(after.seedReal).toBeCloseTo(before.seedReal, 2);
+  });
+
   it('metadata includes viewStateFields', () => {
     const bus = new MessageBus();
     const viz = new JuliaVisualizer(bus);

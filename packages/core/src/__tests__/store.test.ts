@@ -98,6 +98,23 @@ describe('Store', () => {
     expect(store.getState().count).toBe(5);
   });
 
+  it('deserialize merges into existing state', () => {
+    const store = createStore(INITIAL);
+    store.setState({ count: 5, flags: { active: true } });
+    store.deserialize(JSON.stringify({ count: 99 }));
+    const s = store.getState();
+    expect(s.count).toBe(99);
+    expect(s.flags.active).toBe(true);
+  });
+
+  it('empty setState does not change state identity but notifies', () => {
+    const store = createStore(INITIAL);
+    const listener = vi.fn();
+    store.subscribe(listener);
+    store.setState({});
+    expect(listener).toHaveBeenCalledOnce();
+  });
+
   it('swallows subscriber errors', () => {
     const store = createStore(INITIAL);
     store.subscribe(() => { throw new Error('boom'); });

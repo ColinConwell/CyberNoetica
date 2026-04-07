@@ -67,6 +67,16 @@ describe('OrbitalVisualizer', () => {
     expect(cam.z).toBeCloseTo(12, 1);
   });
 
+  it('setViewState partial update preserves other fields', () => {
+    const bus = new MessageBus();
+    const viz = new OrbitalVisualizer(bus);
+    viz.setViewState({ orbitAngle: 2.0 });
+    const vs = viz.getViewState();
+    expect(vs.orbitAngle).toBe(2.0);
+    expect(vs.distance).toBe(12);
+    expect(vs.elevation).toBe(0);
+  });
+
   it('metadata includes viewStateFields', () => {
     const bus = new MessageBus();
     const viz = new OrbitalVisualizer(bus);
