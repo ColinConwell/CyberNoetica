@@ -4,7 +4,7 @@ import { MessageBus } from '@cybernoetica/core';
 import type { AudioFeatures } from '@cybernoetica/core';
 
 describe('MandelbrotVisualizer', () => {
-  it('updates uniforms from audio features', () => {
+  it('updates from audio features', () => {
     const bus = new MessageBus();
     const viz = new MandelbrotVisualizer(bus);
     const features: AudioFeatures = {
@@ -28,5 +28,43 @@ describe('MandelbrotVisualizer', () => {
     expect(uniforms.zoom).toBeDefined();
     expect(uniforms.colorSpeed).toBeDefined();
     expect(uniforms.iterations).toBeDefined();
+  });
+
+  it('getViewState returns valid initial coordinates', () => {
+    const bus = new MessageBus();
+    const viz = new MandelbrotVisualizer(bus);
+    const vs = viz.getViewState();
+    expect(vs.centerReal).toBeDefined();
+    expect(vs.centerImaginary).toBeDefined();
+    expect(vs.zoom).toBeGreaterThan(0);
+    expect(vs.rotation).toBeDefined();
+  });
+
+  it('setViewState updates center and zoom', () => {
+    const bus = new MessageBus();
+    const viz = new MandelbrotVisualizer(bus);
+    viz.setViewState({ centerReal: -0.5, centerImaginary: 0.3, zoom: 100 });
+    const vs = viz.getViewState();
+    expect(vs.centerReal).toBe(-0.5);
+    expect(vs.centerImaginary).toBe(0.3);
+    expect(vs.zoom).toBe(100);
+  });
+
+  it('setViewState partial update preserves other fields', () => {
+    const bus = new MessageBus();
+    const viz = new MandelbrotVisualizer(bus);
+    const before = viz.getViewState();
+    viz.setViewState({ rotation: 1.5 });
+    const after = viz.getViewState();
+    expect(after.rotation).toBe(1.5);
+    expect(after.centerReal).toBe(before.centerReal);
+  });
+
+  it('metadata includes viewStateFields', () => {
+    const bus = new MessageBus();
+    const viz = new MandelbrotVisualizer(bus);
+    expect(viz.metadata.viewStateFields.length).toBe(4);
+    expect(viz.metadata.viewStateFields.map(f => f.key))
+      .toEqual(['centerReal', 'centerImaginary', 'zoom', 'rotation']);
   });
 });

@@ -22,6 +22,9 @@ const waveformMetadata: VisualizerMetadata = {
     { key: 'rmsToGlow', label: 'RMS \u2192 Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly volume affects glow intensity' },
   ],
   viewport: { pan: false, zoom: false, orbit: false },
+  viewStateFields: [
+    { key: 'verticalShift', label: 'Vertical Shift', min: -0.5, max: 0.5, step: 0.01 },
+  ],
 };
 
 export class WaveformVisualizer implements Visualizer {
@@ -37,6 +40,8 @@ export class WaveformVisualizer implements Visualizer {
     bassToAmplitude: 1.0,
     rmsToGlow: 1.0,
   };
+
+  private _verticalShift = 0;
 
   private smoothers = {
     bass: new EMASmoothing(0.15),
@@ -90,6 +95,7 @@ export class WaveformVisualizer implements Visualizer {
         u_rms: { value: 0.2 },
         u_spectralCentroid: { value: 0.5 },
         u_beatPulse: { value: 0.0 },
+        u_verticalShift: { value: 0.0 },
       },
       transparent: true,
     });
@@ -133,6 +139,7 @@ export class WaveformVisualizer implements Visualizer {
       this.material.uniforms.u_rms.value = this.smoothers.rms.value * this.userParams.brightness * rToG;
       this.material.uniforms.u_spectralCentroid.value = this.smoothers.spectralCentroid.value;
       this.material.uniforms.u_beatPulse.value = this.smoothers.beatPulse.value;
+      this.material.uniforms.u_verticalShift.value = this._verticalShift;
     }
   }
 
@@ -149,6 +156,16 @@ export class WaveformVisualizer implements Visualizer {
   setUserParam(key: string, value: number): void {
     if (key in this.userParams) {
       this.userParams[key] = value;
+    }
+  }
+
+  getViewState(): Record<string, number> {
+    return { verticalShift: this._verticalShift };
+  }
+
+  setViewState(partial: Record<string, number>): void {
+    if ('verticalShift' in partial) {
+      this._verticalShift = Math.max(-0.5, Math.min(0.5, partial.verticalShift));
     }
   }
 
@@ -185,6 +202,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   uniform float u_rms;
   uniform float u_spectralCentroid;
   uniform float u_beatPulse;
+  uniform float u_verticalShift;
 
   varying vec2 vUv;
 
@@ -227,8 +245,7 @@ const FRAGMENT_SHADER = /* glsl */ `
 
   void main() {
     vec2 uv = gl_FragCoord.xy / u_resolution;
-    // Center vertically: y goes from -0.5 to 0.5
-    float y = uv.y - 0.5;
+    float y = uv.y - 0.5 - u_verticalShift;
     float x = uv.x;
 
     // Aspect ratio correction for glow calculations

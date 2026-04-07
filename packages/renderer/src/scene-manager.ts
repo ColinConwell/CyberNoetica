@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import type { ViewportCapabilities } from './visualizers/types.js';
 
+export type ViewportDragHandler = (dx: number, dy: number) => void;
+export type ViewportZoomHandler = (delta: number) => void;
+export type ViewportResetHandler = () => void;
+
 export class SceneManager {
   public width: number;
   public height: number;
@@ -12,21 +16,15 @@ export class SceneManager {
   private animationId: number | null = null;
   private renderCallbacks: Array<(time: number) => void> = [];
 
-  private panX = 0;
-  private panY = 0;
-  private userZoom = 1.0;
   private dragging = false;
   private lastPointerX = 0;
   private lastPointerY = 0;
 
   private viewportCaps: ViewportCapabilities = { pan: true, zoom: true, orbit: false };
 
-  private driftAngle = 0;
-  driftEnabled = true;
-  driftSpeed = 0.08;
-
-  /** Multiplier to scale pan sensitivity for visualizers with their own zoom (e.g. Mandelbrot) */
-  private panSensitivityScale = 1.0;
+  private _onDrag: ViewportDragHandler | null = null;
+  private _onZoom: ViewportZoomHandler | null = null;
+  private _onReset: ViewportResetHandler | null = null;
 
   constructor(width: number, height: number) {
     this.width = width;
@@ -69,12 +67,8 @@ export class SceneManager {
       this.lastPointerX = e.clientX;
       this.lastPointerY = e.clientY;
 
-      if (this.viewportCaps.orbit) {
-        this.driftAngle += dx * 3.0;
-      } else if (this.viewportCaps.pan) {
-        const scale = 2.0 * this.panSensitivityScale / this.userZoom;
-        this.panX -= dx * scale;
-        this.panY += dy * scale;
+      if (this._onDrag && (this.viewportCaps.pan || this.viewportCaps.orbit)) {
+        this._onDrag(dx, dy);
       }
     };
 
@@ -90,19 +84,18 @@ export class SceneManager {
     canvas.addEventListener('pointerup', onPointerUp);
     canvas.addEventListener('pointercancel', onPointerUp);
 
-    // ── Double-click to reset viewport ────────────────────────────
+    // ── Double-click to reset ─────────────────────────────────────
     canvas.addEventListener('dblclick', (e) => {
       e.preventDefault();
-      this.resetView();
+      if (this._onReset) this._onReset();
     });
 
     // ── Scroll to zoom ────────────────────────────────────────────
     canvas.addEventListener('wheel', (e) => {
       if (!this.viewportCaps.zoom) return;
       e.preventDefault();
-      const zoomDelta = e.deltaY > 0 ? 0.9 : 1.1;
-      this.userZoom *= zoomDelta;
-      this.userZoom = Math.max(0.1, Math.min(20.0, this.userZoom));
+      const delta = e.deltaY > 0 ? -0.1 : 0.1;
+      if (this._onZoom) this._onZoom(delta);
     }, { passive: false });
 
     // ── Touch pinch-to-zoom ───────────────────────────────────────
@@ -118,10 +111,9 @@ export class SceneManager {
       if (e.touches.length === 2 && this.viewportCaps.zoom) {
         const t = e.touches;
         const dist = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-        if (lastPinchDist > 0) {
+        if (lastPinchDist > 0 && this._onZoom) {
           const scale = dist / lastPinchDist;
-          this.userZoom *= scale;
-          this.userZoom = Math.max(0.1, Math.min(20.0, this.userZoom));
+          this._onZoom(scale - 1.0);
         }
         lastPinchDist = dist;
       }
@@ -134,23 +126,15 @@ export class SceneManager {
     this.viewportCaps = caps;
   }
 
-  setPanSensitivityScale(scale: number): void {
-    this.panSensitivityScale = scale;
-  }
+  onViewportDrag(handler: ViewportDragHandler): void { this._onDrag = handler; }
+  onViewportZoom(handler: ViewportZoomHandler): void { this._onZoom = handler; }
+  onViewportReset(handler: ViewportResetHandler): void { this._onReset = handler; }
 
-  getPan(): [number, number] {
-    return [this.panX, this.panY];
-  }
+  isDragging(): boolean { return this.dragging; }
 
-  getUserZoom(): number {
-    return this.userZoom;
-  }
-
-  resetView(): void {
-    this.panX = 0;
-    this.panY = 0;
-    this.userZoom = 1.0;
-    this.driftAngle = 0;
+  setCameraPosition(x: number, y: number, z: number): void {
+    this.perspCamera.position.set(x, y, z);
+    this.perspCamera.lookAt(0, 0, 0);
   }
 
   onRender(callback: (time: number) => void): () => void {
@@ -161,20 +145,6 @@ export class SceneManager {
   start(): void {
     const loop = (time: number) => {
       this.animationId = requestAnimationFrame(loop);
-
-      if (this.activeCamera === this.perspCamera && this.driftEnabled && !this.dragging) {
-        this.driftAngle += this.driftSpeed / 60;
-      }
-      if (this.activeCamera === this.perspCamera) {
-        const dist = 12;
-        this.perspCamera.position.set(
-          Math.sin(this.driftAngle) * dist,
-          2.0 * Math.sin(this.driftAngle * 0.3),
-          Math.cos(this.driftAngle) * dist,
-        );
-        this.perspCamera.lookAt(0, 0, 0);
-      }
-
       for (const cb of this.renderCallbacks) cb(time);
       this.renderer?.render(this.scene, this.activeCamera);
     };

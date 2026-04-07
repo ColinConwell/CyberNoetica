@@ -180,6 +180,11 @@ const orbitalMetadata: VisualizerMetadata = {
     { key: 'rmsToGlow', label: 'RMS \u2192 Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly overall volume affects glow intensity' },
   ],
   viewport: { pan: false, zoom: true, orbit: true },
+  viewStateFields: [
+    { key: 'orbitAngle', label: 'Orbit Angle', min: 0, max: 6.283, step: 0.05 },
+    { key: 'elevation', label: 'Elevation', min: -1.5, max: 1.5, step: 0.05 },
+    { key: 'distance', label: 'Distance', min: 4, max: 30, step: 0.5 },
+  ],
 };
 
 // ---------------------------------------------------------------------------
@@ -235,6 +240,12 @@ export class OrbitalVisualizer implements Visualizer {
 
   // Beat burst state
   private burstCooldown = 0;
+
+  // Camera view state (spherical coordinates around origin)
+  private _orbitAngle = 0;
+  private _elevation = 0;
+  private _distance = 12;
+  private viewOverrides: Record<string, boolean> = {};
 
   constructor(private bus: MessageBus) {
     this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
@@ -467,6 +478,37 @@ export class OrbitalVisualizer implements Visualizer {
     if (key in this.userParams) {
       this.userParams[key] = value;
     }
+  }
+
+  getViewState(): Record<string, number> {
+    return {
+      orbitAngle: this._orbitAngle,
+      elevation: this._elevation,
+      distance: this._distance,
+    };
+  }
+
+  setViewState(partial: Record<string, number>): void {
+    if ('orbitAngle' in partial) {
+      this._orbitAngle = partial.orbitAngle;
+      this.viewOverrides.orbit = true;
+    }
+    if ('elevation' in partial) {
+      this._elevation = Math.max(-1.5, Math.min(1.5, partial.elevation));
+      this.viewOverrides.elevation = true;
+    }
+    if ('distance' in partial) {
+      this._distance = Math.max(4, Math.min(30, partial.distance));
+    }
+  }
+
+  /** Called by VisualizerManager to get camera position for perspective rendering */
+  getCameraPosition(): { x: number; y: number; z: number } {
+    return {
+      x: Math.sin(this._orbitAngle) * this._distance,
+      y: this._elevation * this._distance * 0.3,
+      z: Math.cos(this._orbitAngle) * this._distance,
+    };
   }
 
   dispose(): void {

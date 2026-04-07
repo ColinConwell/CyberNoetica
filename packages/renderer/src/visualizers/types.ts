@@ -11,6 +11,15 @@ export interface VisualizerParam {
   description?: string;
 }
 
+export interface ViewStateField {
+  key: string;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  readOnly?: boolean;
+}
+
 export interface ViewportCapabilities {
   pan: boolean;
   zoom: boolean;
@@ -24,6 +33,7 @@ export interface VisualizerMetadata {
   usesPerspective: boolean;
   params: VisualizerParam[];
   viewport: ViewportCapabilities;
+  viewStateFields: ViewStateField[];
 }
 
 export interface Visualizer {
@@ -32,7 +42,7 @@ export interface Visualizer {
   tick(): void;
   setResolution(w: number, h: number): void;
   dispose(): void;
-  setPan?(x: number, y: number): void;
-  setZoom?(z: number): void;
   setUserParam(key: string, value: number): void;
+  getViewState(): Record<string, number>;
+  setViewState(partial: Record<string, number>): void;
 }

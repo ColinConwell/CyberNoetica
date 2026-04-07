@@ -30,6 +30,7 @@ export async function createApp(container: HTMLElement): Promise<void> {
   const playback = new PlaybackStateMachine(bus);
 
   (window as any).__cybernoetica.playback = playback;
+  (window as any).__cybernoetica.vizManager = vizManager;
 
   const saved = store.getState();
   if (saved.ui.autoPlay !== undefined || saved.ui.shuffle !== undefined) {
@@ -114,7 +115,23 @@ export async function createApp(container: HTMLElement): Promise<void> {
 
   function updateAppearanceControls() {
     const viz = vizManager.getActive();
-    if (!viz || viz.metadata.params.length === 0) {
+    if (!viz) {
+      ui.setAppearanceRenderer(null);
+      ui.setViewStateAccessors(null);
+      return;
+    }
+
+    ui.setViewStateAccessors({
+      getViewState: () => viz.getViewState(),
+      setViewState: (partial) => viz.setViewState(partial),
+      onResetView: () => {
+        const type = vizManager.getActiveType();
+        if (type) vizManager.switchTo(type);
+        updateAppearanceControls();
+      },
+    });
+
+    if (viz.metadata.params.length === 0) {
       ui.setAppearanceRenderer(null);
       return;
     }

@@ -44,6 +44,11 @@ const juliaMetadata: VisualizerMetadata = {
     { key: 'rmsToBrightness', label: 'RMS \u2192 Brightness', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly volume affects brightness' },
   ],
   viewport: { pan: false, zoom: true, orbit: false },
+  viewStateFields: [
+    { key: 'seedReal', label: 'Seed (Real)', min: -2, max: 2, step: 0.001 },
+    { key: 'seedImaginary', label: 'Seed (Imag)', min: -2, max: 2, step: 0.001 },
+    { key: 'zoom', label: 'Zoom', min: 0.3, max: 5, step: 0.05 },
+  ],
 };
 
 export class JuliaVisualizer implements Visualizer {
@@ -130,18 +135,20 @@ export class JuliaVisualizer implements Visualizer {
     // Orbit the c-parameter around the current base point
     this.orbitPhase += this.orbitSpeed / 60;
 
-    // Slowly transition between interesting base points
-    if (this.transitionTime > this.transitionDuration) {
-      this.transitionTime = 0;
-      this.targetIdx = (this.targetIdx + 1) % JULIA_ORBITS.length;
+    // Slowly transition between interesting base points (unless user overrode seed)
+    if (!this.viewOverrides.seed) {
+      if (this.transitionTime > this.transitionDuration) {
+        this.transitionTime = 0;
+        this.targetIdx = (this.targetIdx + 1) % JULIA_ORBITS.length;
+      }
+      const nextIdx = (this.targetIdx + 1) % JULIA_ORBITS.length;
+      const t = this.transitionTime / this.transitionDuration;
+      const smoothT = t * t * (3 - 2 * t);
+      const current = JULIA_ORBITS[this.targetIdx];
+      const next = JULIA_ORBITS[nextIdx];
+      this.baseCx = current.cx + (next.cx - current.cx) * smoothT;
+      this.baseCy = current.cy + (next.cy - current.cy) * smoothT;
     }
-    const nextIdx = (this.targetIdx + 1) % JULIA_ORBITS.length;
-    const t = this.transitionTime / this.transitionDuration;
-    const smoothT = t * t * (3 - 2 * t); // smoothstep
-    const current = JULIA_ORBITS[this.targetIdx];
-    const next = JULIA_ORBITS[nextIdx];
-    this.baseCx = current.cx + (next.cx - current.cx) * smoothT;
-    this.baseCy = current.cy + (next.cy - current.cy) * smoothT;
 
     if (this.latestFeatures) {
       const f = this.latestFeatures;
@@ -176,7 +183,7 @@ export class JuliaVisualizer implements Visualizer {
 
     if (this.material) {
       this.material.uniforms.u_c.value.set(this.smoothers.cx.value, this.smoothers.cy.value);
-      this.material.uniforms.u_zoom.value = this.smoothers.zoom.value * this.userZoom;
+      this.material.uniforms.u_zoom.value = this.smoothers.zoom.value;
       this.material.uniforms.u_iterations.value = Math.round(Math.min(this.smoothers.iterations.value, 800));
       this.material.uniforms.u_colorSpeed.value = this.smoothers.colorSpeed.value;
       this.material.uniforms.u_brightness.value = this.smoothers.brightness.value + this.smoothers.beatPulse.value * 0.25;
@@ -186,18 +193,31 @@ export class JuliaVisualizer implements Visualizer {
     }
   }
 
-  private userZoom = 1.0;
+  private viewOverrides: Record<string, boolean> = {};
 
-  setZoom(z: number): void {
-    this.userZoom = z;
-  }
-
-  getUniforms() {
+  getViewState(): Record<string, number> {
     return {
-      cx: this.smoothers.cx.value,
-      cy: this.smoothers.cy.value,
+      seedReal: this.smoothers.cx.value,
+      seedImaginary: this.smoothers.cy.value,
       zoom: this.smoothers.zoom.value,
     };
+  }
+
+  setViewState(partial: Record<string, number>): void {
+    if ('seedReal' in partial) {
+      this.baseCx = partial.seedReal;
+      this.smoothers.cx.reset(partial.seedReal);
+      this.viewOverrides.seed = true;
+    }
+    if ('seedImaginary' in partial) {
+      this.baseCy = partial.seedImaginary;
+      this.smoothers.cy.reset(partial.seedImaginary);
+      this.viewOverrides.seed = true;
+    }
+    if ('zoom' in partial) {
+      this.smoothers.zoom.reset(partial.zoom);
+      this.viewOverrides.zoom = true;
+    }
   }
 
   setResolution(width: number, height: number): void {

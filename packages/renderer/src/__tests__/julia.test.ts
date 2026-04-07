@@ -13,7 +13,7 @@ describe('JuliaVisualizer', () => {
   it('responds to audio features and morphs c-parameter', () => {
     const bus = new MessageBus();
     const viz = new JuliaVisualizer(bus);
-    const initial = viz.getUniforms();
+    const initial = viz.getViewState();
 
     bus.publish('audio:features', {
       fftBins: new Float32Array(1024), bass: 0.9, mid: 0.5, high: 0.3,
@@ -22,10 +22,9 @@ describe('JuliaVisualizer', () => {
     } as AudioFeatures);
     viz.tick();
 
-    const after = viz.getUniforms();
-    // c-parameter should have started moving
-    expect(after.cx).toBeDefined();
-    expect(after.cy).toBeDefined();
+    const after = viz.getViewState();
+    expect(after.seedReal).toBeDefined();
+    expect(after.seedImaginary).toBeDefined();
   });
 
   it('has idle animation with no audio', () => {
@@ -33,7 +32,34 @@ describe('JuliaVisualizer', () => {
     const viz = new JuliaVisualizer(bus);
     viz.tick();
     viz.tick();
-    const u = viz.getUniforms();
-    expect(u.zoom).toBeGreaterThan(0);
+    const vs = viz.getViewState();
+    expect(vs.zoom).toBeGreaterThan(0);
+  });
+
+  it('getViewState returns valid initial values', () => {
+    const bus = new MessageBus();
+    const viz = new JuliaVisualizer(bus);
+    const vs = viz.getViewState();
+    expect(vs.seedReal).toBeDefined();
+    expect(vs.seedImaginary).toBeDefined();
+    expect(vs.zoom).toBeGreaterThan(0);
+  });
+
+  it('setViewState updates seed and zoom', () => {
+    const bus = new MessageBus();
+    const viz = new JuliaVisualizer(bus);
+    viz.setViewState({ seedReal: -0.8, seedImaginary: 0.156, zoom: 2.5 });
+    const vs = viz.getViewState();
+    expect(vs.seedReal).toBeCloseTo(-0.8, 1);
+    expect(vs.seedImaginary).toBeCloseTo(0.156, 2);
+    expect(vs.zoom).toBeCloseTo(2.5, 1);
+  });
+
+  it('metadata includes viewStateFields', () => {
+    const bus = new MessageBus();
+    const viz = new JuliaVisualizer(bus);
+    expect(viz.metadata.viewStateFields.length).toBe(3);
+    expect(viz.metadata.viewStateFields.map(f => f.key))
+      .toEqual(['seedReal', 'seedImaginary', 'zoom']);
   });
 });

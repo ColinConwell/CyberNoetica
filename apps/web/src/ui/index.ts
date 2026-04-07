@@ -10,6 +10,7 @@ import { createStartScreen } from './start-screen.js';
 import { createControlBar } from './control-bar.js';
 import { createFadeManager } from './fade-manager.js';
 import { renderVisualPanel } from './panels/visual-panel.js';
+import { listVisualizers } from '@cybernoetica/renderer';
 import { renderSoundPanel } from './panels/sound-panel.js';
 import { renderControlPanel } from './panels/control-panel.js';
 import { getSetting } from '../settings-loader.js';
@@ -33,6 +34,11 @@ export interface UIControls {
   onAutoPlayChange: (handler: (enabled: boolean, shuffle: boolean) => void) => void;
   onSettingsChange: (handler: (settings: AppSettings) => void) => void;
   setAppearanceRenderer: (renderer: ((container: HTMLElement) => void) | null) => void;
+  setViewStateAccessors: (accessors: {
+    getViewState: () => Record<string, number>;
+    setViewState: (partial: Record<string, number>) => void;
+    onResetView: () => void;
+  } | null) => void;
   showError: (message: string) => void;
   setPlaying: (playing: boolean) => void;
   setActiveVisualizer: (type: string) => void;
@@ -66,6 +72,11 @@ export function createUI(): UIControls {
   let autoPlayHandler: ((enabled: boolean, shuffle: boolean) => void) | null = null;
   let settingsChangeHandler: ((s: AppSettings) => void) | null = null;
   let appearanceRenderer: ((container: HTMLElement) => void) | null = null;
+  let viewStateAccessors: {
+    getViewState: () => Record<string, number>;
+    setViewState: (partial: Record<string, number>) => void;
+    onResetView: () => void;
+  } | null = null;
   let debugCleanup: (() => void) | null = null;
 
   // Hidden file input
@@ -157,12 +168,17 @@ export function createUI(): UIControls {
     panel.innerHTML = '';
 
     if (type === 'visual') {
+      const vizMeta = listVisualizers().find(v => v.type === currentVizType);
       renderVisualPanel(panel, {
         currentVizType,
         onRandomViz: randomVizHandler,
         onVizChange: vizChangeHandler,
         onClose: closePanel,
         appearanceRenderer,
+        viewStateFields: vizMeta?.viewStateFields ?? [],
+        getViewState: viewStateAccessors?.getViewState ?? (() => ({})),
+        setViewState: viewStateAccessors?.setViewState ?? (() => {}),
+        onResetView: viewStateAccessors?.onResetView ?? (() => {}),
       });
     } else if (type === 'sound') {
       renderSoundPanel(panel, {
@@ -228,6 +244,7 @@ export function createUI(): UIControls {
     onAutoPlayChange(h) { autoPlayHandler = h; },
     onSettingsChange(h) { settingsChangeHandler = h; },
     setAppearanceRenderer(r) { appearanceRenderer = r; },
+    setViewStateAccessors(a) { viewStateAccessors = a; },
 
     showError(message: string) {
       errorEl.textContent = message;

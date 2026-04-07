@@ -45,15 +45,19 @@ const mandelbrotMetadata: VisualizerMetadata = {
   description: 'Deep zoom into infinite fractal edges',
   usesPerspective: false,
   params: [
-    // Appearance
     { key: 'zoomSpeed', label: 'Zoom Speed', min: 0.0002, max: 0.003, step: 0.0001, initial: 0.0008, category: 'appearance' },
     { key: 'rotationSpeed', label: 'Rotation', min: 0.0, max: 0.015, step: 0.001, initial: 0.003, category: 'appearance' },
-    // Audio mapping strengths
     { key: 'bassToZoom', label: 'Bass \u2192 Zoom', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly bass drives zoom speed' },
     { key: 'rmsToBrightness', label: 'RMS \u2192 Brightness', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly volume affects brightness' },
     { key: 'centroidToWarmth', label: 'Centroid \u2192 Warmth', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly spectral centroid shifts color temperature' },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
+  viewStateFields: [
+    { key: 'centerReal', label: 'Center (Real)', min: -2.5, max: 1.5, step: 0.001 },
+    { key: 'centerImaginary', label: 'Center (Imag)', min: -1.5, max: 1.5, step: 0.001 },
+    { key: 'zoom', label: 'Zoom', min: 0.5, max: 10000, step: 1 },
+    { key: 'rotation', label: 'Rotation', min: 0, max: 6.283, step: 0.01 },
+  ],
 };
 
 export class MandelbrotVisualizer implements Visualizer {
@@ -156,23 +160,26 @@ export class MandelbrotVisualizer implements Visualizer {
       this.smoothers.beatPulse.update(0.0);
     }
 
-    // Zoom cycle: zoom in to maxZoom, then reverse out, switch target, zoom in again
-    const rate = this.zoomSpeed * this.smoothers.zoomRate.value;
-    if (this.zoomDirection === 'in') {
-      this.zoomLevel *= (1.0 + rate);
-      if (this.zoomLevel >= this.maxZoom) {
-        this.zoomDirection = 'out';
-      }
-    } else {
-      this.zoomLevel *= (1.0 - rate * 1.5); // zoom out a bit faster
-      if (this.zoomLevel <= this.minZoom) {
-        // Pick next target and start zooming in again
-        this.zoomDirection = 'in';
-        this.targetIndex = (this.targetIndex + 1) % ZOOM_TARGETS.length;
-        this.target = ZOOM_TARGETS[this.targetIndex];
-        this.cx = this.target.cx;
-        this.cy = this.target.cy;
-        this.zoomLevel = this.minZoom;
+    // Zoom cycle (only when not overridden by user)
+    if (!this.viewOverrides.zoom) {
+      const rate = this.zoomSpeed * this.smoothers.zoomRate.value;
+      if (this.zoomDirection === 'in') {
+        this.zoomLevel *= (1.0 + rate);
+        if (this.zoomLevel >= this.maxZoom) {
+          this.zoomDirection = 'out';
+        }
+      } else {
+        this.zoomLevel *= (1.0 - rate * 1.5);
+        if (this.zoomLevel <= this.minZoom) {
+          this.zoomDirection = 'in';
+          if (!this.viewOverrides.center) {
+            this.targetIndex = (this.targetIndex + 1) % ZOOM_TARGETS.length;
+            this.target = ZOOM_TARGETS[this.targetIndex];
+            this.cx = this.target.cx;
+            this.cy = this.target.cy;
+          }
+          this.zoomLevel = this.minZoom;
+        }
       }
     }
 
@@ -187,11 +194,8 @@ export class MandelbrotVisualizer implements Visualizer {
 
     // Update uniforms
     if (this.material) {
-      this.material.uniforms.u_zoom.value = this.zoomLevel * this.userZoom;
-      this.material.uniforms.u_center.value.set(
-        this.cx + this.userPanX / this.zoomLevel,
-        this.cy + this.userPanY / this.zoomLevel,
-      );
+      this.material.uniforms.u_zoom.value = this.zoomLevel;
+      this.material.uniforms.u_center.value.set(this.cx, this.cy);
       this.material.uniforms.u_rotation.value = this.rotation;
       this.material.uniforms.u_iterations.value = Math.round(Math.min(totalIterations, 1000));
       this.material.uniforms.u_colorSpeed.value = this.smoothers.colorSpeed.value;
@@ -215,17 +219,33 @@ export class MandelbrotVisualizer implements Visualizer {
     };
   }
 
-  private userPanX = 0;
-  private userPanY = 0;
-  private userZoom = 1.0;
+  private viewOverrides: Record<string, boolean> = {};
 
-  setPan(x: number, y: number): void {
-    this.userPanX = x;
-    this.userPanY = y;
+  getViewState(): Record<string, number> {
+    return {
+      centerReal: this.cx,
+      centerImaginary: this.cy,
+      zoom: this.zoomLevel,
+      rotation: this.rotation,
+    };
   }
 
-  setZoom(z: number): void {
-    this.userZoom = z;
+  setViewState(partial: Record<string, number>): void {
+    if ('centerReal' in partial) {
+      this.cx = partial.centerReal;
+      this.viewOverrides.center = true;
+    }
+    if ('centerImaginary' in partial) {
+      this.cy = partial.centerImaginary;
+      this.viewOverrides.center = true;
+    }
+    if ('zoom' in partial) {
+      this.zoomLevel = Math.max(this.minZoom, Math.min(this.maxZoom, partial.zoom));
+      this.viewOverrides.zoom = true;
+    }
+    if ('rotation' in partial) {
+      this.rotation = partial.rotation;
+    }
   }
 
   setResolution(width: number, height: number): void {

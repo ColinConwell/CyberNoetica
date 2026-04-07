@@ -235,7 +235,13 @@ export function renderDebugPanel(container: HTMLElement): () => void {
 
     const s = store.getState();
     const playbackState = debug?.playbackState || '?';
-    vizInfo.textContent = `Type: ${s.visualizer?.type || '\u2014'}\nPlayback: ${playbackState}\nParams: ${JSON.stringify(s.visualizer?.userParams || {}, null, 1)}`;
+    const vizMgr = (window as any).__cybernoetica?.vizManager;
+    const activeViz = vizMgr?.getActive?.();
+    const viewState = activeViz?.getViewState?.() ?? {};
+    const viewStr = Object.entries(viewState).map(([k, v]) =>
+      `${k}:${typeof v === 'number' ? (Math.abs(v) < 0.01 ? v.toExponential(1) : v.toFixed(3)) : v}`
+    ).join(' ');
+    vizInfo.textContent = `Type: ${s.visualizer?.type || '\u2014'}\nPlayback: ${playbackState}\nView: ${viewStr || '\u2014'}\nParams: ${JSON.stringify(s.visualizer?.userParams || {}, null, 1)}`;
     stateBox.textContent = JSON.stringify(s, null, 2);
     busInfo.textContent = `audio:features ${busRate} msg/s`;
   }, 200);

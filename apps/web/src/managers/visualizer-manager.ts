@@ -7,14 +7,21 @@ import {
 } from '@cybernoetica/renderer';
 import type { Visualizer, VisualizerMetadata } from '@cybernoetica/renderer';
 
+const DEFAULT_DRIFT_SPEED = 0.08;
+
 export class VisualizerManager {
   private activeViz: Visualizer | null = null;
   private activeType = '';
+  private driftEnabled = true;
 
   constructor(
     private bus: MessageBus,
     private scene: SceneManager,
-  ) {}
+  ) {
+    scene.onViewportDrag((dx, dy) => this.handleDrag(dx, dy));
+    scene.onViewportZoom((delta) => this.handleZoom(delta));
+    scene.onViewportReset(() => this.handleReset());
+  }
 
   switchTo(type: string): Visualizer | null {
     if (this.activeViz) {
@@ -33,11 +40,8 @@ export class VisualizerManager {
 
     this.scene.activeCamera = this.activeViz.metadata.usesPerspective
       ? this.scene.perspCamera : this.scene.camera;
-    this.scene.resetView();
     this.scene.setViewportCapabilities(this.activeViz.metadata.viewport);
-    // Fractal visualizers have their own auto-zoom; boost pan sensitivity accordingly
-    const hasFractalZoom = type === 'mandelbrot' || type === 'julia';
-    this.scene.setPanSensitivityScale(hasFractalZoom ? 50.0 : 1.0);
+    this.driftEnabled = true;
 
     return this.activeViz;
   }
@@ -60,9 +64,71 @@ export class VisualizerManager {
   }
 
   tick(): void {
-    const [px, py] = this.scene.getPan();
-    this.activeViz?.setPan?.(px, py);
-    this.activeViz?.setZoom?.(this.scene.getUserZoom());
-    this.activeViz?.tick();
+    if (!this.activeViz) return;
+
+    // For perspective visualizers: apply auto-drift and update camera from view state
+    if (this.activeViz.metadata.usesPerspective) {
+      if (this.driftEnabled && !this.scene.isDragging()) {
+        const vs = this.activeViz.getViewState();
+        this.activeViz.setViewState({
+          orbitAngle: (vs.orbitAngle ?? 0) + DEFAULT_DRIFT_SPEED / 60,
+        });
+      }
+      const vs = this.activeViz.getViewState();
+      const dist = vs.distance ?? 12;
+      const angle = vs.orbitAngle ?? 0;
+      const elev = vs.elevation ?? 0;
+      this.scene.setCameraPosition(
+        Math.sin(angle) * dist,
+        elev * dist * 0.3,
+        Math.cos(angle) * dist,
+      );
+    }
+
+    this.activeViz.tick();
+  }
+
+  // ── Viewport interaction translation ────────────────────────────
+
+  private handleDrag(dx: number, dy: number): void {
+    if (!this.activeViz) return;
+    const meta = this.activeViz.metadata;
+    const vs = this.activeViz.getViewState();
+
+    if (meta.viewport.orbit) {
+      this.activeViz.setViewState({
+        orbitAngle: (vs.orbitAngle ?? 0) + dx * 3.0,
+        elevation: Math.max(-1.5, Math.min(1.5, (vs.elevation ?? 0) - dy * 2.0)),
+      });
+    } else if (meta.viewport.pan) {
+      const zoom = vs.zoom ?? 1;
+      const scale = 2.0 / Math.max(zoom, 0.1);
+      if ('centerReal' in vs) {
+        this.activeViz.setViewState({
+          centerReal: vs.centerReal - dx * scale,
+          centerImaginary: vs.centerImaginary + dy * scale,
+        });
+      }
+    }
+  }
+
+  private handleZoom(delta: number): void {
+    if (!this.activeViz) return;
+    const vs = this.activeViz.getViewState();
+
+    if ('distance' in vs) {
+      const newDist = Math.max(4, Math.min(30, vs.distance * (1 - delta)));
+      this.activeViz.setViewState({ distance: newDist });
+    } else if ('zoom' in vs) {
+      const factor = 1 + delta;
+      this.activeViz.setViewState({ zoom: vs.zoom * factor });
+    }
+  }
+
+  private handleReset(): void {
+    // Re-create the visualizer to reset all state
+    if (this.activeType) {
+      this.switchTo(this.activeType);
+    }
   }
 }

@@ -132,6 +132,8 @@ CyberNoetica/
 
 **Visualizer system:** Self-registering visualizers organized in versioned folders. Each family (orbital, mandelbrot, julia, waveform) has a folder with `v{NN}-{greek}.ts` files. Parameters are categorized as `'appearance'` or `'audio-mapping'`. The UI groups controls accordingly.
 
+**View state.** Each visualizer exposes a per-family coordinate system via `getViewState()` / `setViewState()`. The coordinates have intuitive, domain-specific names (e.g., Mandelbrot uses `centerReal`/`centerImaginary`/`zoom`/`rotation`; Orbital uses `orbitAngle`/`elevation`/`distance`). User interactions (drag, scroll, pinch) flow from SceneManager as raw deltas through VisualizerManager, which translates them into the appropriate `setViewState()` calls. The Visual Panel shows live coordinate readouts with editable inputs. Setting a coordinate via `setViewState()` pauses the autonomous animation for that axis.
+
 **Settings override system.** `settings.json` at repo root provides dev-time overrides (app title, UI theme, track display format). The `settings-loader.ts` module loads it via fetch with graceful fallback to defaults.
 
 ## Development
@@ -141,7 +143,7 @@ export PATH="$HOME/.volta/bin:$HOME/.cargo/bin:$PATH"
 
 pnpm install          # Install all workspace dependencies
 pnpm dev              # Start Vite dev server (apps/web, port 5173)
-pnpm test             # Run all Vitest suites (79 tests)
+pnpm test             # Run all Vitest suites (95 tests)
 pnpm build            # Build all packages
 ```
 
@@ -199,6 +201,19 @@ Each `VisualizerParam` has an optional `category` field:
 - `'audio-mapping'` -- controls the strength of audio-to-visual mappings (e.g., bass-to-gravity multiplier)
 
 Audio-mapping params act as multipliers on the existing audio-driven computations in `tick()`. The Visual Panel groups these into "Appearance" and "Audio Response" sections.
+
+### View state
+
+Every visualizer must implement `getViewState()` and `setViewState(partial)` and declare `viewStateFields` in its metadata. View state represents *where* the user is looking, with domain-specific coordinate names:
+
+| Family | Fields | Description |
+|---|---|---|
+| Mandelbrot | `centerReal`, `centerImaginary`, `zoom`, `rotation` | Complex plane coordinates |
+| Julia | `seedReal`, `seedImaginary`, `zoom` | c-parameter and magnification |
+| Orbital | `orbitAngle`, `elevation`, `distance` | Spherical camera coordinates |
+| Waveform | `verticalShift` | Vertical offset of the waveform stack |
+
+When a user sets a view state value, the visualizer should pause its autonomous animation for that axis. The UI's "Reset View" button re-creates the visualizer to restore all defaults.
 
 ### Versioning scheme
 
