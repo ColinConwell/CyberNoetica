@@ -13,13 +13,13 @@ export async function createApp(container: HTMLElement): Promise<void> {
   const bus = new MessageBus();
   const store = createAppStore();
 
-  (window as any).__cybernoetica = { store, bus, scene };
-
   const scene = new SceneManager(
     container.clientWidth || window.innerWidth,
     container.clientHeight || window.innerHeight,
   );
   scene.attach(container);
+
+  (window as any).__cybernoetica = { store, bus, scene };
 
   const audio = new AudioPipeline(bus);
   await audio.init();

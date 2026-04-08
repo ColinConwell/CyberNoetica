@@ -203,11 +203,11 @@ export function createUI(): UIControls {
         onMicClick: micClickHandler,
         onTrackSelect: trackSelectHandler,
         onAutoPlayChange: autoPlayHandler,
-        onToggleTrackList() { trackListExpanded = !trackListExpanded; openPanel('sound'); },
+        onToggleTrackList() { trackListExpanded = !trackListExpanded; activePanel = null; openPanel('sound'); },
         onToggleFolder(folder: string) {
           if (expandedFolders.has(folder)) expandedFolders.delete(folder);
           else expandedFolders.add(folder);
-          openPanel('sound');
+          activePanel = null; openPanel('sound');
         },
         onClose: closePanel,
       });

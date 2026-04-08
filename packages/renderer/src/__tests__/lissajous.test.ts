@@ -99,4 +99,27 @@ describe('LissajousVisualizer', () => {
     expect(keys).toContain('zoom');
     expect(keys).toContain('phase');
   });
+
+  it('getViewState returns centerX and centerY at origin', () => {
+    const bus = new MessageBus();
+    const viz = new LissajousVisualizer(bus);
+    const vs = viz.getViewState();
+    expect(vs.centerX).toBe(0);
+    expect(vs.centerY).toBe(0);
+  });
+
+  it('setViewState updates and clamps center', () => {
+    const bus = new MessageBus();
+    const viz = new LissajousVisualizer(bus);
+    viz.setViewState({ centerX: 1.5, centerY: -0.8 });
+    const vs = viz.getViewState();
+    expect(vs.centerX).toBe(1.5);
+    expect(vs.centerY).toBe(-0.8);
+
+    viz.setViewState({ centerX: 5.0 });
+    expect(viz.getViewState().centerX).toBe(2);
+
+    viz.setViewState({ centerY: -5.0 });
+    expect(viz.getViewState().centerY).toBe(-2);
+  });
 });
