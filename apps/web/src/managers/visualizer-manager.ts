@@ -35,6 +35,13 @@ export class VisualizerManager {
 
     this.activeType = type;
     this.activeViz = entry.create(this.bus);
+
+    // Inject renderer for visualizers that need off-screen rendering (e.g. FBO ping-pong)
+    const renderer = this.scene.getRenderer();
+    if (renderer && 'setRenderer' in this.activeViz && typeof (this.activeViz as any).setRenderer === 'function') {
+      (this.activeViz as any).setRenderer(renderer);
+    }
+
     this.activeViz.attach(this.scene.scene);
     const buf = this.scene.getDrawingBufferSize();
     this.activeViz.setResolution(buf.width, buf.height);
@@ -120,6 +127,11 @@ export class VisualizerManager {
         this.activeViz.setViewState({
           seedReal: vs.seedReal - dx * scale * 0.5,
           seedImaginary: vs.seedImaginary + dy * scale * 0.5,
+        });
+      } else if ('panX' in vs && 'panY' in vs) {
+        this.activeViz.setViewState({
+          panX: vs.panX - dx * scale,
+          panY: vs.panY + dy * scale,
         });
       }
     }
