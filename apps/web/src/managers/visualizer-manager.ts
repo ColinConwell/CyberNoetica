@@ -36,7 +36,8 @@ export class VisualizerManager {
     this.activeType = type;
     this.activeViz = entry.create(this.bus);
     this.activeViz.attach(this.scene.scene);
-    this.activeViz.setResolution(this.scene.width, this.scene.height);
+    const buf = this.scene.getDrawingBufferSize();
+    this.activeViz.setResolution(buf.width, buf.height);
 
     this.scene.activeCamera = this.activeViz.metadata.usesPerspective
       ? this.scene.perspCamera : this.scene.camera;
@@ -59,8 +60,9 @@ export class VisualizerManager {
   getAvailableTypes(): string[] { return getVisualizerTypes(); }
   getMetadataList(): VisualizerMetadata[] { return listVisualizers(); }
 
-  resize(w: number, h: number): void {
-    this.activeViz?.setResolution(w, h);
+  resize(_w: number, _h: number): void {
+    const buf = this.scene.getDrawingBufferSize();
+    this.activeViz?.setResolution(buf.width, buf.height);
   }
 
   tick(): void {

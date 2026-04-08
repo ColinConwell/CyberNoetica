@@ -166,7 +166,7 @@ const PARTICLE_FRAGMENT_SHADER = /* glsl */ `
 
 const orbitalMetadata: VisualizerMetadata = {
   type: 'orbital',
-  label: 'Orbital',
+  label: 'Orbital Alpha',
   description: 'Particle vortex with comet attractors',
   usesPerspective: true,
   params: [

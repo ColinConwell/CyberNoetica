@@ -245,6 +245,10 @@ export class OrbitalGammaVisualizer implements Visualizer {
   private raycaster = new THREE.Raycaster();
   private clickPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
   private boundClickHandler: ((e: MouseEvent) => void) | null = null;
+  private boundContextHandler: ((e: MouseEvent) => void) | null = null;
+  private boundPointerDownHandler: ((e: PointerEvent) => void) | null = null;
+  private pointerDownPos: { x: number; y: number } | null = null;
+  private sculptHint: HTMLElement | null = null;
 
   private _orbitAngle = 0;
   private _elevation = 0;
@@ -300,17 +304,46 @@ export class OrbitalGammaVisualizer implements Visualizer {
     this.particlePoints = new THREE.Points(this.particleGeometry, this.particleMaterial);
     scene.add(this.particlePoints);
 
-    // Attach sculpt click handler to the canvas
+    // Attach sculpt interaction handlers
     const canvas = document.querySelector('canvas');
     if (canvas) {
-      this.boundClickHandler = (e: MouseEvent) => this._handleSculptClick(e, canvas);
+      this.boundPointerDownHandler = (e: PointerEvent) => {
+        this.pointerDownPos = { x: e.clientX, y: e.clientY };
+      };
+      this.boundClickHandler = (e: MouseEvent) => this._handleSculptClick(e, canvas, 'attractor');
+      this.boundContextHandler = (e: MouseEvent) => {
+        e.preventDefault();
+        this._handleSculptClick(e, canvas, 'repulsor');
+      };
+      canvas.addEventListener('pointerdown', this.boundPointerDownHandler);
       canvas.addEventListener('click', this.boundClickHandler);
+      canvas.addEventListener('contextmenu', this.boundContextHandler);
     }
+
+    // Sculpt mode hint overlay
+    this.sculptHint = document.createElement('div');
+    Object.assign(this.sculptHint.style, {
+      position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)',
+      padding: '6px 16px', borderRadius: '20px',
+      background: 'rgba(8, 8, 16, 0.7)', backdropFilter: 'blur(12px)',
+      border: '1px solid rgba(255, 255, 255, 0.1)',
+      color: 'rgba(255, 255, 255, 0.4)', fontFamily: 'system-ui, sans-serif',
+      fontSize: '10px', letterSpacing: '0.08em', pointerEvents: 'none',
+      zIndex: '80', opacity: '0', transition: 'opacity 0.3s ease',
+      whiteSpace: 'nowrap',
+    });
+    this.sculptHint.textContent = 'Click to place attractor \u00B7 Right-click for repulsor';
+    document.body.appendChild(this.sculptHint);
   }
 
   tick(): void {
     const dt = 1 / 60;
     this.time += dt;
+
+    // Update sculpt hint visibility
+    if (this.sculptHint) {
+      this.sculptHint.style.opacity = this.userParams.sculptMode >= 0.5 ? '1' : '0';
+    }
 
     const f = this.latestFeatures ?? IDLE_FEATURES;
     const bass = this.smoothBass.update(f.bass);
@@ -501,17 +534,29 @@ export class OrbitalGammaVisualizer implements Visualizer {
     }
     this.forceFields = [];
     const canvas = document.querySelector('canvas');
-    if (canvas && this.boundClickHandler) {
-      canvas.removeEventListener('click', this.boundClickHandler);
+    if (canvas) {
+      if (this.boundClickHandler) canvas.removeEventListener('click', this.boundClickHandler);
+      if (this.boundContextHandler) canvas.removeEventListener('contextmenu', this.boundContextHandler);
+      if (this.boundPointerDownHandler) canvas.removeEventListener('pointerdown', this.boundPointerDownHandler);
+    }
+    if (this.sculptHint) {
+      this.sculptHint.remove();
+      this.sculptHint = null;
     }
   }
 
   // --- Force field management ---
 
-  private _handleSculptClick(e: MouseEvent, canvas: HTMLCanvasElement): void {
+  private _handleSculptClick(e: MouseEvent, canvas: HTMLCanvasElement, fieldType: 'attractor' | 'repulsor'): void {
     if (this.userParams.sculptMode < 0.5) return;
-    // Ignore if the click target is not the canvas (e.g., UI panels)
     if (e.target !== canvas) return;
+
+    // Suppress placement if the pointer moved (was a drag, not a click)
+    if (this.pointerDownPos) {
+      const dx = e.clientX - this.pointerDownPos.x;
+      const dy = e.clientY - this.pointerDownPos.y;
+      if (dx * dx + dy * dy > 25) return;
+    }
 
     const rect = canvas.getBoundingClientRect();
     const mouse = new THREE.Vector2(
@@ -519,12 +564,10 @@ export class OrbitalGammaVisualizer implements Visualizer {
       -((e.clientY - rect.top) / rect.height) * 2 + 1,
     );
 
-    // Get camera from the global scene manager
     const globals = (window as any).__cybernoetica;
     const perspCamera = globals?.scene?.perspCamera as THREE.PerspectiveCamera | undefined;
     if (!perspCamera) return;
 
-    // Cast ray through the click point, intersect with a plane at z=0 facing camera
     this.raycaster.setFromCamera(mouse, perspCamera);
     const cameraDir = new THREE.Vector3();
     perspCamera.getWorldDirection(cameraDir);
@@ -534,8 +577,7 @@ export class OrbitalGammaVisualizer implements Visualizer {
     const intersection = new THREE.Vector3();
     if (!this.raycaster.ray.intersectPlane(this.clickPlane, intersection)) return;
 
-    const type: 'attractor' | 'repulsor' = e.shiftKey ? 'repulsor' : 'attractor';
-    this._addForceField(intersection, type);
+    this._addForceField(intersection, fieldType);
   }
 
   private _addForceField(position: THREE.Vector3, type: 'attractor' | 'repulsor'): void {

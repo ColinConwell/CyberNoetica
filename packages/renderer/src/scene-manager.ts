@@ -1,6 +1,26 @@
 import * as THREE from 'three';
 import type { ViewportCapabilities } from './visualizers/types.js';
 
+const CURSOR_SVG_IDLE = `url("data:image/svg+xml,${encodeURIComponent(
+  `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'>` +
+  `<line x1='12' y1='3' x2='12' y2='9' stroke='rgba(255,255,255,0.45)' stroke-width='1'/>` +
+  `<line x1='12' y1='15' x2='12' y2='21' stroke='rgba(255,255,255,0.45)' stroke-width='1'/>` +
+  `<line x1='3' y1='12' x2='9' y2='12' stroke='rgba(255,255,255,0.45)' stroke-width='1'/>` +
+  `<line x1='15' y1='12' x2='21' y2='12' stroke='rgba(255,255,255,0.45)' stroke-width='1'/>` +
+  `<circle cx='12' cy='12' r='1' fill='rgba(255,255,255,0.5)'/>` +
+  `</svg>`,
+)}") 12 12, crosshair`;
+
+const CURSOR_SVG_ACTIVE = `url("data:image/svg+xml,${encodeURIComponent(
+  `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'>` +
+  `<line x1='12' y1='3' x2='12' y2='9' stroke='rgba(255,255,255,0.7)' stroke-width='1.5'/>` +
+  `<line x1='12' y1='15' x2='12' y2='21' stroke='rgba(255,255,255,0.7)' stroke-width='1.5'/>` +
+  `<line x1='3' y1='12' x2='9' y2='12' stroke='rgba(255,255,255,0.7)' stroke-width='1.5'/>` +
+  `<line x1='15' y1='12' x2='21' y2='12' stroke='rgba(255,255,255,0.7)' stroke-width='1.5'/>` +
+  `<circle cx='12' cy='12' r='1.5' fill='rgba(255,255,255,0.8)'/>` +
+  `</svg>`,
+)}") 12 12, move`;
+
 export type ViewportDragHandler = (dx: number, dy: number) => void;
 export type ViewportZoomHandler = (delta: number) => void;
 export type ViewportResetHandler = () => void;
@@ -51,7 +71,7 @@ export class SceneManager {
     const updateIdleCursor = () => {
       if (this.dragging) return;
       const canDrag = this.viewportCaps.pan || this.viewportCaps.orbit;
-      canvas.style.cursor = canDrag ? 'grab' : '';
+      canvas.style.cursor = canDrag ? CURSOR_SVG_IDLE : '';
     };
 
     // ── Pointer events (unified mouse + touch) ────────────────────
@@ -61,7 +81,7 @@ export class SceneManager {
       this.dragging = true;
       this.lastPointerX = e.clientX;
       this.lastPointerY = e.clientY;
-      canvas.style.cursor = 'grabbing';
+      canvas.style.cursor = CURSOR_SVG_ACTIVE;
       canvas.setPointerCapture(e.pointerId);
       e.preventDefault();
     };
@@ -132,7 +152,7 @@ export class SceneManager {
     this.viewportCaps = caps;
     const canDrag = caps.pan || caps.orbit;
     if (this.renderer) {
-      this.renderer.domElement.style.cursor = canDrag ? 'grab' : '';
+      this.renderer.domElement.style.cursor = canDrag ? CURSOR_SVG_IDLE : '';
     }
   }
 
@@ -171,6 +191,15 @@ export class SceneManager {
     this.renderer?.setSize(width, height);
     this.perspCamera.aspect = width / height;
     this.perspCamera.updateProjectionMatrix();
+  }
+
+  getPixelRatio(): number {
+    return this.renderer?.getPixelRatio() ?? 1;
+  }
+
+  getDrawingBufferSize(): { width: number; height: number } {
+    const dpr = this.getPixelRatio();
+    return { width: Math.floor(this.width * dpr), height: Math.floor(this.height * dpr) };
   }
 
   getRendererInfo(): THREE.WebGLInfo | null {

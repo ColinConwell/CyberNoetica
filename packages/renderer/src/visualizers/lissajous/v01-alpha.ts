@@ -106,7 +106,7 @@ export class LissajousVisualizer implements Visualizer {
     this.smoothers.rms.reset(0.1);
     this.smoothers.spectralCentroid.reset(0.5);
     this.smoothers.beatPulse.reset(0);
-    this.smoothers.amplitude.reset(0.8);
+    this.smoothers.amplitude.reset(0.45);
   }
 
   attach(scene: THREE.Scene): void {
@@ -121,7 +121,7 @@ export class LissajousVisualizer implements Visualizer {
         u_freqA: { value: 2.0 },
         u_freqB: { value: 3.0 },
         u_phaseDelta: { value: Math.PI / 4 },
-        u_amplitude: { value: 0.8 },
+        u_amplitude: { value: 0.45 },
         u_damping: { value: 0.05 },
         u_dampingEnvelope: { value: 1.0 },
         u_trailLength: { value: 384.0 },
@@ -164,7 +164,7 @@ export class LissajousVisualizer implements Visualizer {
       this.smoothers.spectralCentroid.update(f.spectralCentroid);
       this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
 
-      const amp = 0.6 + f.bass * 0.5 * this.userParams.bassToAmplitude;
+      const amp = 0.35 + f.bass * 0.3 * this.userParams.bassToAmplitude;
       this.smoothers.amplitude.update(amp);
 
       // Beat resets the damping envelope (fresh bloom)
@@ -173,7 +173,7 @@ export class LissajousVisualizer implements Visualizer {
       }
     } else {
       this.smoothers.beatPulse.update(0.0);
-      this.smoothers.amplitude.update(0.8);
+      this.smoothers.amplitude.update(0.45);
     }
 
     // Get frequency ratios from preset
@@ -313,33 +313,40 @@ const FRAGMENT_SHADER = /* glsl */ `
     return vec2(x, y) * u_amplitude;
   }
 
+  // Distance from point p to the line segment a--b
+  float segDist(vec2 p, vec2 a, vec2 b) {
+    vec2 ab = b - a;
+    float t = clamp(dot(p - a, ab) / dot(ab, ab), 0.0, 1.0);
+    return length(p - (a + t * ab));
+  }
+
   void main() {
     vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution) / min(u_resolution.x, u_resolution.y);
     uv = uv / u_zoom + u_center;
 
-    // Minimum distance from pixel to the parametric curve
     float minDist = 100.0;
     float closestT = 0.0;
     int numSamples = int(u_trailLength);
 
-    // Evaluate curve at many points, find nearest
-    float tStep = 40.0 / u_trailLength;
-    for (int i = 0; i < 512; i++) {
+    // Compute distance to the parametric curve using line segments
+    float tStep = 16.0 / u_trailLength;
+    vec2 prev = harmonograph(0.0, u_time);
+    for (int i = 1; i < 512; i++) {
       if (i >= numSamples) break;
       float t = float(i) * tStep;
-      vec2 p = harmonograph(t, u_time);
-      float d = length(uv - p);
+      vec2 cur = harmonograph(t, u_time);
+      float d = segDist(uv, prev, cur);
       if (d < minDist) {
         minDist = d;
-        closestT = t;
+        closestT = t - tStep * 0.5;
       }
+      prev = cur;
     }
 
-    // Glow falloff — wider radius so sample points merge into a continuous curve
-    float glowRadius = u_glowWidth * 0.025;
+    float glowRadius = u_glowWidth * 0.005;
     float core = exp(-minDist * minDist / (glowRadius * glowRadius));
-    float soft = exp(-minDist * minDist / (glowRadius * glowRadius * 12.0));
-    float glow = core * 0.85 + soft * 0.2;
+    float soft = exp(-minDist * minDist / (glowRadius * glowRadius * 6.0));
+    float glow = core * 0.9 + soft * 0.15;
 
     // Audio-driven brightness (strong idle base so curve is always visible)
     float brightness = 0.9 + u_rms * 0.6 * u_rmsToGlow;
@@ -347,8 +354,8 @@ const FRAGMENT_SHADER = /* glsl */ `
     glow += u_beatPulse * core * 0.3;
 
     // Color: hue shifts along the curve parameter
-    float hue = fract(closestT * 0.03 + u_time * 0.05 + u_spectralCentroid * 0.2);
-    float sat = 0.6 + 0.3 * (1.0 - closestT / 40.0);
+    float hue = fract(closestT * 0.06 + u_time * 0.05 + u_spectralCentroid * 0.2);
+    float sat = 0.6 + 0.3 * (1.0 - closestT / 16.0);
     float val = glow;
 
     vec3 color = hsv2rgb(vec3(hue, sat, 1.0)) * val;
