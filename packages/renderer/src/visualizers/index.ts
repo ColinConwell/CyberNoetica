@@ -6,6 +6,9 @@ import './mandelbrot/index.js';
 import './voronoi/index.js';
 import './lissajous/index.js';
 import './kaleidoscope/index.js';
+import './reaction/index.js';
+import './attractor/index.js';
+import './hyperbolic/index.js';
 
 // Registry API
 export { registerVisualizer, getVisualizerEntry, listVisualizers, getVisualizerTypes } from './registry.js';
@@ -23,3 +26,6 @@ export { JuliaVisualizer } from './julia/index.js';
 export { VoronoiVisualizer } from './voronoi/index.js';
 export { LissajousVisualizer } from './lissajous/index.js';
 export { KaleidoscopeVisualizer } from './kaleidoscope/index.js';
+export { ReactionDiffusionVisualizer } from './reaction/index.js';
+export { AttractorVisualizer } from './attractor/index.js';
+export { HyperbolicVisualizer } from './hyperbolic/index.js';
