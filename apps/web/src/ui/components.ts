@@ -1,4 +1,4 @@
-import { FONT, GLASS_BORDER, TEXT_PRIMARY, TEXT_DIM, TRANSITION, ACCENT } from './styles.js';
+import { FONT, GLASS_BORDER, TEXT_PRIMARY, TEXT_DIM, ACCENT } from './styles.js';
 
 // ---------------------------------------------------------------------------
 // Core Element Helper
@@ -265,6 +265,45 @@ export function sectionLabelWithToggle(
   }
 
   row.append(lbl, toggleGroup);
+  return row;
+}
+
+// ---------------------------------------------------------------------------
+// Param Slider Row
+// ---------------------------------------------------------------------------
+
+export interface ParamSliderOpts {
+  key: string;
+  label: string;
+  description?: string;
+  min: number;
+  max: number;
+  step: number;
+  initial: number;
+  onChange: (key: string, value: number) => void;
+}
+
+export function paramSlider(opts: ParamSliderOpts): HTMLElement {
+  const row = el('div', {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: '10px', fontSize: '12px', color: 'rgba(255,255,255,0.5)',
+  });
+  const label = el('span', {});
+  label.textContent = opts.label;
+  if (opts.description) label.title = opts.description;
+  const right = el('div', { display: 'flex', alignItems: 'center', gap: '8px' });
+  const slider = el('input', { width: '90px', accentColor: ACCENT },
+    { type: 'range', min: String(opts.min), max: String(opts.max),
+      step: String(opts.step), value: String(opts.initial) });
+  const num = el('span', { fontSize: '10px', color: TEXT_DIM, minWidth: '36px', textAlign: 'right' });
+  num.textContent = String(opts.initial);
+  slider.addEventListener('input', () => {
+    const val = Number((slider as HTMLInputElement).value);
+    num.textContent = val < 0.01 ? val.toExponential(1) : String(Math.round(val * 1000) / 1000);
+    opts.onChange(opts.key, val);
+  });
+  right.append(slider, num);
+  row.append(label, right);
   return row;
 }
 

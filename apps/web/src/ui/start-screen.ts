@@ -1,4 +1,5 @@
 import { el, glassButton } from './components.js';
+import { Z_INDEX, TIMING } from './constants.js';
 
 export interface StartScreen {
   element: HTMLElement;
@@ -15,8 +16,8 @@ export function createStartScreen(): StartScreen {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: '200',
-    transition: 'opacity 0.6s ease',
+    zIndex: String(Z_INDEX.startScreen),
+    transition: `opacity ${TIMING.startScreenFade}`,
   });
 
   const btn = glassButton('Start', { large: true, accent: true });

@@ -1,7 +1,7 @@
 import { el, sectionLabel, glassButton, infoBlock, updateInfoBlock, sectionLabelWithToggle } from '../components.js';
 import type { InfoBlockField } from '../components.js';
 import { ACCENT, FONT, GLASS_BORDER, TEXT_DIM, TEXT_PRIMARY, TEXT_SECONDARY } from '../styles.js';
-import type { MessageBus, AudioFeatures, BusMessage, Store } from '@cybernoetica/core';
+import type { AudioFeatures, BusMessage } from '@cybernoetica/core';
 import {
   createLogDisplay,
   type LogLevel,
@@ -9,19 +9,7 @@ import {
   type LogDisplay,
   type LogStyle,
 } from '../log-display.js';
-
-interface CyberNoeticaGlobals {
-  store: Store<any>;
-  bus: MessageBus;
-}
-
-function getGlobals(): CyberNoeticaGlobals | null {
-  return (window as any).__cybernoetica ?? null;
-}
-
-function getDebugInfo(): { fps: number; frameTime: number; vizType: string; playbackState?: string } | null {
-  return (window as any).__cybernoetica_debug ?? null;
-}
+import { getGlobals, getDebugInfo } from '../../globals.js';
 
 export function renderDebugPanel(container: HTMLElement): () => void {
   const globals = getGlobals();
@@ -414,7 +402,7 @@ export function renderDebugPanel(container: HTMLElement): () => void {
 
     const s = store.getState();
     const playbackState = debug?.playbackState || '?';
-    const vizMgr = (window as any).__cybernoetica?.vizManager;
+    const vizMgr = window.__cybernoetica?.vizManager;
     const activeViz = vizMgr?.getActive?.();
     const viewState = activeViz?.getViewState?.() ?? {};
     const viewStr = Object.entries(viewState).map(([k, v]) =>
@@ -442,7 +430,7 @@ export function renderDebugPanel(container: HTMLElement): () => void {
 
 export function isDebugEnabled(): boolean {
   if (typeof import.meta !== 'undefined' && (import.meta as any).env?.DEV) return true;
-  if ((window as any).__cybernoetica_debug_enabled) return true;
+  if (window.__cybernoetica_debug_enabled) return true;
   try {
     return new URLSearchParams(window.location.search).has('debug');
   } catch { return false; }

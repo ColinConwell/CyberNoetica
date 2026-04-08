@@ -66,7 +66,7 @@ wasm:
 
 # ─── Test ─────────────────────────────────────────────────────────────
 
-# Run all tests (95 Vitest + Rust)
+# Run all Vitest tests (58 tests across 4 packages; use test-rust for Rust)
 test:
     pnpm test
 
@@ -184,6 +184,16 @@ railway-domains:
 # Check Railway custom domain status
 railway-domain-status domain="app.imbasso.com":
     ./scripts/manage-dns.sh railway-status "{{domain}}"
+
+# Type-check without emitting (catches errors Vite misses)
+typecheck:
+    pnpm typecheck
+
+# ─── Auditing ─────────────────────────────────────────────────────────
+
+# Audit CSS transitions and animations for consistency
+audit-animations:
+    npx tsx scripts/audit-ui-animations.ts
 
 # ─── Clean ────────────────────────────────────────────────────────────
 

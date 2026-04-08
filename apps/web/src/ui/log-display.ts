@@ -1,5 +1,6 @@
 import { el } from './components.js';
 import { FONT, GLASS_BG, GLASS_BORDER, TEXT_DIM, TEXT_PRIMARY, TEXT_SECONDARY, ACCENT } from './styles.js';
+import { Z_INDEX, DIMENSIONS, SPACING, POSITIONS, TIMING } from './constants.js';
 
 // ---------------------------------------------------------------------------
 // Log Types
@@ -174,11 +175,11 @@ function matches(entry: LogEntry, filter: LogLevel | 'all'): boolean {
 
 function createFloatingDisplay(filter: LogLevel | 'all', style: LogStyle): { element: HTMLElement; cleanup: () => void } {
   const container = el('div', {
-    position: 'fixed', top: '60px', right: '20px',
-    width: '460px', maxHeight: '50vh',
+    position: 'fixed', top: `${POSITIONS.floatLogTop}px`, right: `${POSITIONS.floatLogRight}px`,
+    width: `${DIMENSIONS.floatLogWidth}px`, maxHeight: DIMENSIONS.floatLogMaxHeight,
     background: GLASS_BG, backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
     border: `1px solid ${GLASS_BORDER}`, borderRadius: '12px',
-    zIndex: '200', overflow: 'hidden',
+    zIndex: String(Z_INDEX.logFloat), overflow: 'hidden',
     fontFamily: 'monospace', fontSize: '11px',
   });
 
@@ -246,21 +247,20 @@ function createFloatingDisplay(filter: LogLevel | 'all', style: LogStyle): { ele
 // ---------------------------------------------------------------------------
 
 function createFixedDisplay(filter: LogLevel | 'all', style: LogStyle): { element: HTMLElement; cleanup: () => void } {
-  const FIXED_LOG_HEIGHT = 160;
-
   const container = el('div', {
     position: 'fixed', bottom: '0', left: '50%',
     transform: 'translateX(-50%)',
-    width: '440px', maxWidth: '90vw', height: `${FIXED_LOG_HEIGHT}px`,
+    width: `${DIMENSIONS.fixedLogWidth}px`, maxWidth: '90vw',
+    height: `${DIMENSIONS.fixedLogHeight}px`,
     background: GLASS_BG, backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
     border: `1px solid ${GLASS_BORDER}`, borderRadius: '12px 12px 0 0',
-    zIndex: '88', overflow: 'hidden',
+    zIndex: String(Z_INDEX.logFixed), overflow: 'hidden',
     fontFamily: 'monospace', fontSize: '11px',
     transition: 'opacity 0.3s ease',
     display: 'flex', flexDirection: 'column',
   });
   container.setAttribute('data-log-fixed', 'true');
-  container.setAttribute('data-log-fixed-height', String(FIXED_LOG_HEIGHT));
+  container.setAttribute('data-log-fixed-height', String(DIMENSIONS.fixedLogHeight));
 
   const headerRow = el('div', {
     padding: '5px 12px', display: 'flex', justifyContent: 'space-between',
@@ -304,10 +304,10 @@ function createFixedDisplay(filter: LogLevel | 'all', style: LogStyle): { elemen
 function createStreamDisplay(filter: LogLevel | 'all', style: LogStyle): { element: HTMLElement; cleanup: () => void } {
   const container = el('div', {
     position: 'fixed', bottom: '100px', left: '50%', transform: 'translateX(-50%)',
-    width: '500px', maxWidth: '80vw',
-    pointerEvents: 'none', zIndex: '85',
-    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px',
-    transition: 'bottom 0.3s ease',
+    width: `${DIMENSIONS.streamLogWidth}px`, maxWidth: '80vw',
+    pointerEvents: 'none', zIndex: String(Z_INDEX.logStream),
+    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: `${SPACING.smallGap}px`,
+    transition: `bottom ${TIMING.bottomSlide}`,
   });
   container.setAttribute('data-log-stream', 'true');
   document.body.appendChild(container);
@@ -355,14 +355,14 @@ function createStreamDisplay(filter: LogLevel | 'all', style: LogStyle): { eleme
       line.textContent = entry.message;
     }
     container.appendChild(line);
-    setTimeout(() => { line.remove(); }, 4200);
-    while (container.children.length > 6) container.removeChild(container.firstChild!);
+    setTimeout(() => { line.remove(); }, TIMING.streamRemoveMs);
+    while (container.children.length > TIMING.streamMaxLines) container.removeChild(container.firstChild!);
   }
 
   // Replay recent buffer entries with staggered animation
-  const recent = logBuffer.filter(en => matches(en, filter)).slice(-3);
+  const recent = logBuffer.filter(en => matches(en, filter)).slice(-TIMING.streamReplayCount);
   recent.forEach((entry, i) => {
-    setTimeout(() => addStreamLine(entry), i * 200);
+    setTimeout(() => addStreamLine(entry), i * TIMING.streamReplayStaggerMs);
   });
 
   const unsub = onLog((entry) => {

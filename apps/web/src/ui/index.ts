@@ -17,6 +17,7 @@ import { getSetting } from '../settings-loader.js';
 import { groupTracksByFolder } from '../utils/track-display.js';
 import { installLogInterceptor, createLogDisplay, type LogDisplay, type LogDisplayMode } from './log-display.js';
 import { createKeyboardOverlay, getBaseShortcuts, getVisualizerShortcuts, type KeyboardOverlayAPI } from './keyboard-overlay.js';
+import { Z_INDEX, DIMENSIONS, SPACING, POSITIONS, TIMING, STACK } from './constants.js';
 
 export type VisualizerType = string;
 
@@ -107,11 +108,11 @@ export function createUI(): UIControls {
   // Title
   const appTitle = getSetting('app_title', 'Cybernoetica');
   const title = el('div', {
-    position: 'fixed', top: '24px', left: '50%', transform: 'translateX(-50%)',
+    position: 'fixed', top: `${POSITIONS.titleTop}px`, left: '50%', transform: 'translateX(-50%)',
     color: TEXT_SECONDARY, fontFamily: FONT, fontSize: '17px', fontWeight: '300',
     letterSpacing: '0.3em', textTransform: 'uppercase',
-    pointerEvents: 'none', userSelect: 'none', zIndex: '100',
-    transition: 'opacity 0.5s ease',
+    pointerEvents: 'none', userSelect: 'none', zIndex: String(Z_INDEX.title),
+    transition: `opacity ${TIMING.opacitySlow}`,
   });
   title.textContent = appTitle;
   document.title = appTitle;
@@ -119,11 +120,11 @@ export function createUI(): UIControls {
 
   // Interactivity hint (below title)
   const interactivityHint = el('div', {
-    position: 'fixed', top: '52px', left: '50%', transform: 'translateX(-50%)',
+    position: 'fixed', top: `${POSITIONS.interactivityHintTop}px`, left: '50%', transform: 'translateX(-50%)',
     color: TEXT_SECONDARY, fontFamily: FONT, fontSize: '11px', fontWeight: '300',
     letterSpacing: '0.1em',
-    pointerEvents: 'none', userSelect: 'none', zIndex: '100',
-    transition: 'opacity 0.6s ease',
+    pointerEvents: 'none', userSelect: 'none', zIndex: String(Z_INDEX.interactivityHint),
+    transition: `opacity ${TIMING.hintFade}`,
     opacity: '0',
   });
   document.body.appendChild(interactivityHint);
@@ -140,7 +141,7 @@ export function createUI(): UIControls {
     if (interactivityHintTimer) clearTimeout(interactivityHintTimer);
     interactivityHintTimer = setTimeout(() => {
       interactivityHint.style.opacity = '0';
-    }, 4000);
+    }, TIMING.hintShowMs);
   }
 
   document.addEventListener('mousemove', () => {
@@ -149,7 +150,7 @@ export function createUI(): UIControls {
       if (interactivityHintTimer) clearTimeout(interactivityHintTimer);
       interactivityHintTimer = setTimeout(() => {
         interactivityHint.style.opacity = '0';
-      }, 3000);
+      }, TIMING.hintMouseMs);
     }
   });
 
@@ -161,28 +162,29 @@ export function createUI(): UIControls {
 
   // Panel container
   const panelBackdrop = el('div', {
-    position: 'fixed', inset: '0', zIndex: '90', display: 'none',
+    position: 'fixed', inset: '0', zIndex: String(Z_INDEX.panelBackdrop), display: 'none',
   });
   document.body.appendChild(panelBackdrop);
 
   const panel = el('div', {
     position: 'fixed', bottom: '100px', left: '50%',
     transform: 'translateX(-50%) translateY(20px)',
-    minWidth: '320px', maxWidth: '440px', maxHeight: '55vh', overflowY: 'auto',
-    padding: '20px 24px',
+    minWidth: `${DIMENSIONS.panelMinWidth}px`, maxWidth: `${DIMENSIONS.panelMaxWidth}px`,
+    maxHeight: DIMENSIONS.panelMaxHeight, overflowY: 'auto',
+    padding: `${DIMENSIONS.panelPadding}px ${DIMENSIONS.panelPadding + 4}px`,
     background: GLASS_BG, backdropFilter: GLASS_BLUR, WebkitBackdropFilter: GLASS_BLUR,
-    border: `1px solid ${GLASS_BORDER}`, borderRadius: '20px',
-    zIndex: '95', display: 'none', opacity: '0',
-    transition: 'opacity 0.3s ease, transform 0.3s ease, bottom 0.3s ease',
+    border: `1px solid ${GLASS_BORDER}`, borderRadius: `${SPACING.panelBorderRadius}px`,
+    zIndex: String(Z_INDEX.panel), display: 'none', opacity: '0',
+    transition: `opacity ${TIMING.panelTransition}, transform ${TIMING.panelTransition}, bottom ${TIMING.bottomSlide}`,
     fontFamily: FONT, color: TEXT_PRIMARY,
   });
   document.body.appendChild(panel);
 
   // ── Vertical Layout Coordinator ─────────────────────────────────
   // Stacks bottom-up: fixed log -> keyboard overlay -> control bar -> panel/stream
-  const LAYOUT_GAP = 6;
-  const KEYBOARD_BAR_HEIGHT = 30;
-  const CONTROL_BAR_HEIGHT = 54;
+  const LAYOUT_GAP = SPACING.layoutGap;
+  const KEYBOARD_BAR_HEIGHT = STACK.keyboardBarMinHeight;
+  const CONTROL_BAR_HEIGHT = STACK.controlBarMinHeight;
 
   let fixedLogHeight = 0;
   let keyOverlay: KeyboardOverlayAPI | null = null;
@@ -212,11 +214,12 @@ export function createUI(): UIControls {
 
   // Error display
   const errorEl = el('div', {
-    position: 'fixed', top: '60px', left: '50%', transform: 'translateX(-50%)',
+    position: 'fixed', top: `${POSITIONS.errorTop}px`, left: '50%', transform: 'translateX(-50%)',
     padding: '10px 20px', background: 'rgba(220, 50, 50, 0.85)',
     backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
     color: 'white', fontFamily: FONT, fontSize: '13px', borderRadius: '10px',
-    display: 'none', zIndex: '300', maxWidth: '400px', textAlign: 'center',
+    display: 'none', zIndex: String(Z_INDEX.errorToast), maxWidth: `${DIMENSIONS.errorMaxWidth}px`,
+    textAlign: 'center',
   });
   document.body.appendChild(errorEl);
   let errorTimer: ReturnType<typeof setTimeout> | null = null;
@@ -225,7 +228,6 @@ export function createUI(): UIControls {
   const fade = createFadeManager({
     controlBar: cbar.bar,
     panel,
-    title,
     getActivePanel: () => activePanel,
     getIsPlaying: () => isPlaying,
     getFadeDelay: () => settings.menuFadeDelay,

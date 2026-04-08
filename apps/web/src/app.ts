@@ -2,12 +2,15 @@ import { MessageBus } from '@cybernoetica/core';
 import { SceneManager, getVisualizerTypes } from '@cybernoetica/renderer';
 import { createUI } from './ui/index.js';
 import type { VisualizerType } from './ui/index.js';
+import { paramSlider } from './ui/components.js';
 import { AudioPipeline } from './managers/audio-pipeline.js';
 import { TrackManager } from './managers/track-manager.js';
 import { VisualizerManager } from './managers/visualizer-manager.js';
 import { PlaybackStateMachine } from './managers/playback-state.js';
 import { createAppStore } from './store.js';
 import { resolveLaunchConfig, resolveAudioTarget } from './utils/launch-params.js';
+import type { CyberNoeticaGlobals } from './globals.js';
+import './globals.js';
 
 export async function createApp(container: HTMLElement): Promise<void> {
   const bus = new MessageBus();
@@ -19,7 +22,7 @@ export async function createApp(container: HTMLElement): Promise<void> {
   );
   scene.attach(container);
 
-  (window as any).__cybernoetica = { store, bus, scene };
+  window.__cybernoetica = { store, bus, scene, powerSaver: false, setPowerSaver: () => {} } as CyberNoeticaGlobals;
 
   const audio = new AudioPipeline(bus);
   await audio.init();
@@ -30,8 +33,8 @@ export async function createApp(container: HTMLElement): Promise<void> {
   const sampleTracks = await trackManager.fetchSampleTracks();
   const playback = new PlaybackStateMachine(bus);
 
-  (window as any).__cybernoetica.playback = playback;
-  (window as any).__cybernoetica.vizManager = vizManager;
+  window.__cybernoetica!.playback = playback;
+  window.__cybernoetica!.vizManager = vizManager;
 
   const saved = store.getState();
   if (saved.ui.autoPlay !== undefined || saved.ui.shuffle !== undefined) {
@@ -80,38 +83,15 @@ export async function createApp(container: HTMLElement): Promise<void> {
     }
   }
 
-  function renderParamSlider(
+  function renderParamSliderRow(
     ctr: HTMLElement,
-    param: typeof viz extends null ? never : NonNullable<ReturnType<typeof vizManager.getActive>>['metadata']['params'][0],
-    viz: NonNullable<ReturnType<typeof vizManager.getActive>>,
+    param: { key: string; label: string; description?: string; min: number; max: number; step: number; initial: number },
+    viz: { setUserParam(key: string, value: number): void },
   ) {
-    const row = document.createElement('div');
-    Object.assign(row.style, {
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      marginBottom: '10px', fontSize: '12px', color: 'rgba(255,255,255,0.5)',
-    });
-    const label = document.createElement('span');
-    label.textContent = param.label;
-    if (param.description) label.title = param.description;
-    const right = document.createElement('div');
-    Object.assign(right.style, { display: 'flex', alignItems: 'center', gap: '8px' });
-    const slider = document.createElement('input');
-    Object.assign(slider, {
-      type: 'range', min: String(param.min), max: String(param.max),
-      step: String(param.step), value: String(param.initial),
-    });
-    Object.assign(slider.style, { width: '90px', accentColor: 'rgba(140, 160, 255, 0.6)' });
-    const num = document.createElement('span');
-    Object.assign(num.style, { fontSize: '10px', color: 'rgba(255,255,255,0.3)', minWidth: '36px', textAlign: 'right' });
-    num.textContent = String(param.initial);
-    slider.addEventListener('input', () => {
-      const val = Number(slider.value);
-      num.textContent = val < 0.01 ? val.toExponential(1) : String(Math.round(val * 1000) / 1000);
-      viz.setUserParam(param.key, val);
-    });
-    right.append(slider, num);
-    row.append(label, right);
-    ctr.appendChild(row);
+    ctr.appendChild(paramSlider({
+      ...param,
+      onChange: (key, val) => viz.setUserParam(key, val),
+    }));
   }
 
   function updateAppearanceControls() {
@@ -142,7 +122,7 @@ export async function createApp(container: HTMLElement): Promise<void> {
 
     ui.setAppearanceRenderer((ctr: HTMLElement) => {
       for (const param of appearanceParams) {
-        renderParamSlider(ctr, param, viz);
+        renderParamSliderRow(ctr, param, viz);
       }
 
       if (audioParams.length > 0) {
@@ -161,7 +141,7 @@ export async function createApp(container: HTMLElement): Promise<void> {
         ctr.appendChild(sectionEl);
 
         for (const param of audioParams) {
-          renderParamSlider(ctr, param, viz);
+          renderParamSliderRow(ctr, param, viz);
         }
       }
     });
@@ -174,7 +154,7 @@ export async function createApp(container: HTMLElement): Promise<void> {
   const launchConfig = resolveLaunchConfig();
 
   if (launchConfig.debug) {
-    (window as any).__cybernoetica_debug_enabled = true;
+    window.__cybernoetica_debug_enabled = true;
   }
 
   if (launchConfig.showLog) {
@@ -404,13 +384,13 @@ export async function createApp(container: HTMLElement): Promise<void> {
   let fpsTimer = performance.now();
   let skipFrame = false;
 
-  (window as any).__cybernoetica.powerSaver = false;
-  (window as any).__cybernoetica.setPowerSaver = (enabled: boolean) => {
-    (window as any).__cybernoetica.powerSaver = enabled;
+  window.__cybernoetica!.powerSaver = false;
+  window.__cybernoetica!.setPowerSaver = (enabled: boolean) => {
+    window.__cybernoetica!.powerSaver = enabled;
   };
 
   scene.onRender(() => {
-    const powerSaver = (window as any).__cybernoetica.powerSaver;
+    const powerSaver = window.__cybernoetica?.powerSaver;
     if (powerSaver) {
       skipFrame = !skipFrame;
       if (skipFrame) return;
@@ -436,7 +416,7 @@ export async function createApp(container: HTMLElement): Promise<void> {
     vizManager.tick();
 
     if (frameCount % 6 === 0) {
-      (window as any).__cybernoetica_debug = {
+      window.__cybernoetica_debug = {
         fps, frameTime: Math.round(frameTime * 10) / 10,
         vizType: vizManager.getActiveType(),
         playbackState: playback.state,

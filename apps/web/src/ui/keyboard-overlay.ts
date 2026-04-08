@@ -1,5 +1,6 @@
 import { el } from './components.js';
 import { FONT, GLASS_BORDER, TEXT_DIM, TEXT_PRIMARY, TEXT_SECONDARY } from './styles.js';
+import { Z_INDEX, SPACING, TIMING } from './constants.js';
 
 export interface KeyboardShortcut {
   key: string;
@@ -51,14 +52,14 @@ export function createKeyboardOverlay(): KeyboardOverlayAPI {
     left: '50%',
     transform: 'translateX(-50%)',
     display: 'flex',
-    gap: '6px',
+    gap: `${SPACING.layoutGap}px`,
     alignItems: 'center',
     justifyContent: 'center',
     flexWrap: 'wrap',
     padding: '4px 10px',
-    zIndex: '80',
+    zIndex: String(Z_INDEX.keyboardOverlay),
     pointerEvents: 'auto',
-    transition: 'opacity 0.3s ease, bottom 0.3s ease',
+    transition: `opacity ${TIMING.opacityMedium}, bottom ${TIMING.bottomSlide}`,
     opacity: '0.6',
     maxWidth: '90vw',
   });

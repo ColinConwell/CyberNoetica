@@ -1,7 +1,8 @@
 import { el, sectionLabel, sectionDivider, toggleSwitch } from '../components.js';
-import { ACCENT, GLASS_BG, GLASS_BORDER, FONT, TEXT_DIM, TEXT_PRIMARY, TEXT_SECONDARY } from '../styles.js';
+import { ACCENT, GLASS_BORDER, FONT, TEXT_DIM, TEXT_PRIMARY, TEXT_SECONDARY, glassBackground } from '../styles.js';
 import type { AppSettings } from '../styles.js';
 import { isDebugEnabled, renderDebugPanel } from './debug-panel.js';
+import '../../globals.js';
 
 export interface ControlPanelOpts {
   settings: AppSettings;
@@ -78,7 +79,7 @@ export function renderControlPanel(panel: HTMLElement, opts: ControlPanelOpts): 
   opacSlider.addEventListener('input', () => {
     opts.settings.menuOpacity = Number((opacSlider as HTMLInputElement).value) / 100;
     opacNum.textContent = `${Math.round(opts.settings.menuOpacity * 100)}%`;
-    opts.controlBar.style.background = GLASS_BG.replace('0.88', String(opts.settings.menuOpacity * 0.88 / 0.95));
+    opts.controlBar.style.background = glassBackground(opts.settings.menuOpacity * 0.88 / 0.95);
     if (opts.onSettingsChange) opts.onSettingsChange(opts.settings);
   });
   opacValue.append(opacSlider, opacNum);
@@ -105,8 +106,8 @@ export function renderControlPanel(panel: HTMLElement, opts: ControlPanelOpts): 
 }
 
 function renderEnergySection(container: HTMLElement): () => void {
-  const globals = (window as any).__cybernoetica;
-  const debugInfo = () => (window as any).__cybernoetica_debug ?? null;
+  const globals = window.__cybernoetica;
+  const debugInfo = () => window.__cybernoetica_debug ?? null;
 
   function makeStatRow(label: string) {
     const row = el('div', {

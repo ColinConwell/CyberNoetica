@@ -9,7 +9,8 @@
     "build:server": "pnpm exec esbuild server.ts --bundle --platform=node --format=esm --outfile=server.mjs --packages=external",
     "preview": "vite preview",
     "serve": "node server.mjs",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@cybernoetica/audio": "workspace:*",

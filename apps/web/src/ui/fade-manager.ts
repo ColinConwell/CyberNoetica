@@ -1,7 +1,6 @@
 export interface FadeManagerOpts {
   controlBar: HTMLElement;
   panel: HTMLElement;
-  title: HTMLElement;
   getActivePanel: () => string | null;
   getIsPlaying: () => boolean;
   getFadeDelay: () => number;

@@ -20,6 +20,7 @@ CyberNoetica/
 │           ├── app.ts                    # Coordinator: wires bus, store, managers, UI
 │           ├── store.ts                  # AppState + createAppStore()
 │           ├── settings-loader.ts        # Dev settings from settings.json overrides
+│           ├── globals.ts                # Typed window.__cybernoetica interfaces
 │           ├── managers/
 │           │   ├── audio-pipeline.ts     # WASM/JS audio analysis, feature push
 │           │   ├── track-manager.ts      # Track loading (generation counter), auto-play
@@ -30,8 +31,9 @@ CyberNoetica/
 │           │   └── launch-params.ts      # URL param + settings.json launch config
 │           ├── ui/
 │           │   ├── index.ts              # createUI() compositor, UIControls
+│           │   ├── constants.ts          # Z-index, spacing, timing, dimensions
 │           │   ├── styles.ts             # Theme system, glass-morphism constants
-│           │   ├── components.ts         # el(), glassButton(), toggleSwitch(), etc.
+│           │   ├── components.ts         # el(), glassButton(), toggleSwitch(), paramSlider(), etc.
 │           │   ├── start-screen.ts       # Start overlay with pulsing button
 │           │   ├── control-bar.ts        # 4-button bar (Pause/Visual/Sound/Control)
 │           │   ├── fade-manager.ts       # Auto-fade timer, mouse/key re-show
@@ -90,11 +92,10 @@ CyberNoetica/
 │   │               ├── v01-alpha.ts      # Psychedelic mandala symmetry
 │   │               └── index.ts
 │   └── audio/                            # @cybernoetica/audio
-│       ├── src/
-│       │   ├── index.ts
-│       │   ├── audio-source.ts           # Web Audio: file, mic, system (with cleanup)
-│       │   └── audio-processor.ts        # Publishes AudioFeatures to bus
-│       └── wasm/
+│       └── src/
+│           ├── index.ts
+│           ├── audio-source.ts           # Web Audio: file, mic, system (with cleanup)
+│           └── audio-processor.ts        # Publishes AudioFeatures to bus
 ├── crates/
 │   └── audio-analysis/                   # Rust -> WASM via wasm-pack
 ├── scripts/
@@ -154,6 +155,10 @@ CyberNoetica/
 
 **Energy monitoring.** The Control panel includes a Performance section (always visible, not just debug) showing FPS with target, frame budget (color-coded bar with percentage), power draw (Low/Medium/High with scalar %), GPU name (via `WEBGL_debug_renderer_info`), GPU object counts, CPU thread count (via `hardwareConcurrency`), draw calls, triangles, JS heap memory (Chrome), and a Power Saver toggle that caps the render loop to ~30fps.
 
+**UI constants and typed globals.** All z-index values, spacing, timing, and dimension constants are centralized in `apps/web/src/ui/constants.ts`. Global state (`window.__cybernoetica`, `window.__cybernoetica_debug`) is typed via interfaces in `apps/web/src/globals.ts` -- never use `(window as any)`. Theme-resolved exports (`GLASS_BG`, `TEXT_PRIMARY`, etc.) come from `styles.ts` which resolves the active theme at module load. For custom glass opacity, use `glassBackground(opacity)`.
+
+**Bottom stack layout.** Fixed-position elements at the viewport bottom are coordinated by `updateBottomLayout()` in `ui/index.ts`. The stack order (bottom to top): fixed log panel, keyboard overlay, control bar, panel/stream. When elements appear/disappear, all positions recalculate with smooth `bottom` transitions. Height constants are in `constants.ts` under `STACK`.
+
 **Launch configuration.** The app supports auto-starting with a specific visualizer, audio source, and/or UI settings. Configuration sources (in ascending priority): `settings.json` `launch` block, URL search params (`?viz=`, `&audio=`, `&log=`, `&autostart`). When a visualizer or audio source is specified, the start screen is skipped and playback begins immediately. See "Launch Configuration" section below.
 
 ## Development
@@ -163,7 +168,7 @@ export PATH="$HOME/.volta/bin:$HOME/.cargo/bin:$PATH"
 
 pnpm install          # Install all workspace dependencies
 pnpm dev              # Start Vite dev server (apps/web, port 5173)
-pnpm test             # Run all Vitest suites (95 tests)
+pnpm test             # Run all Vitest suites (58 tests across 4 packages)
 pnpm build            # Build all packages
 ```
 

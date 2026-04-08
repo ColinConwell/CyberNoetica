@@ -1,5 +1,6 @@
 import { el, glassButton } from './components.js';
 import { GLASS_BG, GLASS_BLUR, GLASS_BORDER } from './styles.js';
+import { Z_INDEX, SPACING, TIMING } from './constants.js';
 
 export interface ControlBarAPI {
   bar: HTMLElement;
@@ -17,16 +18,16 @@ export function createControlBar(): ControlBarAPI {
     left: '50%',
     transform: 'translateX(-50%)',
     display: 'none',
-    gap: '8px',
+    gap: `${SPACING.controlGap}px`,
     alignItems: 'center',
     padding: '10px 16px',
     background: GLASS_BG,
     backdropFilter: GLASS_BLUR,
     WebkitBackdropFilter: GLASS_BLUR,
     border: `1px solid ${GLASS_BORDER}`,
-    borderRadius: '40px',
-    zIndex: '100',
-    transition: 'opacity 0.4s ease, bottom 0.3s ease',
+    borderRadius: `${SPACING.barBorderRadius}px`,
+    zIndex: String(Z_INDEX.controlBar),
+    transition: `opacity ${TIMING.fadeTransition}, bottom ${TIMING.bottomSlide}`,
     opacity: '1',
   });
   document.body.appendChild(bar);

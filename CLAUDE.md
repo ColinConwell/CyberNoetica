@@ -7,7 +7,7 @@ Project instructions for Claude Code. See AGENTS.md for full documentation.
 ```bash
 export PATH="$HOME/.volta/bin:$HOME/.cargo/bin:$PATH"
 pnpm install && pnpm dev     # Dev server on :5173
-pnpm test                    # 95 Vitest tests across 4 packages
+pnpm test                    # 58 Vitest tests across 4 packages
 pnpm build                   # Build all packages
 ```
 
@@ -33,6 +33,9 @@ TypeScript + Vite 6 + Three.js + GLSL. pnpm workspaces. Vitest with jsdom. Optio
 - Launch config: URL params (`?viz=`, `&audio=`, `&autostart`) or `settings.json` `launch` block can auto-start with specific visualizer/audio source
 - Use `.env.local` for local env overrides (gitignored)
 - The JUSTFile contains all dev/deploy commands; audio management via `scripts/upload-audio.sh`
+- UI z-index, spacing, timing, and dimensions are centralized in `apps/web/src/ui/constants.ts` -- never hardcode inline
+- Typed globals via `apps/web/src/globals.ts` -- never use `(window as any)` for `__cybernoetica`
+- Theme values are resolved at module load from `styles.ts`; use `glassBackground(opacity)` for custom opacity
 
 ## Design Principles
 
