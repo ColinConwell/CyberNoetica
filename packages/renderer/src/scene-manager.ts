@@ -48,6 +48,12 @@ export class SceneManager {
 
     const canvas = this.renderer.domElement;
 
+    const updateIdleCursor = () => {
+      if (this.dragging) return;
+      const canDrag = this.viewportCaps.pan || this.viewportCaps.orbit;
+      canvas.style.cursor = canDrag ? 'grab' : '';
+    };
+
     // ── Pointer events (unified mouse + touch) ────────────────────
     const onPointerDown = (e: PointerEvent) => {
       if (e.button !== 0 && e.pointerType === 'mouse') return;
@@ -75,7 +81,7 @@ export class SceneManager {
     const onPointerUp = (e: PointerEvent) => {
       if (!this.dragging) return;
       this.dragging = false;
-      canvas.style.cursor = '';
+      updateIdleCursor();
       canvas.releasePointerCapture(e.pointerId);
     };
 
@@ -124,6 +130,10 @@ export class SceneManager {
 
   setViewportCapabilities(caps: ViewportCapabilities): void {
     this.viewportCaps = caps;
+    const canDrag = caps.pan || caps.orbit;
+    if (this.renderer) {
+      this.renderer.domElement.style.cursor = canDrag ? 'grab' : '';
+    }
   }
 
   onViewportDrag(handler: ViewportDragHandler): void { this._onDrag = handler; }
@@ -161,6 +171,14 @@ export class SceneManager {
     this.renderer?.setSize(width, height);
     this.perspCamera.aspect = width / height;
     this.perspCamera.updateProjectionMatrix();
+  }
+
+  getRendererInfo(): THREE.WebGLInfo | null {
+    return this.renderer?.info ?? null;
+  }
+
+  getRenderer(): THREE.WebGLRenderer | null {
+    return this.renderer;
   }
 
   dispose(): void { this.stop(); this.renderer?.dispose(); this.renderer = null; }

@@ -13,7 +13,7 @@ export async function createApp(container: HTMLElement): Promise<void> {
   const bus = new MessageBus();
   const store = createAppStore();
 
-  (window as any).__cybernoetica = { store, bus };
+  (window as any).__cybernoetica = { store, bus, scene };
 
   const scene = new SceneManager(
     container.clientWidth || window.innerWidth,
@@ -383,8 +383,20 @@ export async function createApp(container: HTMLElement): Promise<void> {
   let frameCount = 0;
   let fps = 0;
   let fpsTimer = performance.now();
+  let skipFrame = false;
+
+  (window as any).__cybernoetica.powerSaver = false;
+  (window as any).__cybernoetica.setPowerSaver = (enabled: boolean) => {
+    (window as any).__cybernoetica.powerSaver = enabled;
+  };
 
   scene.onRender(() => {
+    const powerSaver = (window as any).__cybernoetica.powerSaver;
+    if (powerSaver) {
+      skipFrame = !skipFrame;
+      if (skipFrame) return;
+    }
+
     const now = performance.now();
     frameCount++;
     if (now - fpsTimer >= 1000) {

@@ -323,17 +323,17 @@ const FRAGMENT_SHADER = /* glsl */ `
     float hue = cellHash.x + u_time * 0.03 + u_mid * 0.3 * u_midToHue;
     hue = fract(hue);
     float sat = u_colorSaturation * (0.5 + 0.5 * cellHash.y);
-    float val = 0.15 + 0.25 * (1.0 - minDist1);
+    float val = 0.25 + 0.35 * (1.0 - minDist1);
 
     // Audio-driven brightness
-    val += u_rms * 0.3;
-    val *= 0.8 + u_bass * 0.4;
+    val += u_rms * 0.35;
+    val *= 0.9 + u_bass * 0.5;
 
     vec3 cellColor = hsv2rgb(vec3(hue, sat, val));
 
     // Edge color: bright, desaturated
     float edgeHue = fract(hue + 0.5);
-    vec3 edgeColor = hsv2rgb(vec3(edgeHue, 0.3, 0.6 + u_rms * 0.6 * u_rmsToEdge));
+    vec3 edgeColor = hsv2rgb(vec3(edgeHue, 0.3, 0.75 + u_rms * 0.6 * u_rmsToEdge));
 
     // Beat flash on edges
     edgeColor += vec3(u_beatPulse * 0.5);
@@ -347,14 +347,14 @@ const FRAGMENT_SHADER = /* glsl */ `
     // Vignette
     float aspect = u_resolution.x / u_resolution.y;
     vec2 vUv2 = gl_FragCoord.xy / u_resolution;
-    float vignette = 1.0 - 0.35 * length((vUv2 - 0.5) * vec2(aspect, 1.0));
+    float vignette = 1.0 - 0.25 * length((vUv2 - 0.5) * vec2(aspect, 1.0));
     color *= vignette;
 
     // Beat pulse background glow
-    color += vec3(0.02, 0.01, 0.03) * u_beatPulse;
+    color += vec3(0.03, 0.015, 0.04) * u_beatPulse;
 
-    // Tone mapping
-    color = color / (1.0 + color);
+    // Tone mapping (softened to preserve brightness)
+    color = color / (0.85 + color);
 
     gl_FragColor = vec4(color, 1.0);
   }

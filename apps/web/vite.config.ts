@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import { resolve } from 'path';
-import { readdirSync, statSync, existsSync, createReadStream } from 'fs';
+import { readdirSync, statSync, existsSync, createReadStream, readFileSync } from 'fs';
 
 /** Recursively scan a directory for audio files */
 function scanAudioFiles(dir: string, base = ''): string[] {
@@ -77,6 +77,16 @@ export default defineConfig({
           res.setHeader('Content-Type', 'application/json');
           createReadStream(settingsPath).pipe(res);
         });
+      },
+      generateBundle() {
+        const settingsPath = resolve(__dirname, '../../settings.json');
+        if (existsSync(settingsPath)) {
+          this.emitFile({
+            type: 'asset',
+            fileName: 'settings.json',
+            source: readFileSync(settingsPath, 'utf-8'),
+          });
+        }
       },
     },
     {

@@ -29,7 +29,7 @@ describe('LissajousVisualizer', () => {
     const viz = new LissajousVisualizer(bus);
     expect(viz.metadata.label).toBe('Lissajous');
     expect(viz.metadata.usesPerspective).toBe(false);
-    expect(viz.metadata.viewport.pan).toBe(false);
+    expect(viz.metadata.viewport.pan).toBe(true);
     expect(viz.metadata.viewport.zoom).toBe(true);
     expect(viz.metadata.viewport.orbit).toBe(false);
   });
@@ -92,8 +92,10 @@ describe('LissajousVisualizer', () => {
   it('metadata includes viewStateFields', () => {
     const bus = new MessageBus();
     const viz = new LissajousVisualizer(bus);
-    expect(viz.metadata.viewStateFields.length).toBe(2);
+    expect(viz.metadata.viewStateFields.length).toBe(4);
     const keys = viz.metadata.viewStateFields.map(f => f.key);
+    expect(keys).toContain('centerX');
+    expect(keys).toContain('centerY');
     expect(keys).toContain('zoom');
     expect(keys).toContain('phase');
   });

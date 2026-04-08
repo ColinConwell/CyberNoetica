@@ -11,6 +11,7 @@ COPY packages/audio/package.json packages/audio/
 RUN pnpm install --frozen-lockfile
 
 COPY tsconfig.base.json ./
+COPY settings.json ./
 COPY apps/web/ apps/web/
 COPY packages/ packages/
 

@@ -46,6 +46,14 @@ launch-with +params="":
     sleep 2
     open "$url"
 
+# Launch via the centralized launch script (supports --viz, --audio, --log, --debug, etc.)
+# Examples:
+#   just run --viz mandelbrot --audio system
+#   just run --debug --log stream
+#   just run --prod
+run +args="":
+    ./launch.sh {{args}}
+
 # ─── Build ────────────────────────────────────────────────────────────
 
 # Build all packages

@@ -14,6 +14,7 @@ import { listVisualizers } from '@cybernoetica/renderer';
 import { renderSoundPanel } from './panels/sound-panel.js';
 import { renderControlPanel } from './panels/control-panel.js';
 import { getSetting } from '../settings-loader.js';
+import { groupTracksByFolder } from '../utils/track-display.js';
 
 export type VisualizerType = string;
 
@@ -57,6 +58,8 @@ export function createUI(): UIControls {
   let autoPlay = true;
   let shuffleMode = true;
   let trackListExpanded = false;
+  const expandedFolders = new Set<string>();
+  let foldersInitialized = false;
 
   // Handlers
   let pauseHandler: (() => void) | null = null;
@@ -78,6 +81,7 @@ export function createUI(): UIControls {
     onResetView: () => void;
   } | null = null;
   let debugCleanup: (() => void) | null = null;
+  let energyCleanup: (() => void) | null = null;
 
   // Hidden file input
   const fileInput = el('input', { display: 'none' }, { type: 'file', accept: 'audio/*' });
@@ -90,14 +94,16 @@ export function createUI(): UIControls {
   });
 
   // Title
+  const appTitle = getSetting('app_title', 'Cybernoetica');
   const title = el('div', {
     position: 'fixed', top: '24px', left: '50%', transform: 'translateX(-50%)',
-    color: TEXT_SECONDARY, fontFamily: FONT, fontSize: '13px', fontWeight: '300',
-    letterSpacing: '0.35em', textTransform: 'uppercase',
+    color: TEXT_SECONDARY, fontFamily: FONT, fontSize: '17px', fontWeight: '300',
+    letterSpacing: '0.3em', textTransform: 'uppercase',
     pointerEvents: 'none', userSelect: 'none', zIndex: '100',
     transition: 'opacity 0.5s ease',
   });
-  title.textContent = getSetting('app_title', 'Cybernoetica');
+  title.textContent = appTitle;
+  document.title = appTitle;
   document.body.appendChild(title);
 
   // Start screen
@@ -156,6 +162,7 @@ export function createUI(): UIControls {
     panel.style.transform = 'translateX(-50%) translateY(20px)';
     panelBackdrop.style.display = 'none';
     if (debugCleanup) { debugCleanup(); debugCleanup = null; }
+    if (energyCleanup) { energyCleanup(); energyCleanup = null; }
     setTimeout(() => { if (!activePanel) panel.style.display = 'none'; }, 300);
   }
 
@@ -181,8 +188,15 @@ export function createUI(): UIControls {
         onResetView: viewStateAccessors?.onResetView ?? (() => {}),
       });
     } else if (type === 'sound') {
+      if (!foldersInitialized && sampleTracks.length > 0) {
+        for (const folder of groupTracksByFolder(sampleTracks).keys()) {
+          if (folder) expandedFolders.add(folder);
+        }
+        foldersInitialized = true;
+      }
       renderSoundPanel(panel, {
         activeTrackName, sampleTracks, autoPlay, shuffleMode, trackListExpanded,
+        expandedFolders,
         onRandomTrack: randomTrackHandler,
         onSystemAudio: systemAudioHandler,
         onFileClick: () => fileInput.click(),
@@ -190,6 +204,11 @@ export function createUI(): UIControls {
         onTrackSelect: trackSelectHandler,
         onAutoPlayChange: autoPlayHandler,
         onToggleTrackList() { trackListExpanded = !trackListExpanded; openPanel('sound'); },
+        onToggleFolder(folder: string) {
+          if (expandedFolders.has(folder)) expandedFolders.delete(folder);
+          else expandedFolders.add(folder);
+          openPanel('sound');
+        },
         onClose: closePanel,
       });
     } else {
@@ -199,6 +218,7 @@ export function createUI(): UIControls {
         onSettingsChange: settingsChangeHandler,
         onResetFade: () => fade.reset(),
         onDebugCleanup: (fn) => { debugCleanup = fn; },
+        onEnergyCleanup: (fn) => { energyCleanup = fn; },
       });
     }
 

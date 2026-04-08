@@ -43,7 +43,7 @@ const juliaMetadata: VisualizerMetadata = {
     { key: 'midToZoom', label: 'Mid \u2192 Zoom', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly mids drive zoom breathing' },
     { key: 'rmsToBrightness', label: 'RMS \u2192 Brightness', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly volume affects brightness' },
   ],
-  viewport: { pan: false, zoom: true, orbit: false },
+  viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
     { key: 'seedReal', label: 'Seed (Real)', min: -2, max: 2, step: 0.001 },
     { key: 'seedImaginary', label: 'Seed (Imag)', min: -2, max: 2, step: 0.001 },

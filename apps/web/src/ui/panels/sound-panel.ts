@@ -10,6 +10,7 @@ export interface SoundPanelOpts {
   autoPlay: boolean;
   shuffleMode: boolean;
   trackListExpanded: boolean;
+  expandedFolders: Set<string>;
   onRandomTrack: (() => void) | null;
   onSystemAudio: (() => void) | null;
   onFileClick: () => void;
@@ -17,6 +18,7 @@ export interface SoundPanelOpts {
   onTrackSelect: ((url: string, name: string) => void) | null;
   onAutoPlayChange: ((enabled: boolean, shuffle: boolean) => void) | null;
   onToggleTrackList: () => void;
+  onToggleFolder: (folder: string) => void;
   onClose: () => void;
 }
 
@@ -82,37 +84,63 @@ export function renderSoundPanel(panel: HTMLElement, opts: SoundPanelOpts): void
     const groups = groupTracksByFolder(opts.sampleTracks);
 
     for (const [folder, tracks] of groups) {
-      if (showFolders && folder) {
+      const isFolder = showFolders && folder;
+      const isFolderExpanded = !isFolder || opts.expandedFolders.has(folder);
+
+      if (isFolder) {
+        const chevron = isFolderExpanded ? '\u25BE' : '\u25B8';
         const folderHeader = el('div', {
           fontSize: '10px', fontWeight: '500', letterSpacing: '0.12em',
           textTransform: 'uppercase', color: TEXT_DIM,
           padding: '8px 10px 4px', marginTop: '4px',
+          cursor: 'pointer', transition: 'color 0.2s, background 0.15s',
+          borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '6px',
+          userSelect: 'none',
         });
-        folderHeader.textContent = formatFolderName(folder);
+        const chevronEl = el('span', {
+          display: 'inline-block', transition: 'transform 0.2s ease',
+          fontSize: '9px', width: '10px',
+        });
+        chevronEl.textContent = chevron;
+        const nameEl = el('span', {});
+        nameEl.textContent = `${formatFolderName(folder)} (${tracks.length})`;
+        folderHeader.append(chevronEl, nameEl);
+
+        folderHeader.addEventListener('mouseenter', () => {
+          folderHeader.style.color = TEXT_SECONDARY;
+          folderHeader.style.background = 'rgba(255,255,255,0.04)';
+        });
+        folderHeader.addEventListener('mouseleave', () => {
+          folderHeader.style.color = TEXT_DIM;
+          folderHeader.style.background = 'transparent';
+        });
+        folderHeader.addEventListener('click', () => opts.onToggleFolder(folder));
         trackList.appendChild(folderHeader);
       }
 
-      for (const file of tracks) {
-        const rawName = trackFileName(file);
-        const displayName = formatTrackName(rawName, displayFormat);
-        const isActive = rawName === opts.activeTrackName || displayName === opts.activeTrackName;
-        const item = el('div', {
-          padding: '6px 10px', paddingLeft: showFolders && folder ? '20px' : '10px',
-          fontSize: '11px',
-          color: isActive ? TEXT_PRIMARY : TEXT_SECONDARY,
-          cursor: 'pointer', transition: 'background 0.15s', borderRadius: '6px',
-          background: isActive ? 'rgba(140, 160, 255, 0.1)' : 'transparent',
-        });
-        item.textContent = displayName;
-        item.addEventListener('mouseenter', () => { item.style.background = 'rgba(255,255,255,0.08)'; });
-        item.addEventListener('mouseleave', () => {
-          item.style.background = isActive ? 'rgba(140, 160, 255, 0.1)' : 'transparent';
-        });
-        item.addEventListener('click', () => {
-          if (opts.onTrackSelect) opts.onTrackSelect(`/sample-music/${file}`, displayName);
-          opts.onClose();
-        });
-        trackList.appendChild(item);
+      if (isFolderExpanded) {
+        for (const file of tracks) {
+          const rawName = trackFileName(file);
+          const displayName = formatTrackName(rawName, displayFormat);
+          const isActive = rawName === opts.activeTrackName || displayName === opts.activeTrackName;
+          const item = el('div', {
+            padding: '6px 10px', paddingLeft: isFolder ? '20px' : '10px',
+            fontSize: '11px',
+            color: isActive ? TEXT_PRIMARY : TEXT_SECONDARY,
+            cursor: 'pointer', transition: 'background 0.15s', borderRadius: '6px',
+            background: isActive ? 'rgba(140, 160, 255, 0.1)' : 'transparent',
+          });
+          item.textContent = displayName;
+          item.addEventListener('mouseenter', () => { item.style.background = 'rgba(255,255,255,0.08)'; });
+          item.addEventListener('mouseleave', () => {
+            item.style.background = isActive ? 'rgba(140, 160, 255, 0.1)' : 'transparent';
+          });
+          item.addEventListener('click', () => {
+            if (opts.onTrackSelect) opts.onTrackSelect(`/sample-music/${file}`, displayName);
+            opts.onClose();
+          });
+          trackList.appendChild(item);
+        }
       }
     }
     panel.appendChild(trackList);

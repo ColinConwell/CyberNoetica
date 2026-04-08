@@ -103,10 +103,21 @@ export class VisualizerManager {
     } else if (meta.viewport.pan) {
       const zoom = vs.zoom ?? 1;
       const scale = 2.0 / Math.max(zoom, 0.1);
-      if ('centerReal' in vs) {
+
+      if ('centerReal' in vs && 'centerImaginary' in vs) {
         this.activeViz.setViewState({
           centerReal: vs.centerReal - dx * scale,
           centerImaginary: vs.centerImaginary + dy * scale,
+        });
+      } else if ('centerX' in vs && 'centerY' in vs) {
+        this.activeViz.setViewState({
+          centerX: vs.centerX - dx * scale,
+          centerY: vs.centerY + dy * scale,
+        });
+      } else if ('seedReal' in vs && 'seedImaginary' in vs) {
+        this.activeViz.setViewState({
+          seedReal: vs.seedReal - dx * scale * 0.5,
+          seedImaginary: vs.seedImaginary + dy * scale * 0.5,
         });
       }
     }

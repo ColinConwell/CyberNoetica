@@ -37,8 +37,8 @@ const lissajousMetadata: VisualizerMetadata = {
   params: [
     // Appearance
     { key: 'complexity', label: 'Complexity', min: 0, max: 7, step: 1, initial: 2, category: 'appearance' },
-    { key: 'trailLength', label: 'Trail Length', min: 64, max: 512, step: 16, initial: 256, category: 'appearance' },
-    { key: 'glowWidth', label: 'Glow Width', min: 0.5, max: 4.0, step: 0.25, initial: 1.5, category: 'appearance' },
+    { key: 'trailLength', label: 'Trail Length', min: 64, max: 512, step: 16, initial: 384, category: 'appearance' },
+    { key: 'glowWidth', label: 'Glow Width', min: 0.5, max: 4.0, step: 0.25, initial: 2.5, category: 'appearance' },
     { key: 'damping', label: 'Damping', min: 0.0, max: 0.5, step: 0.02, initial: 0.05, category: 'appearance' },
     { key: 'rotationSpeed', label: 'Rotation', min: 0.0, max: 0.5, step: 0.02, initial: 0.08, category: 'appearance' },
     // Audio mapping
@@ -47,8 +47,10 @@ const lissajousMetadata: VisualizerMetadata = {
     { key: 'rmsToGlow', label: 'RMS → Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly volume affects trail brightness' },
     { key: 'beatToBloom', label: 'Beat → Bloom', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly beats trigger fresh curve bloom' },
   ],
-  viewport: { pan: false, zoom: true, orbit: false },
+  viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
+    { key: 'centerX', label: 'Center X', min: -2, max: 2, step: 0.01 },
+    { key: 'centerY', label: 'Center Y', min: -2, max: 2, step: 0.01 },
     { key: 'zoom', label: 'Zoom', min: 0.3, max: 3.0, step: 0.05 },
     { key: 'phase', label: 'Phase', min: 0, max: 6.283, step: 0.01, readOnly: true },
   ],
@@ -65,8 +67,8 @@ export class LissajousVisualizer implements Visualizer {
 
   private userParams: Record<string, number> = {
     complexity: 2,
-    trailLength: 256,
-    glowWidth: 1.5,
+    trailLength: 384,
+    glowWidth: 2.5,
     damping: 0.05,
     rotationSpeed: 0.08,
     bassToAmplitude: 1.0,
@@ -76,6 +78,8 @@ export class LissajousVisualizer implements Visualizer {
   };
 
   private _zoom = 1.0;
+  private _centerX = 0;
+  private _centerY = 0;
   private viewOverrides: Record<string, boolean> = {};
 
   private smoothers = {
@@ -102,7 +106,7 @@ export class LissajousVisualizer implements Visualizer {
     this.smoothers.rms.reset(0.1);
     this.smoothers.spectralCentroid.reset(0.5);
     this.smoothers.beatPulse.reset(0);
-    this.smoothers.amplitude.reset(0.6);
+    this.smoothers.amplitude.reset(0.8);
   }
 
   attach(scene: THREE.Scene): void {
@@ -113,14 +117,15 @@ export class LissajousVisualizer implements Visualizer {
         u_time: { value: 0.0 },
         u_resolution: { value: new THREE.Vector2(1920, 1080) },
         u_zoom: { value: 1.0 },
+        u_center: { value: new THREE.Vector2(0, 0) },
         u_freqA: { value: 2.0 },
         u_freqB: { value: 3.0 },
         u_phaseDelta: { value: Math.PI / 4 },
-        u_amplitude: { value: 0.6 },
+        u_amplitude: { value: 0.8 },
         u_damping: { value: 0.05 },
         u_dampingEnvelope: { value: 1.0 },
-        u_trailLength: { value: 256.0 },
-        u_glowWidth: { value: 1.5 },
+        u_trailLength: { value: 384.0 },
+        u_glowWidth: { value: 2.5 },
         u_rotationSpeed: { value: 0.08 },
         u_bass: { value: 0.0 },
         u_mid: { value: 0.0 },
@@ -159,7 +164,7 @@ export class LissajousVisualizer implements Visualizer {
       this.smoothers.spectralCentroid.update(f.spectralCentroid);
       this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
 
-      const amp = 0.4 + f.bass * 0.6 * this.userParams.bassToAmplitude;
+      const amp = 0.6 + f.bass * 0.5 * this.userParams.bassToAmplitude;
       this.smoothers.amplitude.update(amp);
 
       // Beat resets the damping envelope (fresh bloom)
@@ -168,7 +173,7 @@ export class LissajousVisualizer implements Visualizer {
       }
     } else {
       this.smoothers.beatPulse.update(0.0);
-      this.smoothers.amplitude.update(0.6);
+      this.smoothers.amplitude.update(0.8);
     }
 
     // Get frequency ratios from preset
@@ -182,6 +187,7 @@ export class LissajousVisualizer implements Visualizer {
       const u = this.material.uniforms;
       u.u_time.value = this.time;
       u.u_zoom.value = this._zoom;
+      u.u_center.value.set(this._centerX, this._centerY);
       u.u_freqA.value = preset.a + spectralOffset;
       u.u_freqB.value = preset.b;
       u.u_freqA2.value = preset.a * 0.5 + 0.1;
@@ -215,12 +221,22 @@ export class LissajousVisualizer implements Visualizer {
 
   getViewState(): Record<string, number> {
     return {
+      centerX: this._centerX,
+      centerY: this._centerY,
       zoom: this._zoom,
       phase: this.phase % (Math.PI * 2),
     };
   }
 
   setViewState(partial: Record<string, number>): void {
+    if ('centerX' in partial) {
+      this._centerX = Math.max(-2, Math.min(2, partial.centerX));
+      this.viewOverrides.center = true;
+    }
+    if ('centerY' in partial) {
+      this._centerY = Math.max(-2, Math.min(2, partial.centerY));
+      this.viewOverrides.center = true;
+    }
     if ('zoom' in partial) {
       this._zoom = Math.max(0.3, Math.min(3.0, partial.zoom));
       this.viewOverrides.zoom = true;
@@ -253,6 +269,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   uniform float u_time;
   uniform vec2 u_resolution;
   uniform float u_zoom;
+  uniform vec2 u_center;
   uniform float u_freqA;
   uniform float u_freqB;
   uniform float u_freqA2;
@@ -298,7 +315,7 @@ const FRAGMENT_SHADER = /* glsl */ `
 
   void main() {
     vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution) / min(u_resolution.x, u_resolution.y);
-    uv /= u_zoom;
+    uv = uv / u_zoom + u_center;
 
     // Minimum distance from pixel to the parametric curve
     float minDist = 100.0;

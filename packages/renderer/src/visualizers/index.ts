@@ -17,7 +17,7 @@ export type { Visualizer, VisualizerMetadata, VisualizerParam, ViewStateField, V
 // Direct class exports (backward compat -- prefer registry for new code)
 export { MandelbrotVisualizer } from './mandelbrot/index.js';
 export type { MandelbrotUniforms } from './mandelbrot/index.js';
-export { OrbitalVisualizer } from './orbital/index.js';
+export { OrbitalVisualizer, OrbitalBetaVisualizer, OrbitalGammaVisualizer } from './orbital/index.js';
 export { WaveformVisualizer } from './waveform/index.js';
 export { JuliaVisualizer } from './julia/index.js';
 export { VoronoiVisualizer } from './voronoi/index.js';

@@ -2,7 +2,7 @@
 
 ## Overview
 
-**Cybernoetica** is a high-aesthetic, GPU-accelerated audio-reactive visualizer and knowledge portal. It delivers 4 visualizer families (each with versioned subvariants) driven by real-time audio analysis, with a glass-morphism control interface and formal playback state management.
+**Cybernoetica** is a high-aesthetic, GPU-accelerated audio-reactive visualizer and knowledge portal. It delivers 7 visualizer families (some with versioned subvariants) driven by real-time audio analysis, with a glass-morphism control interface, energy monitoring, and formal playback state management.
 
 ## Directory Structure
 
@@ -66,7 +66,9 @@ CyberNoetica/
 │   │           ├── registry.ts           # VisualizerEntry, registerVisualizer()
 │   │           ├── index.ts              # Barrel imports from subfolder barrels
 │   │           ├── orbital/
-│   │           │   ├── v01-alpha.ts      # 5K particle system
+│   │           │   ├── v01-alpha.ts      # 5K particle vortex
+│   │           │   ├── v02-beta.ts       # Chaotic drifting orbits (7 emitters, 3D tangents)
+│   │           │   ├── v03-gamma.ts      # Interactive sculpt mode (force fields)
 │   │           │   └── index.ts
 │   │           ├── mandelbrot/
 │   │           │   ├── v01-alpha.ts      # Deep fractal zoom
@@ -74,8 +76,17 @@ CyberNoetica/
 │   │           ├── julia/
 │   │           │   ├── v01-alpha.ts      # Shape-shifting Julia set
 │   │           │   └── index.ts
-│   │           └── waveform/
-│   │               ├── v01-alpha.ts      # Neon soundwaves
+│   │           ├── waveform/
+│   │           │   ├── v01-alpha.ts      # Neon soundwaves
+│   │           │   └── index.ts
+│   │           ├── voronoi/
+│   │           │   ├── v01-alpha.ts      # Animated Voronoi cells
+│   │           │   └── index.ts
+│   │           ├── lissajous/
+│   │           │   ├── v01-alpha.ts      # Harmonograph light curves
+│   │           │   └── index.ts
+│   │           └── kaleidoscope/
+│   │               ├── v01-alpha.ts      # Psychedelic mandala symmetry
 │   │               └── index.ts
 │   └── audio/                            # @cybernoetica/audio
 │       ├── src/
@@ -92,7 +103,8 @@ CyberNoetica/
 ├── guidebook/
 │   ├── README.md
 │   └── Design-Principles.md             # Core design philosophy
-├── settings.json                         # Dev overrides (title, theme, launch config)
+├── settings.json                         # Dev + prod overrides (title, theme, launch config)
+├── launch.sh                             # Centralized launch script (--viz, --audio, --debug, etc.)
 ├── CLAUDE.md                             # Claude Code project instructions
 ├── JUSTFile                              # Development + deployment commands
 ├── Dockerfile
@@ -133,11 +145,13 @@ CyberNoetica/
 3. Visualizers subscribe to audio features and modulate their parameters
 4. `SceneManager` drives the Three.js render loop with pointer/touch viewport interaction
 
-**Visualizer system:** Self-registering visualizers organized in versioned folders. Each family (orbital, mandelbrot, julia, waveform) has a folder with `v{NN}-{greek}.ts` files. Parameters are categorized as `'appearance'` or `'audio-mapping'`. The UI groups controls accordingly.
+**Visualizer system:** Self-registering visualizers organized in versioned folders. Each family (orbital, mandelbrot, julia, waveform, voronoi, lissajous, kaleidoscope) has a folder with `v{NN}-{greek}.ts` files. Parameters are categorized as `'appearance'` or `'audio-mapping'`. The UI groups controls accordingly. The orbital family has three versions: alpha (classic), beta (chaotic with drift), and gamma (interactive sculpt mode with user-placeable force fields).
 
-**View state.** Each visualizer exposes a per-family coordinate system via `getViewState()` / `setViewState()`. The coordinates have intuitive, domain-specific names (e.g., Mandelbrot uses `centerReal`/`centerImaginary`/`zoom`/`rotation`; Orbital uses `orbitAngle`/`elevation`/`distance`). User interactions (drag, scroll, pinch) flow from SceneManager as raw deltas through VisualizerManager, which translates them into the appropriate `setViewState()` calls. The Visual Panel shows live coordinate readouts with editable inputs. Setting a coordinate via `setViewState()` pauses the autonomous animation for that axis.
+**View state.** Each visualizer exposes a per-family coordinate system via `getViewState()` / `setViewState()`. The coordinates have intuitive, domain-specific names (e.g., Mandelbrot uses `centerReal`/`centerImaginary`/`zoom`/`rotation`; Orbital uses `orbitAngle`/`elevation`/`distance`; Voronoi uses `centerX`/`centerY`/`zoom`). User interactions (drag, scroll, pinch) flow from SceneManager as raw deltas through VisualizerManager, which translates them into the appropriate `setViewState()` calls. The pan handler in VisualizerManager supports multiple field name patterns: `centerReal`/`centerImaginary` (Mandelbrot), `centerX`/`centerY` (Voronoi, Lissajous), and `seedReal`/`seedImaginary` (Julia). The canvas shows a `grab` cursor on hover when drag is available, and `grabbing` while dragging.
 
-**Settings override system.** `settings.json` at repo root provides dev-time overrides (app title, UI theme, track display format, launch config). The `settings-loader.ts` module loads it via fetch with graceful fallback to defaults.
+**Settings override system.** `settings.json` at repo root provides overrides (app title, UI theme, track display format, launch config). The `settings-loader.ts` module loads it via fetch with graceful fallback to defaults. In production builds, `settings.json` is emitted to `dist/` via a Vite plugin `generateBundle` hook and also copied in the Dockerfile.
+
+**Energy monitoring.** The Control panel includes a Performance section (always visible, not just debug) showing frame budget (color-coded bar), GPU stats (draw calls, triangles), JS heap memory (Chrome), and a Power Saver toggle that caps the render loop to ~30fps.
 
 **Launch configuration.** The app supports auto-starting with a specific visualizer, audio source, and/or UI settings. Configuration sources (in ascending priority): `settings.json` `launch` block, URL search params (`?viz=`, `&audio=`, `&log=`, `&autostart`). When a visualizer or audio source is specified, the start screen is skipped and playback begins immediately. See "Launch Configuration" section below.
 
@@ -251,6 +265,9 @@ Every visualizer must implement `getViewState()` and `setViewState(partial)` and
 | Julia | `seedReal`, `seedImaginary`, `zoom` | c-parameter and magnification |
 | Orbital | `orbitAngle`, `elevation`, `distance` | Spherical camera coordinates |
 | Waveform | `verticalShift` | Vertical offset of the waveform stack |
+| Voronoi | `centerX`, `centerY`, `zoom` | 2D pan + zoom |
+| Lissajous | `centerX`, `centerY`, `zoom`, `phase` | 2D pan + zoom (phase is read-only) |
+| Kaleidoscope | `zoom`, `rotation` | Zoom + fold rotation |
 
 When a user sets a view state value, the visualizer should pause its autonomous animation for that axis. The UI's "Reset View" button re-creates the visualizer to restore all defaults.
 
