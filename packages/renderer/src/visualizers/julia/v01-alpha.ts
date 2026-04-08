@@ -99,7 +99,7 @@ export class JuliaVisualizer implements Visualizer {
 
     this.smoothers.cx.reset(this.baseCx);
     this.smoothers.cy.reset(this.baseCy);
-    this.smoothers.zoom.reset(1.2);
+    this.smoothers.zoom.reset(1.6);
     this.smoothers.colorSpeed.reset(0.6);
     this.smoothers.iterations.reset(200);
     this.smoothers.brightness.reset(0.8);
@@ -113,7 +113,7 @@ export class JuliaVisualizer implements Visualizer {
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
         u_c: { value: new THREE.Vector2(this.baseCx, this.baseCy) },
-        u_zoom: { value: 1.2 },
+        u_zoom: { value: 1.6 },
         u_iterations: { value: 200.0 },
         u_colorSpeed: { value: 0.6 },
         u_brightness: { value: 0.8 },
@@ -159,7 +159,7 @@ export class JuliaVisualizer implements Visualizer {
 
       this.smoothers.cx.update(cx);
       this.smoothers.cy.update(cy);
-      this.smoothers.zoom.update(1.0 + f.mid * 0.8 * am.midToZoom);
+      this.smoothers.zoom.update(1.4 + f.mid * 0.5 * am.midToZoom);
       this.smoothers.colorSpeed.update(0.3 + f.mid * 2.0);
       this.smoothers.iterations.update(150 + f.high * 350);
       this.smoothers.brightness.update(0.5 + f.rms * 0.8 * am.rmsToBrightness);

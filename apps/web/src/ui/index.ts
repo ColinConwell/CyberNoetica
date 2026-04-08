@@ -15,6 +15,8 @@ import { renderSoundPanel } from './panels/sound-panel.js';
 import { renderControlPanel } from './panels/control-panel.js';
 import { getSetting } from '../settings-loader.js';
 import { groupTracksByFolder } from '../utils/track-display.js';
+import { installLogInterceptor, createLogDisplay, type LogDisplay, type LogDisplayMode } from './log-display.js';
+import { createKeyboardOverlay, getBaseShortcuts, getVisualizerShortcuts, type KeyboardOverlayAPI } from './keyboard-overlay.js';
 
 export type VisualizerType = string;
 
@@ -45,10 +47,17 @@ export interface UIControls {
   setActiveVisualizer: (type: string) => void;
   setActiveTrack: (name: string) => void;
   setSampleTracks: (tracks: string[]) => void;
+  openLogDisplay: (mode: LogDisplayMode) => void;
+  closeLogDisplay: () => void;
+  setKeyboardOverlayVisible: (visible: boolean) => void;
+  updateKeyboardShortcuts: () => void;
+  onResetVisualizer: (handler: () => void) => void;
   destroy: () => void;
 }
 
 export function createUI(): UIControls {
+  installLogInterceptor();
+
   const settings = { ...DEFAULT_SETTINGS };
   let sampleTracks: string[] = [];
   let activeTrackName = '';
@@ -60,6 +69,8 @@ export function createUI(): UIControls {
   let trackListExpanded = false;
   const expandedFolders = new Set<string>();
   let foldersInitialized = false;
+  let standaloneLogDisplay: LogDisplay | null = null;
+  let resetVisualizerHandler: (() => void) | null = null;
 
   // Handlers
   let pauseHandler: (() => void) | null = null;
@@ -106,6 +117,42 @@ export function createUI(): UIControls {
   document.title = appTitle;
   document.body.appendChild(title);
 
+  // Interactivity hint (below title)
+  const interactivityHint = el('div', {
+    position: 'fixed', top: '52px', left: '50%', transform: 'translateX(-50%)',
+    color: TEXT_SECONDARY, fontFamily: FONT, fontSize: '11px', fontWeight: '300',
+    letterSpacing: '0.1em',
+    pointerEvents: 'none', userSelect: 'none', zIndex: '100',
+    transition: 'opacity 0.6s ease',
+    opacity: '0',
+  });
+  document.body.appendChild(interactivityHint);
+  let interactivityHintTimer: ReturnType<typeof setTimeout> | null = null;
+  let showInteractivityHints = true;
+
+  function showInteractivityHintText(text: string) {
+    if (!showInteractivityHints || !text) {
+      interactivityHint.style.opacity = '0';
+      return;
+    }
+    interactivityHint.textContent = text;
+    interactivityHint.style.opacity = '0.7';
+    if (interactivityHintTimer) clearTimeout(interactivityHintTimer);
+    interactivityHintTimer = setTimeout(() => {
+      interactivityHint.style.opacity = '0';
+    }, 4000);
+  }
+
+  document.addEventListener('mousemove', () => {
+    if (interactivityHint.textContent && showInteractivityHints) {
+      interactivityHint.style.opacity = '0.5';
+      if (interactivityHintTimer) clearTimeout(interactivityHintTimer);
+      interactivityHintTimer = setTimeout(() => {
+        interactivityHint.style.opacity = '0';
+      }, 3000);
+    }
+  });
+
   // Start screen
   const startScreen = createStartScreen();
 
@@ -119,17 +166,49 @@ export function createUI(): UIControls {
   document.body.appendChild(panelBackdrop);
 
   const panel = el('div', {
-    position: 'fixed', bottom: '80px', left: '50%',
+    position: 'fixed', bottom: '100px', left: '50%',
     transform: 'translateX(-50%) translateY(20px)',
     minWidth: '320px', maxWidth: '440px', maxHeight: '55vh', overflowY: 'auto',
     padding: '20px 24px',
     background: GLASS_BG, backdropFilter: GLASS_BLUR, WebkitBackdropFilter: GLASS_BLUR,
     border: `1px solid ${GLASS_BORDER}`, borderRadius: '20px',
     zIndex: '95', display: 'none', opacity: '0',
-    transition: 'opacity 0.3s ease, transform 0.3s ease',
+    transition: 'opacity 0.3s ease, transform 0.3s ease, bottom 0.3s ease',
     fontFamily: FONT, color: TEXT_PRIMARY,
   });
   document.body.appendChild(panel);
+
+  // ── Vertical Layout Coordinator ─────────────────────────────────
+  // Stacks bottom-up: fixed log -> keyboard overlay -> control bar -> panel/stream
+  const LAYOUT_GAP = 6;
+  const KEYBOARD_BAR_HEIGHT = 30;
+  const CONTROL_BAR_HEIGHT = 54;
+
+  let fixedLogHeight = 0;
+  let keyOverlay: KeyboardOverlayAPI | null = null;
+
+  function updateBottomLayout() {
+    let cursor = LAYOUT_GAP;
+
+    if (fixedLogHeight > 0) {
+      cursor = fixedLogHeight + LAYOUT_GAP;
+    }
+
+    const kbBottom = cursor;
+    if (keyOverlay) {
+      keyOverlay.element.style.bottom = `${kbBottom}px`;
+    }
+    const kbVisible = keyOverlay?.isVisible() ?? false;
+    cursor = kbVisible ? kbBottom + KEYBOARD_BAR_HEIGHT + LAYOUT_GAP : kbBottom;
+
+    cbar.bar.style.bottom = `${cursor}px`;
+    cursor += CONTROL_BAR_HEIGHT + LAYOUT_GAP;
+
+    panel.style.bottom = `${cursor}px`;
+
+    const streamEl = document.querySelector('[data-log-stream]') as HTMLElement | null;
+    if (streamEl) streamEl.style.bottom = `${cursor}px`;
+  }
 
   // Error display
   const errorEl = el('div', {
@@ -219,6 +298,13 @@ export function createUI(): UIControls {
         onResetFade: () => fade.reset(),
         onDebugCleanup: (fn) => { debugCleanup = fn; },
         onEnergyCleanup: (fn) => { energyCleanup = fn; },
+        keyboardOverlayVisible: keyOverlay?.isVisible() ?? true,
+        onKeyboardOverlayToggle: (visible) => {
+          if (!keyOverlay) return;
+          if (visible) keyOverlay.show();
+          else keyOverlay.hide();
+          updateBottomLayout();
+        },
       });
     }
 
@@ -244,44 +330,41 @@ export function createUI(): UIControls {
   cbar.soundBtn.addEventListener('click', (e) => { e.stopPropagation(); openPanel('sound'); });
   cbar.controlBtn.addEventListener('click', (e) => { e.stopPropagation(); openPanel('control'); });
 
-  // Keyboard: Escape closes panel
+  // Keyboard: Escape closes panel, 'r' resets visualizer
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && activePanel) closePanel();
+    if (e.key === 'r' && !e.metaKey && !e.ctrlKey && !e.altKey && e.target === document.body) {
+      if (resetVisualizerHandler) resetVisualizerHandler();
+    }
   });
 
-  // Dev-mode refresh button
-  let devRefreshBtn: HTMLElement | null = null;
-  if (import.meta.env.DEV) {
-    const isMac = navigator.platform.toUpperCase().includes('MAC');
-    const shortcutLabel = isMac ? '\u2318R' : 'Ctrl+R';
-
-    devRefreshBtn = el('button', {
-      position: 'fixed', top: '20px', right: '20px', zIndex: '150',
-      padding: '5px 12px',
-      background: 'rgba(255, 255, 255, 0.06)',
-      backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
-      border: `1px solid ${GLASS_BORDER}`,
-      borderRadius: '8px',
-      color: TEXT_SECONDARY, fontFamily: FONT, fontSize: '11px',
-      fontWeight: '400', letterSpacing: '0.04em',
-      cursor: 'pointer', transition: 'all 0.2s ease',
-      opacity: '0.6',
-    });
-    devRefreshBtn.textContent = shortcutLabel;
-    devRefreshBtn.title = 'Full reload';
-
-    devRefreshBtn.addEventListener('mouseenter', () => {
-      devRefreshBtn!.style.opacity = '1';
-      devRefreshBtn!.style.background = 'rgba(255, 255, 255, 0.12)';
-    });
-    devRefreshBtn.addEventListener('mouseleave', () => {
-      devRefreshBtn!.style.opacity = '0.6';
-      devRefreshBtn!.style.background = 'rgba(255, 255, 255, 0.06)';
-    });
-    devRefreshBtn.addEventListener('click', () => location.reload());
-
-    document.body.appendChild(devRefreshBtn);
+  // Detect fixed log panels appearing/disappearing in the DOM
+  function recalcFixedLogHeight() {
+    const fixedEl = document.querySelector('[data-log-fixed]') as HTMLElement | null;
+    if (fixedEl) {
+      fixedLogHeight = parseInt(fixedEl.getAttribute('data-log-fixed-height') ?? '160', 10);
+    } else {
+      fixedLogHeight = 0;
+    }
   }
+
+  const layoutObserver = new MutationObserver(() => {
+    recalcFixedLogHeight();
+    updateBottomLayout();
+  });
+  layoutObserver.observe(document.body, { childList: true });
+
+  // Initial layout
+  updateBottomLayout();
+
+  // Keyboard shortcut overlay
+  keyOverlay = createKeyboardOverlay();
+  const isDevMode = typeof import.meta !== 'undefined' && !!(import.meta as any).env?.DEV;
+  keyOverlay.setShortcuts([
+    ...getBaseShortcuts(isDevMode),
+    { key: 'r', label: 'Reset', tooltip: 'Reset current visualizer' },
+  ]);
+  updateBottomLayout();
 
   return {
     onStart(h) { startScreen.onStart(h); },
@@ -320,21 +403,65 @@ export function createUI(): UIControls {
       }
     },
 
-    setActiveVisualizer(type: string) { currentVizType = type; },
+    setActiveVisualizer(type: string) {
+      currentVizType = type;
+      const vizMeta = listVisualizers().find(v => v.type === type);
+      if (vizMeta?.interactivity?.description) {
+        showInteractivityHintText(vizMeta.interactivity.description);
+      } else {
+        interactivityHint.style.opacity = '0';
+        interactivityHint.textContent = '';
+      }
+    },
     setActiveTrack(name: string) { activeTrackName = name; },
     setSampleTracks(tracks: string[]) { sampleTracks = tracks; },
 
+    openLogDisplay(mode: LogDisplayMode) {
+      if (standaloneLogDisplay) { standaloneLogDisplay.cleanup(); standaloneLogDisplay = null; }
+      standaloneLogDisplay = createLogDisplay(mode, 'all');
+      recalcFixedLogHeight();
+      updateBottomLayout();
+    },
+
+    closeLogDisplay() {
+      if (standaloneLogDisplay) { standaloneLogDisplay.cleanup(); standaloneLogDisplay = null; }
+      fixedLogHeight = 0;
+      updateBottomLayout();
+    },
+
+    setKeyboardOverlayVisible(visible: boolean) {
+      if (!keyOverlay) return;
+      if (visible) keyOverlay.show();
+      else keyOverlay.hide();
+      updateBottomLayout();
+    },
+
+    updateKeyboardShortcuts() {
+      if (!keyOverlay) return;
+      const vizShortcuts = getVisualizerShortcuts(currentVizType);
+      keyOverlay.setShortcuts([
+        ...getBaseShortcuts(isDevMode),
+        { key: 'r', label: 'Reset', tooltip: 'Reset current visualizer' },
+        ...vizShortcuts,
+      ]);
+    },
+
+    onResetVisualizer(h) { resetVisualizerHandler = h; },
+
     destroy() {
       fade.destroy();
+      keyOverlay?.destroy();
+      layoutObserver.disconnect();
       if (errorTimer) clearTimeout(errorTimer);
+      if (standaloneLogDisplay) { standaloneLogDisplay.cleanup(); standaloneLogDisplay = null; }
       startScreen.element.remove();
       cbar.bar.remove();
       panel.remove();
       panelBackdrop.remove();
       title.remove();
+      interactivityHint.remove();
       errorEl.remove();
       fileInput.remove();
-      devRefreshBtn?.remove();
     },
   };
 }

@@ -10,10 +10,35 @@ export interface ControlPanelOpts {
   onResetFade: () => void;
   onDebugCleanup?: (cleanup: () => void) => void;
   onEnergyCleanup?: (cleanup: () => void) => void;
+  keyboardOverlayVisible?: boolean;
+  onKeyboardOverlayToggle?: (visible: boolean) => void;
 }
 
 export function renderControlPanel(panel: HTMLElement, opts: ControlPanelOpts): void {
   panel.innerHTML = '';
+
+  // ── Keyboard ────────────────────────────────────────────────────
+  panel.appendChild(sectionLabel('Keyboard'));
+  const shortcuts = el('div', { fontSize: '12px', color: TEXT_DIM, lineHeight: '1.8', marginBottom: '8px' });
+  shortcuts.innerHTML = `
+    <div><span style="color:${TEXT_SECONDARY}">Space</span> — Toggle controls</div>
+    <div><span style="color:${TEXT_SECONDARY}">Escape</span> — Close panel</div>
+    <div><span style="color:${TEXT_SECONDARY}">R</span> — Reset visualizer</div>
+  `;
+  panel.appendChild(shortcuts);
+
+  const overlayToggle = toggleSwitch({
+    checked: opts.keyboardOverlayVisible ?? true,
+    label: 'Show shortcut bar',
+    onChange(checked) {
+      if (opts.onKeyboardOverlayToggle) opts.onKeyboardOverlayToggle(checked);
+    },
+  });
+  panel.appendChild(overlayToggle);
+
+  panel.appendChild(sectionDivider());
+
+  // ── Interface ───────────────────────────────────────────────────
   panel.appendChild(sectionLabel('Interface'));
 
   // Menu fade delay
@@ -68,15 +93,6 @@ export function renderControlPanel(panel: HTMLElement, opts: ControlPanelOpts): 
   const energyCleanup = renderEnergySection(panel);
   if (opts.onEnergyCleanup) opts.onEnergyCleanup(energyCleanup);
 
-  panel.appendChild(sectionDivider());
-  panel.appendChild(sectionLabel('Keyboard'));
-  const shortcuts = el('div', { fontSize: '12px', color: TEXT_DIM, lineHeight: '1.8' });
-  shortcuts.innerHTML = `
-    <div><span style="color:${TEXT_SECONDARY}">Space</span> — Toggle controls</div>
-    <div><span style="color:${TEXT_SECONDARY}">Escape</span> — Close panel</div>
-  `;
-  panel.appendChild(shortcuts);
-
   if (isDebugEnabled()) {
     panel.appendChild(sectionDivider());
     const debugSection = el('div', {
@@ -117,6 +133,10 @@ function renderEnergySection(container: HTMLElement): () => void {
     return { outer, inner };
   }
 
+  // FPS row with target
+  const fpsRow = makeStatRow('FPS');
+  container.appendChild(fpsRow.row);
+
   // Frame budget bar
   const budgetLabel = el('div', {
     display: 'flex', justifyContent: 'space-between', fontSize: '11px',
@@ -130,7 +150,7 @@ function renderEnergySection(container: HTMLElement): () => void {
   const frameBudget = makeBar();
   container.appendChild(frameBudget.outer);
 
-  // Power level indicator
+  // Power level indicator with scalar percentage
   const powerRow = makeStatRow('Power draw');
   container.appendChild(powerRow.row);
 
@@ -140,9 +160,41 @@ function renderEnergySection(container: HTMLElement): () => void {
   const trianglesRow = makeStatRow('Triangles');
   container.appendChild(trianglesRow.row);
 
+  // GPU info (renderer name)
+  const gpuRow = makeStatRow('GPU');
+  container.appendChild(gpuRow.row);
+  try {
+    const renderer = globals?.scene?.getRenderer?.();
+    if (renderer) {
+      const gl = renderer.getContext();
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      if (ext) {
+        const gpuName = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL);
+        gpuRow.val.textContent = gpuName.length > 30 ? gpuName.substring(0, 28) + '\u2026' : gpuName;
+        gpuRow.val.title = gpuName;
+      } else {
+        gpuRow.val.textContent = 'WebGL';
+      }
+    } else {
+      gpuRow.val.textContent = '\u2014';
+    }
+  } catch {
+    gpuRow.val.textContent = '\u2014';
+  }
+
+  // GPU memory (textures + geometries)
+  const gpuMemRow = makeStatRow('GPU objects');
+  container.appendChild(gpuMemRow.row);
+
+  // CPU info
+  const cpuRow = makeStatRow('CPU threads');
+  container.appendChild(cpuRow.row);
+  const cores = navigator.hardwareConcurrency ?? 0;
+  const wasmActive = globals?.store?.getState?.()?.audio?.wasm ?? false;
+  cpuRow.val.textContent = cores > 0 ? `${cores} cores${wasmActive ? ' + WASM' : ''}` : '\u2014';
+
   // Memory (Chrome only)
   const hasMemory = !!(performance as any).memory;
-  let memoryLabel: HTMLElement | null = null;
   let memoryBar: ReturnType<typeof makeBar> | null = null;
   let memoryValEl: HTMLElement | null = null;
   if (hasMemory) {
@@ -157,7 +209,6 @@ function renderEnergySection(container: HTMLElement): () => void {
     container.appendChild(memLabel);
     memoryBar = makeBar();
     container.appendChild(memoryBar.outer);
-    memoryLabel = memLabel;
   }
 
   // Power saver toggle
@@ -178,24 +229,29 @@ function renderEnergySection(container: HTMLElement): () => void {
   const interval = setInterval(() => {
     const info = debugInfo();
     const frameTime = info?.frameTime ?? 0;
-    const targetMs = 16.67;
+    const isPowerSaverActive = globals?.powerSaver ?? false;
+    const targetMs = isPowerSaverActive ? 33.33 : 16.67;
+    const targetFps = isPowerSaverActive ? 30 : 60;
     const usage = Math.min(frameTime / targetMs, 2.0);
     const pct = Math.round(usage * 100);
 
-    budgetVal.textContent = `${frameTime.toFixed(1)}ms / ${targetMs.toFixed(1)}ms`;
+    // FPS with target
+    fpsRow.val.textContent = `${info?.fps ?? 0} / ${targetFps}`;
+
+    budgetVal.textContent = `${frameTime.toFixed(1)}ms / ${targetMs.toFixed(1)}ms (${pct}%)`;
     frameBudget.inner.style.width = `${Math.min(pct, 100)}%`;
 
     if (usage < 0.5) {
       frameBudget.inner.style.background = 'rgba(100, 220, 120, 0.6)';
-      powerRow.val.textContent = 'Low';
+      powerRow.val.textContent = `Low (${pct}%)`;
       powerRow.val.style.color = 'rgba(100, 220, 120, 0.8)';
     } else if (usage < 0.8) {
       frameBudget.inner.style.background = 'rgba(220, 200, 80, 0.6)';
-      powerRow.val.textContent = 'Medium';
+      powerRow.val.textContent = `Medium (${pct}%)`;
       powerRow.val.style.color = 'rgba(220, 200, 80, 0.8)';
     } else {
       frameBudget.inner.style.background = 'rgba(220, 80, 80, 0.6)';
-      powerRow.val.textContent = 'High';
+      powerRow.val.textContent = `High (${pct}%)`;
       powerRow.val.style.color = 'rgba(220, 80, 80, 0.8)';
     }
 
@@ -205,9 +261,15 @@ function renderEnergySection(container: HTMLElement): () => void {
       drawCallsRow.val.textContent = String(r.calls);
       trianglesRow.val.textContent = r.triangles > 1000
         ? `${(r.triangles / 1000).toFixed(1)}k` : String(r.triangles);
+
+      const mem = rendererInfo.memory;
+      if (mem) {
+        gpuMemRow.val.textContent = `${mem.geometries}g / ${mem.textures}t`;
+      }
     } else {
       drawCallsRow.val.textContent = '\u2014';
       trianglesRow.val.textContent = '\u2014';
+      gpuMemRow.val.textContent = '\u2014';
     }
 
     if (hasMemory && memoryBar && memoryValEl) {

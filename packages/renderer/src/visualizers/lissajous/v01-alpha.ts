@@ -37,10 +37,10 @@ const lissajousMetadata: VisualizerMetadata = {
   params: [
     // Appearance
     { key: 'complexity', label: 'Complexity', min: 0, max: 7, step: 1, initial: 2, category: 'appearance' },
-    { key: 'trailLength', label: 'Trail Length', min: 64, max: 512, step: 16, initial: 384, category: 'appearance' },
-    { key: 'glowWidth', label: 'Glow Width', min: 0.5, max: 4.0, step: 0.25, initial: 2.5, category: 'appearance' },
-    { key: 'damping', label: 'Damping', min: 0.0, max: 0.5, step: 0.02, initial: 0.05, category: 'appearance' },
-    { key: 'rotationSpeed', label: 'Rotation', min: 0.0, max: 0.5, step: 0.02, initial: 0.08, category: 'appearance' },
+    { key: 'trailLength', label: 'Trail Length', min: 128, max: 512, step: 16, initial: 480, category: 'appearance' },
+    { key: 'glowWidth', label: 'Glow Width', min: 0.5, max: 4.0, step: 0.25, initial: 2.0, category: 'appearance' },
+    { key: 'damping', label: 'Damping', min: 0.0, max: 0.5, step: 0.02, initial: 0.03, category: 'appearance' },
+    { key: 'rotationSpeed', label: 'Rotation', min: 0.0, max: 0.5, step: 0.02, initial: 0.06, category: 'appearance' },
     // Audio mapping
     { key: 'bassToAmplitude', label: 'Bass → Amplitude', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly bass affects curve size' },
     { key: 'spectralToRatio', label: 'Spectral → Ratio', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly spectral centroid shifts frequency ratios' },
@@ -67,10 +67,10 @@ export class LissajousVisualizer implements Visualizer {
 
   private userParams: Record<string, number> = {
     complexity: 2,
-    trailLength: 384,
-    glowWidth: 2.5,
-    damping: 0.05,
-    rotationSpeed: 0.08,
+    trailLength: 480,
+    glowWidth: 2.0,
+    damping: 0.03,
+    rotationSpeed: 0.06,
     bassToAmplitude: 1.0,
     spectralToRatio: 1.0,
     rmsToGlow: 1.0,
@@ -83,13 +83,13 @@ export class LissajousVisualizer implements Visualizer {
   private viewOverrides: Record<string, boolean> = {};
 
   private smoothers = {
-    bass: new EMASmoothing(0.15),
-    mid: new EMASmoothing(0.2),
-    high: new EMASmoothing(0.25),
-    rms: new EMASmoothing(0.2),
-    spectralCentroid: new EMASmoothing(0.1),
-    beatPulse: new EMASmoothing(0.5),
-    amplitude: new EMASmoothing(0.1),
+    bass: new EMASmoothing(0.08),
+    mid: new EMASmoothing(0.1),
+    high: new EMASmoothing(0.12),
+    rms: new EMASmoothing(0.1),
+    spectralCentroid: new EMASmoothing(0.06),
+    beatPulse: new EMASmoothing(0.35),
+    amplitude: new EMASmoothing(0.06),
   };
 
   private material: THREE.ShaderMaterial | null = null;
@@ -150,10 +150,8 @@ export class LissajousVisualizer implements Visualizer {
     this.time += 1 / 60;
     this.phase += 0.02;
 
-    // Damping envelope decays over time, reset on beats
-    // Keep a generous floor so idle state always shows the curve
     this.dampingEnvelope *= (1.0 - this.userParams.damping / 60);
-    this.dampingEnvelope = Math.max(0.6, this.dampingEnvelope);
+    this.dampingEnvelope = Math.max(0.7, this.dampingEnvelope);
 
     if (this.latestFeatures) {
       const f = this.latestFeatures;
@@ -190,8 +188,8 @@ export class LissajousVisualizer implements Visualizer {
       u.u_center.value.set(this._centerX, this._centerY);
       u.u_freqA.value = preset.a + spectralOffset;
       u.u_freqB.value = preset.b;
-      u.u_freqA2.value = preset.a * 0.5 + 0.1;
-      u.u_freqB2.value = preset.b * 0.5 + 0.3;
+      u.u_freqA2.value = preset.a * 0.7 + 0.2;
+      u.u_freqB2.value = preset.b * 0.6 + 0.3;
       u.u_phaseDelta.value = Math.PI / 4 + this.smoothers.mid.value * 0.5;
       u.u_amplitude.value = this.smoothers.amplitude.value;
       u.u_damping.value = this.userParams.damping;
@@ -297,26 +295,31 @@ const FRAGMENT_SHADER = /* glsl */ `
     return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
   }
 
-  // Evaluate harmonograph position at parameter t
   vec2 harmonograph(float t, float time) {
-    float decay1 = exp(-u_damping * t * 0.1) * u_dampingEnvelope;
-    float decay2 = exp(-u_damping * t * 0.15) * u_dampingEnvelope;
+    float decay1 = exp(-u_damping * t * 0.08) * u_dampingEnvelope;
+    float decay2 = exp(-u_damping * t * 0.12) * u_dampingEnvelope;
+    float decay3 = exp(-u_damping * t * 0.18) * u_dampingEnvelope;
 
-    // Primary pendulum pair
     float x = sin(u_freqA * t + u_phaseDelta + time * u_rotationSpeed) * decay1;
     float y = sin(u_freqB * t + time * u_rotationSpeed * 0.7) * decay1;
 
-    // Secondary pendulum pair (smaller amplitude, different frequencies)
-    x += 0.3 * sin(u_freqA2 * t + time * 0.15) * decay2;
-    y += 0.3 * sin(u_freqB2 * t + 1.5 + time * 0.12) * decay2;
+    x += 0.35 * sin(u_freqA2 * t + time * 0.15) * decay2;
+    y += 0.35 * sin(u_freqB2 * t + 1.5 + time * 0.12) * decay2;
+
+    // Third harmonic layer for additional detail
+    float fA3 = u_freqA * 1.618 + 0.5;
+    float fB3 = u_freqB * 1.618 + 0.3;
+    x += 0.15 * sin(fA3 * t + time * 0.08 + 2.1) * decay3;
+    y += 0.15 * sin(fB3 * t + time * 0.06 + 0.7) * decay3;
 
     return vec2(x, y) * u_amplitude;
   }
 
-  // Distance from point p to the line segment a--b
   float segDist(vec2 p, vec2 a, vec2 b) {
     vec2 ab = b - a;
-    float t = clamp(dot(p - a, ab) / dot(ab, ab), 0.0, 1.0);
+    float len2 = dot(ab, ab);
+    if (len2 < 1e-10) return length(p - a);
+    float t = clamp(dot(p - a, ab) / len2, 0.0, 1.0);
     return length(p - (a + t * ab));
   }
 
@@ -328,8 +331,8 @@ const FRAGMENT_SHADER = /* glsl */ `
     float closestT = 0.0;
     int numSamples = int(u_trailLength);
 
-    // Compute distance to the parametric curve using line segments
-    float tStep = 16.0 / u_trailLength;
+    // Higher sampling density: finer step for smoother curves
+    float tStep = 12.0 / u_trailLength;
     vec2 prev = harmonograph(0.0, u_time);
     for (int i = 1; i < 512; i++) {
       if (i >= numSamples) break;
@@ -343,37 +346,52 @@ const FRAGMENT_SHADER = /* glsl */ `
       prev = cur;
     }
 
-    float glowRadius = u_glowWidth * 0.005;
+    float glowRadius = u_glowWidth * 0.004;
+
+    // Core glow (tight)
     float core = exp(-minDist * minDist / (glowRadius * glowRadius));
-    float soft = exp(-minDist * minDist / (glowRadius * glowRadius * 6.0));
-    float glow = core * 0.9 + soft * 0.15;
+    // Soft bloom (wide)
+    float bloom = exp(-minDist * minDist / (glowRadius * glowRadius * 8.0));
+    // Ultra-wide atmosphere
+    float atmosphere = exp(-minDist * minDist / (glowRadius * glowRadius * 40.0));
 
-    // Audio-driven brightness (strong idle base so curve is always visible)
-    float brightness = 0.9 + u_rms * 0.6 * u_rmsToGlow;
+    float glow = core * 0.85 + bloom * 0.2 + atmosphere * 0.06;
+
+    float brightness = 0.85 + u_rms * 0.7 * u_rmsToGlow;
     glow *= brightness;
-    glow += u_beatPulse * core * 0.3;
+    glow += u_beatPulse * (core * 0.4 + bloom * 0.15);
 
-    // Color: hue shifts along the curve parameter
-    float hue = fract(closestT * 0.06 + u_time * 0.05 + u_spectralCentroid * 0.2);
-    float sat = 0.6 + 0.3 * (1.0 - closestT / 16.0);
-    float val = glow;
+    // Color: dual-hue system for richer palette
+    float hue1 = fract(closestT * 0.05 + u_time * 0.04 + u_spectralCentroid * 0.25);
+    float hue2 = fract(hue1 + 0.33);
+    float sat = 0.5 + 0.4 * (1.0 - closestT / 12.0);
+    float mixFactor = 0.5 + 0.5 * sin(closestT * 0.3 + u_time * 0.2);
 
-    vec3 color = hsv2rgb(vec3(hue, sat, 1.0)) * val;
+    vec3 color1 = hsv2rgb(vec3(hue1, sat, 1.0));
+    vec3 color2 = hsv2rgb(vec3(hue2, sat * 0.8, 1.0));
+    vec3 curveColor = mix(color1, color2, mixFactor);
 
-    // Background
-    vec3 bg = vec3(0.01, 0.01, 0.025);
-    bg += vec3(0.015, 0.008, 0.03) * u_beatPulse;
+    vec3 color = curveColor * glow;
+
+    // Bloom gets a desaturated tint
+    vec3 bloomColor = mix(curveColor, vec3(0.6, 0.7, 1.0), 0.5) * atmosphere * 0.08;
+    color += bloomColor;
+
+    // Background with subtle radial gradient
+    vec2 bgUv = gl_FragCoord.xy / u_resolution;
+    float bgDist = length(bgUv - 0.5);
+    vec3 bg = mix(vec3(0.015, 0.012, 0.035), vec3(0.005, 0.005, 0.015), bgDist * 1.5);
+    bg += vec3(0.02, 0.01, 0.04) * u_beatPulse;
 
     vec3 finalColor = bg + color;
 
     // Vignette
     float aspect = u_resolution.x / u_resolution.y;
-    vec2 vUv2 = gl_FragCoord.xy / u_resolution;
-    float vignette = 1.0 - 0.35 * length((vUv2 - 0.5) * vec2(aspect, 1.0));
+    float vignette = 1.0 - 0.3 * length((bgUv - 0.5) * vec2(aspect, 1.0));
     finalColor *= vignette;
 
-    // Tone mapping
-    finalColor = finalColor / (1.0 + finalColor);
+    // Tone mapping (ACES-inspired)
+    finalColor = (finalColor * (2.51 * finalColor + 0.03)) / (finalColor * (2.43 * finalColor + 0.59) + 0.14);
 
     gl_FragColor = vec4(finalColor, 1.0);
   }

@@ -173,6 +173,15 @@ export async function createApp(container: HTMLElement): Promise<void> {
 
   const launchConfig = resolveLaunchConfig();
 
+  if (launchConfig.debug) {
+    (window as any).__cybernoetica_debug_enabled = true;
+  }
+
+  if (launchConfig.showLog) {
+    const logModeMap: Record<string, string> = { stream: 'stream', floating: 'floating', docked: 'stream' };
+    ui.openLogDisplay((logModeMap[launchConfig.showLog] ?? 'stream') as any);
+  }
+
   function startApp(vizType?: string, audioId?: string) {
     if (vizType && getVisualizerTypes().includes(vizType)) {
       vizManager.switchTo(vizType);
@@ -272,6 +281,7 @@ export async function createApp(container: HTMLElement): Promise<void> {
     vizManager.switchTo(type);
     updateAppearanceControls();
     ui.setActiveVisualizer(type);
+    ui.updateKeyboardShortcuts();
     store.setState({ visualizer: { type, userParams: {} } });
   });
 
@@ -280,7 +290,16 @@ export async function createApp(container: HTMLElement): Promise<void> {
     updateAppearanceControls();
     const type = vizManager.getActiveType();
     ui.setActiveVisualizer(type as VisualizerType);
+    ui.updateKeyboardShortcuts();
     store.setState({ visualizer: { type, userParams: {} } });
+  });
+
+  ui.onResetVisualizer(() => {
+    const type = vizManager.getActiveType();
+    if (type) {
+      vizManager.switchTo(type);
+      updateAppearanceControls();
+    }
   });
 
   ui.onTrackSelect((url, name) => {

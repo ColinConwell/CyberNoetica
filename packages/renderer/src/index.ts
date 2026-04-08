@@ -1,4 +1,5 @@
 export { SceneManager } from './scene-manager.js';
+export type { CursorMode } from './scene-manager.js';
 export { EMASmoothing } from './smoothing.js';
 
 // Registry API

@@ -1,25 +1,47 @@
 import * as THREE from 'three';
 import type { ViewportCapabilities } from './visualizers/types.js';
 
+export type CursorMode = 'pan' | 'orbit' | 'sculpt' | 'default';
+
+function buildCursorSvg(opts: { strokeAlpha: number; fillAlpha: number; circleRadius: number; ringAlpha: number }): string {
+  const s = opts.strokeAlpha;
+  const f = opts.fillAlpha;
+  const r = opts.ringAlpha;
+  return (
+    `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'>` +
+    `<circle cx='12' cy='12' r='8' stroke='rgba(255,255,255,${r})' stroke-width='0.8' fill='none'/>` +
+    `<line x1='12' y1='3' x2='12' y2='9' stroke='rgba(255,255,255,${s})' stroke-width='1'/>` +
+    `<line x1='12' y1='15' x2='12' y2='21' stroke='rgba(255,255,255,${s})' stroke-width='1'/>` +
+    `<line x1='3' y1='12' x2='9' y2='12' stroke='rgba(255,255,255,${s})' stroke-width='1'/>` +
+    `<line x1='15' y1='12' x2='21' y2='12' stroke='rgba(255,255,255,${s})' stroke-width='1'/>` +
+    `<circle cx='12' cy='12' r='${opts.circleRadius}' fill='rgba(255,255,255,${f})'/>` +
+    `</svg>`
+  );
+}
+
 const CURSOR_SVG_IDLE = `url("data:image/svg+xml,${encodeURIComponent(
-  `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'>` +
-  `<line x1='12' y1='3' x2='12' y2='9' stroke='rgba(255,255,255,0.45)' stroke-width='1'/>` +
-  `<line x1='12' y1='15' x2='12' y2='21' stroke='rgba(255,255,255,0.45)' stroke-width='1'/>` +
-  `<line x1='3' y1='12' x2='9' y2='12' stroke='rgba(255,255,255,0.45)' stroke-width='1'/>` +
-  `<line x1='15' y1='12' x2='21' y2='12' stroke='rgba(255,255,255,0.45)' stroke-width='1'/>` +
-  `<circle cx='12' cy='12' r='1' fill='rgba(255,255,255,0.5)'/>` +
-  `</svg>`,
+  buildCursorSvg({ strokeAlpha: 0.45, fillAlpha: 0.5, circleRadius: 1, ringAlpha: 0.2 }),
 )}") 12 12, crosshair`;
 
 const CURSOR_SVG_ACTIVE = `url("data:image/svg+xml,${encodeURIComponent(
-  `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'>` +
-  `<line x1='12' y1='3' x2='12' y2='9' stroke='rgba(255,255,255,0.7)' stroke-width='1.5'/>` +
-  `<line x1='12' y1='15' x2='12' y2='21' stroke='rgba(255,255,255,0.7)' stroke-width='1.5'/>` +
-  `<line x1='3' y1='12' x2='9' y2='12' stroke='rgba(255,255,255,0.7)' stroke-width='1.5'/>` +
-  `<line x1='15' y1='12' x2='21' y2='12' stroke='rgba(255,255,255,0.7)' stroke-width='1.5'/>` +
-  `<circle cx='12' cy='12' r='1.5' fill='rgba(255,255,255,0.8)'/>` +
-  `</svg>`,
+  buildCursorSvg({ strokeAlpha: 0.7, fillAlpha: 0.8, circleRadius: 1.5, ringAlpha: 0.4 }),
 )}") 12 12, move`;
+
+const CURSOR_SCULPT_IDLE = `url("data:image/svg+xml,${encodeURIComponent(
+  `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'>` +
+  `<circle cx='12' cy='12' r='8' stroke='rgba(140,160,255,0.4)' stroke-width='1' fill='none'/>` +
+  `<line x1='12' y1='6' x2='12' y2='18' stroke='rgba(140,160,255,0.6)' stroke-width='1.5'/>` +
+  `<line x1='6' y1='12' x2='18' y2='12' stroke='rgba(140,160,255,0.6)' stroke-width='1.5'/>` +
+  `</svg>`,
+)}") 12 12, crosshair`;
+
+const CURSOR_SCULPT_ACTIVE = `url("data:image/svg+xml,${encodeURIComponent(
+  `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'>` +
+  `<circle cx='12' cy='12' r='8' stroke='rgba(140,160,255,0.7)' stroke-width='1.5' fill='rgba(140,160,255,0.08)'/>` +
+  `<line x1='12' y1='6' x2='12' y2='18' stroke='rgba(140,160,255,0.8)' stroke-width='2'/>` +
+  `<line x1='6' y1='12' x2='18' y2='12' stroke='rgba(140,160,255,0.8)' stroke-width='2'/>` +
+  `</svg>`,
+)}") 12 12, crosshair`;
 
 export type ViewportDragHandler = (dx: number, dy: number) => void;
 export type ViewportZoomHandler = (delta: number) => void;
@@ -41,6 +63,7 @@ export class SceneManager {
   private lastPointerY = 0;
 
   private viewportCaps: ViewportCapabilities = { pan: true, zoom: true, orbit: false };
+  private cursorMode: CursorMode = 'default';
 
   private _onDrag: ViewportDragHandler | null = null;
   private _onZoom: ViewportZoomHandler | null = null;
@@ -68,10 +91,20 @@ export class SceneManager {
 
     const canvas = this.renderer.domElement;
 
+    const getIdleCursor = (): string => {
+      if (this.cursorMode === 'sculpt') return CURSOR_SCULPT_IDLE;
+      const canDrag = this.viewportCaps.pan || this.viewportCaps.orbit;
+      return canDrag ? CURSOR_SVG_IDLE : '';
+    };
+
+    const getActiveCursor = (): string => {
+      if (this.cursorMode === 'sculpt') return CURSOR_SCULPT_ACTIVE;
+      return CURSOR_SVG_ACTIVE;
+    };
+
     const updateIdleCursor = () => {
       if (this.dragging) return;
-      const canDrag = this.viewportCaps.pan || this.viewportCaps.orbit;
-      canvas.style.cursor = canDrag ? CURSOR_SVG_IDLE : '';
+      canvas.style.cursor = getIdleCursor();
     };
 
     // ── Pointer events (unified mouse + touch) ────────────────────
@@ -81,7 +114,7 @@ export class SceneManager {
       this.dragging = true;
       this.lastPointerX = e.clientX;
       this.lastPointerY = e.clientY;
-      canvas.style.cursor = CURSOR_SVG_ACTIVE;
+      canvas.style.cursor = getActiveCursor();
       canvas.setPointerCapture(e.pointerId);
       e.preventDefault();
     };
@@ -150,8 +183,20 @@ export class SceneManager {
 
   setViewportCapabilities(caps: ViewportCapabilities): void {
     this.viewportCaps = caps;
-    const canDrag = caps.pan || caps.orbit;
-    if (this.renderer) {
+    this._updateCursor();
+  }
+
+  setCursorMode(mode: CursorMode): void {
+    this.cursorMode = mode;
+    this._updateCursor();
+  }
+
+  private _updateCursor(): void {
+    if (!this.renderer || this.dragging) return;
+    if (this.cursorMode === 'sculpt') {
+      this.renderer.domElement.style.cursor = CURSOR_SCULPT_IDLE;
+    } else {
+      const canDrag = this.viewportCaps.pan || this.viewportCaps.orbit;
       this.renderer.domElement.style.cursor = canDrag ? CURSOR_SVG_IDLE : '';
     }
   }

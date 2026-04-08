@@ -26,7 +26,7 @@ export function createControlBar(): ControlBarAPI {
     border: `1px solid ${GLASS_BORDER}`,
     borderRadius: '40px',
     zIndex: '100',
-    transition: 'opacity 0.4s ease',
+    transition: 'opacity 0.4s ease, bottom 0.3s ease',
     opacity: '1',
   });
   document.body.appendChild(bar);

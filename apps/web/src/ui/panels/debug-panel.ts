@@ -1,12 +1,13 @@
-import { el, sectionLabel, glassButton } from '../components.js';
+import { el, sectionLabel, glassButton, infoBlock, updateInfoBlock, sectionLabelWithToggle } from '../components.js';
+import type { InfoBlockField } from '../components.js';
 import { ACCENT, FONT, GLASS_BORDER, TEXT_DIM, TEXT_PRIMARY, TEXT_SECONDARY } from '../styles.js';
 import type { MessageBus, AudioFeatures, BusMessage, Store } from '@cybernoetica/core';
 import {
-  installLogInterceptor,
   createLogDisplay,
   type LogLevel,
   type LogDisplayMode,
   type LogDisplay,
+  type LogStyle,
 } from '../log-display.js';
 
 interface CyberNoeticaGlobals {
@@ -32,7 +33,6 @@ export function renderDebugPanel(container: HTMLElement): () => void {
   }
 
   const { store, bus } = globals;
-  installLogInterceptor();
 
   // ── Performance ─────────────────────────────────────────────────
   container.appendChild(sectionLabel('Performance'));
@@ -79,22 +79,154 @@ export function renderDebugPanel(container: HTMLElement): () => void {
 
   // ── Visualizer ──────────────────────────────────────────────────
   container.appendChild(sectionLabel('Visualizer'));
-  const vizInfo = el('div', {
-    fontSize: '11px', color: TEXT_SECONDARY, marginBottom: '14px',
-    fontFamily: 'monospace', lineHeight: '1.6',
-  });
-  container.appendChild(vizInfo);
+  const vizInfoBlock = infoBlock([
+    { label: 'Type', value: '\u2014' },
+    { label: 'Playback', value: '\u2014' },
+    { label: 'View', value: '\u2014' },
+    { label: 'Params', value: '{}' },
+  ]);
+  container.appendChild(vizInfoBlock);
 
   // ── State ───────────────────────────────────────────────────────
-  container.appendChild(sectionLabel('State'));
+  let stateViewMode: 'json' | 'tree' = 'json';
+
+  const stateHeader = sectionLabelWithToggle('State', ['JSON', 'Tree'], 0, (idx) => {
+    stateViewMode = idx === 0 ? 'json' : 'tree';
+    const s = store.getState();
+    updateStateDisplay(s);
+  });
+  container.appendChild(stateHeader);
+
+  const stateContainer = el('div', { marginBottom: '10px' });
+  container.appendChild(stateContainer);
+
   const stateBox = el('pre', {
     fontSize: '10px', color: TEXT_DIM, fontFamily: 'monospace',
     background: 'rgba(0,0,0,0.3)', borderRadius: '8px', padding: '8px',
-    maxHeight: '120px', overflowY: 'auto', whiteSpace: 'pre-wrap',
-    wordBreak: 'break-all', marginBottom: '10px',
+    maxHeight: '140px', overflowY: 'auto', whiteSpace: 'pre-wrap',
+    wordBreak: 'break-all',
     border: `1px solid ${GLASS_BORDER}`,
+    margin: '0',
   });
-  container.appendChild(stateBox);
+  stateContainer.appendChild(stateBox);
+
+  function updateStateDisplay(state: any) {
+    stateContainer.innerHTML = '';
+    if (stateViewMode === 'json') {
+      stateBox.innerHTML = syntaxHighlightJSON(JSON.stringify(state, null, 2));
+      stateContainer.appendChild(stateBox);
+    } else {
+      const tree = buildPropertyTree(state, 0, true);
+      Object.assign(tree.style, {
+        background: 'rgba(0,0,0,0.25)',
+        border: `1px solid ${GLASS_BORDER}`,
+        borderRadius: '8px',
+        padding: '6px 8px',
+        maxHeight: '140px',
+        overflowY: 'auto',
+        fontSize: '10px',
+        fontFamily: 'monospace',
+      });
+      stateContainer.appendChild(tree);
+    }
+  }
+
+  function syntaxHighlightJSON(json: string): string {
+    return json.replace(
+      /("(\\u[\da-fA-F]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
+      (match) => {
+        let color = 'rgba(180, 220, 255, 0.6)';
+        if (/^"/.test(match)) {
+          color = match.endsWith(':') ? 'rgba(140, 160, 255, 0.7)' : 'rgba(120, 220, 140, 0.7)';
+        } else if (/true|false/.test(match)) {
+          color = 'rgba(255, 180, 80, 0.7)';
+        } else if (/null/.test(match)) {
+          color = 'rgba(255, 255, 255, 0.3)';
+        }
+        return `<span style="color:${color}">${match}</span>`;
+      }
+    );
+  }
+
+  function buildPropertyTree(obj: any, depth: number, expanded: boolean): HTMLElement {
+    const container = el('div', { paddingLeft: depth > 0 ? '12px' : '0' });
+
+    if (obj === null || obj === undefined) {
+      const val = el('span', { color: 'rgba(255,255,255,0.3)' });
+      val.textContent = String(obj);
+      container.appendChild(val);
+      return container;
+    }
+
+    if (typeof obj !== 'object') {
+      const val = el('span', {
+        color: typeof obj === 'string' ? 'rgba(120, 220, 140, 0.7)'
+          : typeof obj === 'number' ? 'rgba(180, 220, 255, 0.6)'
+          : typeof obj === 'boolean' ? 'rgba(255, 180, 80, 0.7)'
+          : TEXT_DIM,
+      });
+      val.textContent = typeof obj === 'string' ? `"${obj}"` : String(obj);
+      container.appendChild(val);
+      return container;
+    }
+
+    const entries = Object.entries(obj);
+    for (const [key, value] of entries) {
+      const isComplex = value !== null && typeof value === 'object';
+      const row = el('div', { padding: '1px 0' });
+
+      if (isComplex) {
+        let isOpen = depth < 1;
+        const toggle = el('span', {
+          cursor: 'pointer', userSelect: 'none',
+          color: TEXT_DIM, fontSize: '9px', marginRight: '4px',
+          display: 'inline-block', width: '10px',
+        });
+        toggle.textContent = isOpen ? '\u25BE' : '\u25B8';
+
+        const keyEl = el('span', { color: 'rgba(140, 160, 255, 0.7)' });
+        keyEl.textContent = key;
+
+        const preview = el('span', { color: TEXT_DIM, marginLeft: '4px', fontSize: '9px' });
+        const childEntries = Object.keys(value as object);
+        preview.textContent = Array.isArray(value) ? ` [${childEntries.length}]` : ` {${childEntries.length}}`;
+
+        const childContainer = el('div', {
+          display: isOpen ? 'block' : 'none',
+          borderLeft: '1px solid rgba(140, 160, 255, 0.15)',
+        });
+        const child = buildPropertyTree(value, depth + 1, isOpen);
+        childContainer.appendChild(child);
+
+        toggle.addEventListener('click', () => {
+          isOpen = !isOpen;
+          toggle.textContent = isOpen ? '\u25BE' : '\u25B8';
+          childContainer.style.display = isOpen ? 'block' : 'none';
+        });
+
+        row.append(toggle, keyEl, preview);
+        row.appendChild(childContainer);
+      } else {
+        const spacer = el('span', { display: 'inline-block', width: '10px', marginRight: '4px' });
+        const keyEl = el('span', { color: 'rgba(140, 160, 255, 0.7)' });
+        keyEl.textContent = key;
+        const sep = el('span', { color: TEXT_DIM });
+        sep.textContent = ': ';
+        const valEl = el('span', {
+          color: typeof value === 'string' ? 'rgba(120, 220, 140, 0.7)'
+            : typeof value === 'number' ? 'rgba(180, 220, 255, 0.6)'
+            : typeof value === 'boolean' ? 'rgba(255, 180, 80, 0.7)'
+            : 'rgba(255,255,255,0.3)',
+        });
+        valEl.textContent = typeof value === 'string' ? `"${value}"` : String(value);
+        row.append(spacer, keyEl, sep, valEl);
+      }
+
+      container.appendChild(row);
+    }
+
+    return container;
+  }
 
   const exportBtn = el('button', {
     padding: '6px 14px', fontSize: '10px', fontFamily: FONT,
@@ -114,10 +246,10 @@ export function renderDebugPanel(container: HTMLElement): () => void {
   // ── Bus ─────────────────────────────────────────────────────────
   container.appendChild(el('div', { height: '10px' }));
   container.appendChild(sectionLabel('Bus'));
-  const busInfo = el('div', {
-    fontSize: '11px', color: TEXT_DIM, fontFamily: 'monospace', marginBottom: '14px',
-  });
-  container.appendChild(busInfo);
+  const busInfoBlock = infoBlock([
+    { label: 'audio:features', value: '0 msg/s' },
+  ]);
+  container.appendChild(busInfoBlock);
 
   // ── Log Display Controls ────────────────────────────────────────
   container.appendChild(sectionLabel('Logs'));
@@ -125,9 +257,10 @@ export function renderDebugPanel(container: HTMLElement): () => void {
   let activeLogDisplay: LogDisplay | null = null;
   let currentLogFilter: LogLevel | 'all' = 'all';
   let currentLogMode: LogDisplayMode = 'stream';
+  let currentLogStyle: 'raw' | 'clean' = 'clean';
 
   const logControlRow = el('div', {
-    display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px',
+    display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '6px', alignItems: 'center',
   });
 
   // Level filter
@@ -137,10 +270,11 @@ export function renderDebugPanel(container: HTMLElement): () => void {
     border: `1px solid ${GLASS_BORDER}`, borderRadius: '6px',
     cursor: 'pointer', outline: 'none',
   }) as HTMLSelectElement;
-  for (const level of ['all', 'debug', 'info', 'warn', 'error'] as const) {
+  const levelLabels: [string, string][] = [['all', 'All'], ['debug', 'Debug'], ['info', 'Info'], ['warn', 'Warn'], ['error', 'Error']];
+  for (const [value, label] of levelLabels) {
     const opt = document.createElement('option');
-    opt.value = level;
-    opt.textContent = level;
+    opt.value = value;
+    opt.textContent = label;
     opt.style.background = '#111';
     levelSelect.appendChild(opt);
   }
@@ -151,13 +285,48 @@ export function renderDebugPanel(container: HTMLElement): () => void {
   });
   logControlRow.appendChild(levelSelect);
 
-  // Mode buttons
+  // Style toggle (Raw / Clean)
+  const styleToggle = el('div', {
+    display: 'flex', borderRadius: '6px', overflow: 'hidden',
+    border: `1px solid ${GLASS_BORDER}`,
+  });
+  const styleRawBtn = el('button', {
+    padding: '3px 8px', fontSize: '9px', fontFamily: FONT,
+    background: currentLogStyle === 'raw' ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.03)',
+    color: currentLogStyle === 'raw' ? TEXT_PRIMARY : TEXT_DIM,
+    border: 'none', cursor: 'pointer', outline: 'none',
+  });
+  styleRawBtn.textContent = 'Raw';
+  const styleCleanBtn = el('button', {
+    padding: '3px 8px', fontSize: '9px', fontFamily: FONT,
+    background: currentLogStyle === 'clean' ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.03)',
+    color: currentLogStyle === 'clean' ? TEXT_PRIMARY : TEXT_DIM,
+    border: 'none', cursor: 'pointer', outline: 'none',
+  });
+  styleCleanBtn.textContent = 'Clean';
+
+  function updateStyleButtons() {
+    styleRawBtn.style.background = currentLogStyle === 'raw' ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.03)';
+    styleRawBtn.style.color = currentLogStyle === 'raw' ? TEXT_PRIMARY : TEXT_DIM;
+    styleCleanBtn.style.background = currentLogStyle === 'clean' ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.03)';
+    styleCleanBtn.style.color = currentLogStyle === 'clean' ? TEXT_PRIMARY : TEXT_DIM;
+  }
+  styleRawBtn.addEventListener('click', () => { currentLogStyle = 'raw'; updateStyleButtons(); reopenLogDisplay(); });
+  styleCleanBtn.addEventListener('click', () => { currentLogStyle = 'clean'; updateStyleButtons(); reopenLogDisplay(); });
+  styleToggle.append(styleRawBtn, styleCleanBtn);
+  logControlRow.appendChild(styleToggle);
+
+  container.appendChild(logControlRow);
+
+  // Mode buttons row
+  const logModeRow = el('div', {
+    display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px',
+  });
+
   const modes: { label: string; mode: LogDisplayMode }[] = [
     { label: 'Stream', mode: 'stream' },
     { label: 'Float', mode: 'floating' },
-    { label: 'Bottom', mode: 'docked-bottom' },
-    { label: 'Left', mode: 'docked-left' },
-    { label: 'Right', mode: 'docked-right' },
+    { label: 'Fixed', mode: 'fixed' },
   ];
 
   const modeButtons: HTMLButtonElement[] = [];
@@ -168,23 +337,26 @@ export function renderDebugPanel(container: HTMLElement): () => void {
     btn.addEventListener('click', () => {
       if (currentLogMode === m.mode && activeLogDisplay) {
         closeLogDisplay();
+        updateModeButtons(null);
         return;
       }
       currentLogMode = m.mode;
       reopenLogDisplay();
-      for (const b of modeButtons) {
-        b.dataset.active = String(false);
-        b.style.background = 'rgba(255,255,255,0.06)';
-        b.style.borderColor = GLASS_BORDER;
-      }
-      btn.dataset.active = String(true);
-      btn.style.background = 'rgba(255,255,255,0.18)';
-      btn.style.borderColor = 'rgba(255,255,255,0.3)';
+      updateModeButtons(btn);
     });
     modeButtons.push(btn);
-    logControlRow.appendChild(btn);
+    logModeRow.appendChild(btn);
   }
-  container.appendChild(logControlRow);
+  container.appendChild(logModeRow);
+
+  function updateModeButtons(activeBtn: HTMLButtonElement | null) {
+    for (const b of modeButtons) {
+      const isActive = b === activeBtn;
+      b.dataset.active = String(isActive);
+      b.style.background = isActive ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.06)';
+      b.style.borderColor = isActive ? 'rgba(255,255,255,0.3)' : GLASS_BORDER;
+    }
+  }
 
   function closeLogDisplay() {
     if (activeLogDisplay) {
@@ -195,8 +367,15 @@ export function renderDebugPanel(container: HTMLElement): () => void {
 
   function reopenLogDisplay() {
     closeLogDisplay();
-    activeLogDisplay = createLogDisplay(currentLogMode, currentLogFilter);
+    activeLogDisplay = createLogDisplay(currentLogMode, currentLogFilter, currentLogStyle);
+    const activeBtn = modeButtons.find(b => {
+      const m = modes.find(md => md.label === b.textContent);
+      return m?.mode === currentLogMode;
+    }) ?? null;
+    updateModeButtons(activeBtn);
   }
+
+  reopenLogDisplay();
 
   // ── Live Data Subscriptions ─────────────────────────────────────
   let latestFeatures: AudioFeatures | null = null;
@@ -240,10 +419,17 @@ export function renderDebugPanel(container: HTMLElement): () => void {
     const viewState = activeViz?.getViewState?.() ?? {};
     const viewStr = Object.entries(viewState).map(([k, v]) =>
       `${k}:${typeof v === 'number' ? (Math.abs(v) < 0.01 ? v.toExponential(1) : v.toFixed(3)) : v}`
-    ).join(' ');
-    vizInfo.textContent = `Type: ${s.visualizer?.type || '\u2014'}\nPlayback: ${playbackState}\nView: ${viewStr || '\u2014'}\nParams: ${JSON.stringify(s.visualizer?.userParams || {}, null, 1)}`;
-    stateBox.textContent = JSON.stringify(s, null, 2);
-    busInfo.textContent = `audio:features ${busRate} msg/s`;
+    ).join('  ');
+    updateInfoBlock(vizInfoBlock, [
+      { label: 'Type', value: s.visualizer?.type || '\u2014' },
+      { label: 'Playback', value: playbackState },
+      { label: 'View', value: viewStr || '\u2014' },
+      { label: 'Params', value: JSON.stringify(s.visualizer?.userParams || {}) },
+    ]);
+    updateStateDisplay(s);
+    updateInfoBlock(busInfoBlock, [
+      { label: 'audio:features', value: `${busRate} msg/s` },
+    ]);
   }, 200);
 
   return () => {
@@ -256,6 +442,7 @@ export function renderDebugPanel(container: HTMLElement): () => void {
 
 export function isDebugEnabled(): boolean {
   if (typeof import.meta !== 'undefined' && (import.meta as any).env?.DEV) return true;
+  if ((window as any).__cybernoetica_debug_enabled) return true;
   try {
     return new URLSearchParams(window.location.search).has('debug');
   } catch { return false; }

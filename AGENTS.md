@@ -35,7 +35,8 @@ CyberNoetica/
 │           │   ├── start-screen.ts       # Start overlay with pulsing button
 │           │   ├── control-bar.ts        # 4-button bar (Pause/Visual/Sound/Control)
 │           │   ├── fade-manager.ts       # Auto-fade timer, mouse/key re-show
-│           │   ├── log-display.ts        # Log capture + 3 display modes
+│           │   ├── keyboard-overlay.ts   # Floating keyboard shortcut bar
+│           │   ├── log-display.ts        # Log capture + 3 display modes (Stream/Float/Fixed)
 │           │   └── panels/
 │           │       ├── visual-panel.ts   # Visualizer picker + categorized controls
 │           │       ├── sound-panel.ts    # Sources, hierarchical track list, toggles
@@ -147,11 +148,11 @@ CyberNoetica/
 
 **Visualizer system:** Self-registering visualizers organized in versioned folders. Each family (orbital, mandelbrot, julia, waveform, voronoi, lissajous, kaleidoscope) has a folder with `v{NN}-{greek}.ts` files. Parameters are categorized as `'appearance'` or `'audio-mapping'`. The UI groups controls accordingly. The orbital family has three versions: alpha (classic), beta (chaotic with drift), and gamma (interactive sculpt mode with user-placeable force fields).
 
-**View state.** Each visualizer exposes a per-family coordinate system via `getViewState()` / `setViewState()`. The coordinates have intuitive, domain-specific names (e.g., Mandelbrot uses `centerReal`/`centerImaginary`/`zoom`/`rotation`; Orbital uses `orbitAngle`/`elevation`/`distance`; Voronoi uses `centerX`/`centerY`/`zoom`). User interactions (drag, scroll, pinch) flow from SceneManager as raw deltas through VisualizerManager, which translates them into the appropriate `setViewState()` calls. The pan handler in VisualizerManager supports multiple field name patterns: `centerReal`/`centerImaginary` (Mandelbrot), `centerX`/`centerY` (Voronoi, Lissajous), and `seedReal`/`seedImaginary` (Julia). The canvas shows a `grab` cursor on hover when drag is available, and `grabbing` while dragging.
+**View state.** Each visualizer exposes a per-family coordinate system via `getViewState()` / `setViewState()`. The coordinates have intuitive, domain-specific names (e.g., Mandelbrot uses `centerReal`/`centerImaginary`/`zoom`/`rotation`; Orbital uses `orbitAngle`/`elevation`/`distance`; Voronoi uses `centerX`/`centerY`/`zoom`). User interactions (drag, scroll, pinch) flow from SceneManager as raw deltas through VisualizerManager, which translates them into the appropriate `setViewState()` calls. The pan handler in VisualizerManager supports multiple field name patterns: `centerReal`/`centerImaginary` (Mandelbrot), `centerX`/`centerY` (Voronoi, Lissajous), and `seedReal`/`seedImaginary` (Julia). The canvas shows a crosshair cursor with surrounding circle on hover when drag is available, with a brighter variant while dragging. SceneManager supports context-sensitive cursor modes (`pan`, `orbit`, `sculpt`, `default`) via `setCursorMode()`, with a dedicated blue crosshair cursor for sculpt mode.
 
 **Settings override system.** `settings.json` at repo root provides overrides (app title, UI theme, track display format, launch config). The `settings-loader.ts` module loads it via fetch with graceful fallback to defaults. In production builds, `settings.json` is emitted to `dist/` via a Vite plugin `generateBundle` hook and also copied in the Dockerfile.
 
-**Energy monitoring.** The Control panel includes a Performance section (always visible, not just debug) showing frame budget (color-coded bar), GPU stats (draw calls, triangles), JS heap memory (Chrome), and a Power Saver toggle that caps the render loop to ~30fps.
+**Energy monitoring.** The Control panel includes a Performance section (always visible, not just debug) showing FPS with target, frame budget (color-coded bar with percentage), power draw (Low/Medium/High with scalar %), GPU name (via `WEBGL_debug_renderer_info`), GPU object counts, CPU thread count (via `hardwareConcurrency`), draw calls, triangles, JS heap memory (Chrome), and a Power Saver toggle that caps the render loop to ~30fps.
 
 **Launch configuration.** The app supports auto-starting with a specific visualizer, audio source, and/or UI settings. Configuration sources (in ascending priority): `settings.json` `launch` block, URL search params (`?viz=`, `&audio=`, `&log=`, `&autostart`). When a visualizer or audio source is specified, the start screen is skipped and playback begins immediately. See "Launch Configuration" section below.
 
@@ -173,10 +174,11 @@ In dev mode or with `?debug` URL parameter, the Control panel shows:
 - Live audio feature bars
 - Visualizer params and state dump
 - Bus message rate
-- Log display with level filtering and 3 display modes:
-  - **Stream** -- Star Wars-style fading text overlay
-  - **Floating** -- draggable modal window
-  - **Docked** -- panel locked to bottom/left/right edge
+- Log display with level filtering (All/Debug/Info/Warn/Error), styling (Raw/Clean), and 3 placement modes:
+  - **Stream** -- Star Wars-style fading text overlay below control bar
+  - **Float** -- draggable modal window
+  - **Fixed** -- compact container below control panel
+- Keyboard shortcut overlay bar below the control bar (toggle-able)
 
 ### Settings Override (settings.json)
 
@@ -270,6 +272,19 @@ Every visualizer must implement `getViewState()` and `setViewState(partial)` and
 | Kaleidoscope | `zoom`, `rotation` | Zoom + fold rotation |
 
 When a user sets a view state value, the visualizer should pause its autonomous animation for that axis. The UI's "Reset View" button re-creates the visualizer to restore all defaults.
+
+### Interactivity
+
+Visualizers can optionally declare an `interactivity` field in their metadata:
+
+```typescript
+interactivity?: {
+  description: string;    // Hint text shown below the title
+  toggleParam?: string;   // Param key that enables/disables interactivity
+};
+```
+
+When a visualizer with interactivity is active, a fading hint text appears below the title, and the keyboard overlay shows relevant shortcuts. The cursor mode also changes (e.g., sculpt cursor for orbital gamma's force field placement).
 
 ### Versioning scheme
 

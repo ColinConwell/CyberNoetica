@@ -1,6 +1,6 @@
 import { listVisualizers } from '@cybernoetica/renderer';
 import type { ViewStateField } from '@cybernoetica/renderer';
-import { glassButton, sectionLabel, sectionDivider, el } from '../components.js';
+import { glassButton, sectionLabel, sectionLabelWithToggle, sectionDivider, el } from '../components.js';
 import { TEXT_DIM, TEXT_SECONDARY, TEXT_PRIMARY, ACCENT, GLASS_BORDER, FONT } from '../styles.js';
 
 export interface VisualPanelOpts {
@@ -17,7 +17,14 @@ export interface VisualPanelOpts {
 
 export function renderVisualPanel(panel: HTMLElement, opts: VisualPanelOpts): void {
   panel.innerHTML = '';
-  panel.appendChild(sectionLabel('Visualizer'));
+
+  let vizViewMode: 'grid' | 'list' = 'grid';
+
+  const vizHeader = sectionLabelWithToggle('Visualizer', ['\u25A6', '\u2261'], 0, (idx) => {
+    vizViewMode = idx === 0 ? 'grid' : 'list';
+    renderVizSelector();
+  });
+  panel.appendChild(vizHeader);
 
   const fateBtn = glassButton('Let Fate Decide', { accent: true });
   fateBtn.style.width = '100%';
@@ -29,19 +36,71 @@ export function renderVisualPanel(panel: HTMLElement, opts: VisualPanelOpts): vo
   panel.appendChild(fateBtn);
 
   const vizOptions = listVisualizers();
-  const grid = el('div', {
-    display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap',
-  });
-  for (const viz of vizOptions) {
-    const btn = glassButton(viz.label, { active: viz.type === opts.currentVizType });
-    btn.title = viz.description;
-    btn.addEventListener('click', () => {
-      if (opts.onVizChange) opts.onVizChange(viz.type);
-      opts.onClose();
-    });
-    grid.appendChild(btn);
+  const vizContainer = el('div', {});
+  panel.appendChild(vizContainer);
+
+  function renderVizSelector() {
+    vizContainer.innerHTML = '';
+
+    if (vizViewMode === 'grid') {
+      const grid = el('div', {
+        display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap',
+      });
+      for (const viz of vizOptions) {
+        const btn = glassButton(viz.label, { active: viz.type === opts.currentVizType });
+        btn.title = viz.description;
+        btn.addEventListener('click', () => {
+          if (opts.onVizChange) opts.onVizChange(viz.type);
+          opts.onClose();
+        });
+        grid.appendChild(btn);
+      }
+      vizContainer.appendChild(grid);
+    } else {
+      const list = el('div', {
+        display: 'flex', flexDirection: 'column', gap: '2px',
+      });
+      for (const viz of vizOptions) {
+        const isActive = viz.type === opts.currentVizType;
+        const row = el('div', {
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '6px 10px', borderRadius: '8px', cursor: 'pointer',
+          background: isActive ? 'rgba(140, 160, 255, 0.12)' : 'rgba(255,255,255,0.03)',
+          border: `1px solid ${isActive ? 'rgba(140, 160, 255, 0.3)' : 'transparent'}`,
+          transition: 'all 0.15s ease',
+        });
+        row.addEventListener('mouseenter', () => {
+          if (!isActive) row.style.background = 'rgba(255,255,255,0.08)';
+        });
+        row.addEventListener('mouseleave', () => {
+          if (!isActive) row.style.background = 'rgba(255,255,255,0.03)';
+        });
+        row.addEventListener('click', () => {
+          if (opts.onVizChange) opts.onVizChange(viz.type);
+          opts.onClose();
+        });
+
+        const nameEl = el('span', {
+          fontSize: '12px', fontWeight: '400',
+          color: isActive ? TEXT_PRIMARY : TEXT_SECONDARY,
+        });
+        nameEl.textContent = viz.label;
+
+        const descEl = el('span', {
+          fontSize: '10px', color: TEXT_DIM,
+          maxWidth: '55%', overflow: 'hidden', textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap', textAlign: 'right',
+        });
+        descEl.textContent = viz.description;
+
+        row.append(nameEl, descEl);
+        list.appendChild(row);
+      }
+      vizContainer.appendChild(list);
+    }
   }
-  panel.appendChild(grid);
+
+  renderVizSelector();
 
   // ── View State section ──────────────────────────────────────────
   if (opts.viewStateFields.length > 0) {

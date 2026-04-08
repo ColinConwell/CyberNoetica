@@ -196,6 +196,10 @@ const orbitalGammaMetadata: VisualizerMetadata = {
     { key: 'elevation', label: 'Elevation', min: -1.5, max: 1.5, step: 0.05 },
     { key: 'distance', label: 'Distance', min: 4, max: 30, step: 0.5 },
   ],
+  interactivity: {
+    description: 'Click to place attractors | Right-click for repulsors',
+    toggleParam: 'sculptMode',
+  },
 };
 
 export class OrbitalGammaVisualizer implements Visualizer {

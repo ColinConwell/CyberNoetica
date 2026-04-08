@@ -12,7 +12,7 @@ export { registerVisualizer, getVisualizerEntry, listVisualizers, getVisualizerT
 export type { VisualizerEntry } from './registry.js';
 
 // Types
-export type { Visualizer, VisualizerMetadata, VisualizerParam, ViewStateField, ViewportCapabilities } from './types.js';
+export type { Visualizer, VisualizerMetadata, VisualizerParam, ViewStateField, ViewportCapabilities, VisualizerInteractivity } from './types.js';
 
 // Direct class exports (backward compat -- prefer registry for new code)
 export { MandelbrotVisualizer } from './mandelbrot/index.js';

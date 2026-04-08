@@ -26,6 +26,11 @@ export interface ViewportCapabilities {
   orbit: boolean;
 }
 
+export interface VisualizerInteractivity {
+  description: string;
+  toggleParam?: string;
+}
+
 export interface VisualizerMetadata {
   type: string;
   label: string;
@@ -34,6 +39,7 @@ export interface VisualizerMetadata {
   params: VisualizerParam[];
   viewport: ViewportCapabilities;
   viewStateFields: ViewStateField[];
+  interactivity?: VisualizerInteractivity;
 }
 
 export interface Visualizer {

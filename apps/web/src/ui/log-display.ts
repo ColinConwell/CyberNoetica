@@ -1,12 +1,13 @@
 import { el } from './components.js';
-import { FONT, GLASS_BG, GLASS_BORDER, TEXT_DIM, TEXT_PRIMARY, TEXT_SECONDARY } from './styles.js';
+import { FONT, GLASS_BG, GLASS_BORDER, TEXT_DIM, TEXT_PRIMARY, TEXT_SECONDARY, ACCENT } from './styles.js';
 
 // ---------------------------------------------------------------------------
 // Log Types
 // ---------------------------------------------------------------------------
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
-export type LogDisplayMode = 'floating' | 'docked-bottom' | 'docked-left' | 'docked-right' | 'stream';
+export type LogDisplayMode = 'stream' | 'floating' | 'fixed';
+export type LogStyle = 'raw' | 'clean';
 
 interface LogEntry {
   level: LogLevel;
@@ -19,6 +20,20 @@ const LOG_COLORS: Record<LogLevel, string> = {
   info: 'rgba(180, 220, 255, 0.7)',
   warn: 'rgba(255, 200, 80, 0.8)',
   error: 'rgba(255, 90, 90, 0.9)',
+};
+
+const LOG_BG_COLORS: Record<LogLevel, string> = {
+  debug: 'rgba(140, 160, 255, 0.06)',
+  info: 'rgba(180, 220, 255, 0.04)',
+  warn: 'rgba(255, 200, 80, 0.06)',
+  error: 'rgba(255, 90, 90, 0.08)',
+};
+
+const LEVEL_LABELS: Record<LogLevel, string> = {
+  debug: 'DBG',
+  info: 'INF',
+  warn: 'WRN',
+  error: 'ERR',
 };
 
 // ---------------------------------------------------------------------------
@@ -96,13 +111,71 @@ export function uninstallLogInterceptor(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Shared Helpers
+// ---------------------------------------------------------------------------
+
+function formatTimestamp(ts: number): string {
+  const time = new Date(ts);
+  return `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}:${String(time.getSeconds()).padStart(2, '0')}`;
+}
+
+function appendLogLine(parent: HTMLElement, entry: LogEntry, style: LogStyle) {
+  if (style === 'clean') {
+    const line = el('div', {
+      padding: '3px 6px', marginBottom: '2px',
+      borderRadius: '4px',
+      background: LOG_BG_COLORS[entry.level],
+      display: 'flex', alignItems: 'baseline', gap: '8px',
+    });
+
+    const badge = el('span', {
+      fontSize: '9px', fontWeight: '600', letterSpacing: '0.05em',
+      padding: '1px 5px', borderRadius: '3px',
+      color: LOG_COLORS[entry.level],
+      background: LOG_BG_COLORS[entry.level],
+      border: `1px solid ${LOG_COLORS[entry.level]}`,
+      fontFamily: 'monospace', flexShrink: '0',
+    });
+    badge.textContent = LEVEL_LABELS[entry.level];
+
+    const ts = el('span', {
+      fontSize: '9px', color: TEXT_DIM, fontFamily: 'monospace', flexShrink: '0',
+    });
+    ts.textContent = formatTimestamp(entry.timestamp);
+
+    const msg = el('span', {
+      color: LOG_COLORS[entry.level],
+      whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+      fontSize: '11px', fontFamily: 'monospace', lineHeight: '1.4',
+    });
+    msg.textContent = entry.message;
+
+    line.append(badge, ts, msg);
+    parent.appendChild(line);
+  } else {
+    const line = el('div', {
+      padding: '2px 0', color: LOG_COLORS[entry.level] || TEXT_DIM,
+      borderBottom: '1px solid rgba(255,255,255,0.03)',
+      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+      fontFamily: 'monospace', fontSize: '11px',
+    });
+    line.textContent = `${formatTimestamp(entry.timestamp)} [${entry.level}] ${entry.message}`;
+    parent.appendChild(line);
+  }
+}
+
+function matches(entry: LogEntry, filter: LogLevel | 'all'): boolean {
+  return filter === 'all' || entry.level === filter;
+}
+
+// ---------------------------------------------------------------------------
 // Floating Modal Display
 // ---------------------------------------------------------------------------
 
-function createFloatingDisplay(filter: LogLevel | 'all'): { element: HTMLElement; cleanup: () => void } {
+function createFloatingDisplay(filter: LogLevel | 'all', style: LogStyle): { element: HTMLElement; cleanup: () => void } {
   const container = el('div', {
     position: 'fixed', top: '60px', right: '20px',
-    width: '420px', maxHeight: '50vh',
+    width: '460px', maxHeight: '50vh',
     background: GLASS_BG, backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
     border: `1px solid ${GLASS_BORDER}`, borderRadius: '12px',
     zIndex: '200', overflow: 'hidden',
@@ -116,8 +189,10 @@ function createFloatingDisplay(filter: LogLevel | 'all'): { element: HTMLElement
   });
   const headerText = el('span', { color: TEXT_DIM, fontSize: '10px', letterSpacing: '0.15em', textTransform: 'uppercase' });
   headerText.textContent = 'Log';
-  const closeBtn = el('span', { color: TEXT_DIM, cursor: 'pointer', fontSize: '14px' });
+  const closeBtn = el('span', { color: TEXT_DIM, cursor: 'pointer', fontSize: '14px', padding: '2px 4px' });
   closeBtn.textContent = '\u00d7';
+  closeBtn.addEventListener('mouseenter', () => { closeBtn.style.color = TEXT_PRIMARY; });
+  closeBtn.addEventListener('mouseleave', () => { closeBtn.style.color = TEXT_DIM; });
   header.append(headerText, closeBtn);
   container.appendChild(header);
 
@@ -126,23 +201,18 @@ function createFloatingDisplay(filter: LogLevel | 'all'): { element: HTMLElement
   });
   container.appendChild(logList);
 
-  // Populate from buffer
-  function matches(e: LogEntry) {
-    return filter === 'all' || e.level === filter;
-  }
-  for (const e of logBuffer.filter(matches)) {
-    appendLogLine(logList, e);
+  for (const e of logBuffer.filter(en => matches(en, filter))) {
+    appendLogLine(logList, e, style);
   }
   logList.scrollTop = logList.scrollHeight;
 
   const unsub = onLog((entry) => {
-    if (!matches(entry)) return;
-    appendLogLine(logList, entry);
+    if (!matches(entry, filter)) return;
+    appendLogLine(logList, entry, style);
     logList.scrollTop = logList.scrollHeight;
     while (logList.children.length > MAX_ENTRIES) logList.removeChild(logList.firstChild!);
   });
 
-  // Drag support
   let dragging = false, dx = 0, dy = 0;
   header.addEventListener('pointerdown', (e) => {
     dragging = true;
@@ -161,54 +231,60 @@ function createFloatingDisplay(filter: LogLevel | 'all'): { element: HTMLElement
 
   document.body.appendChild(container);
 
-  return {
-    element: container,
-    cleanup() {
-      unsub();
-      closeBtn.onclick = null;
-      container.remove();
-    },
+  const cleanup = () => {
+    unsub();
+    container.remove();
   };
+
+  closeBtn.addEventListener('click', cleanup);
+
+  return { element: container, cleanup };
 }
 
 // ---------------------------------------------------------------------------
-// Docked Panel Display
+// Fixed Panel Display (below control panel)
 // ---------------------------------------------------------------------------
 
-function createDockedDisplay(
-  filter: LogLevel | 'all',
-  position: 'bottom' | 'left' | 'right',
-): { element: HTMLElement; cleanup: () => void } {
-  const isHorizontal = position === 'bottom';
+function createFixedDisplay(filter: LogLevel | 'all', style: LogStyle): { element: HTMLElement; cleanup: () => void } {
+  const FIXED_LOG_HEIGHT = 160;
+
   const container = el('div', {
-    position: 'fixed',
-    ...(position === 'bottom' ? { bottom: '0', left: '0', right: '0', height: '180px' } : {}),
-    ...(position === 'left' ? { top: '0', left: '0', bottom: '0', width: '320px' } : {}),
-    ...(position === 'right' ? { top: '0', right: '0', bottom: '0', width: '320px' } : {}),
-    background: 'rgba(4, 4, 12, 0.92)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
-    borderTop: isHorizontal ? `1px solid ${GLASS_BORDER}` : 'none',
-    borderRight: position === 'left' ? `1px solid ${GLASS_BORDER}` : 'none',
-    borderLeft: position === 'right' ? `1px solid ${GLASS_BORDER}` : 'none',
-    zIndex: '190', overflow: 'hidden',
+    position: 'fixed', bottom: '0', left: '50%',
+    transform: 'translateX(-50%)',
+    width: '440px', maxWidth: '90vw', height: `${FIXED_LOG_HEIGHT}px`,
+    background: GLASS_BG, backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+    border: `1px solid ${GLASS_BORDER}`, borderRadius: '12px 12px 0 0',
+    zIndex: '88', overflow: 'hidden',
     fontFamily: 'monospace', fontSize: '11px',
+    transition: 'opacity 0.3s ease',
+    display: 'flex', flexDirection: 'column',
   });
+  container.setAttribute('data-log-fixed', 'true');
+  container.setAttribute('data-log-fixed-height', String(FIXED_LOG_HEIGHT));
+
+  const headerRow = el('div', {
+    padding: '5px 12px', display: 'flex', justifyContent: 'space-between',
+    alignItems: 'center', borderBottom: `1px solid ${GLASS_BORDER}`,
+    flexShrink: '0',
+  });
+  const headerText = el('span', { color: TEXT_DIM, fontSize: '9px', letterSpacing: '0.15em', textTransform: 'uppercase' });
+  headerText.textContent = 'Log Output';
+  headerRow.appendChild(headerText);
+  container.appendChild(headerRow);
 
   const logList = el('div', {
-    height: '100%', overflowY: 'auto', padding: '8px 12px',
+    flex: '1', overflowY: 'auto', padding: '4px 10px',
   });
   container.appendChild(logList);
 
-  function matches(e: LogEntry) {
-    return filter === 'all' || e.level === filter;
-  }
-  for (const e of logBuffer.filter(matches)) {
-    appendLogLine(logList, e);
+  for (const e of logBuffer.filter(en => matches(en, filter))) {
+    appendLogLine(logList, e, style);
   }
   logList.scrollTop = logList.scrollHeight;
 
   const unsub = onLog((entry) => {
-    if (!matches(entry)) return;
-    appendLogLine(logList, entry);
+    if (!matches(entry, filter)) return;
+    appendLogLine(logList, entry, style);
     logList.scrollTop = logList.scrollHeight;
     while (logList.children.length > MAX_ENTRIES) logList.removeChild(logList.firstChild!);
   });
@@ -225,41 +301,21 @@ function createDockedDisplay(
 // Stream Overlay Display (Star Wars style)
 // ---------------------------------------------------------------------------
 
-function createStreamDisplay(filter: LogLevel | 'all'): { element: HTMLElement; cleanup: () => void } {
+function createStreamDisplay(filter: LogLevel | 'all', style: LogStyle): { element: HTMLElement; cleanup: () => void } {
   const container = el('div', {
     position: 'fixed', bottom: '100px', left: '50%', transform: 'translateX(-50%)',
     width: '500px', maxWidth: '80vw',
     pointerEvents: 'none', zIndex: '85',
     display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px',
+    transition: 'bottom 0.3s ease',
   });
+  container.setAttribute('data-log-stream', 'true');
   document.body.appendChild(container);
 
-  function matches(e: LogEntry) {
-    return filter === 'all' || e.level === filter;
-  }
-
-  const unsub = onLog((entry) => {
-    if (!matches(entry)) return;
-    const line = el('div', {
-      fontFamily: 'monospace', fontSize: '11px',
-      color: LOG_COLORS[entry.level] || TEXT_DIM,
-      opacity: '0', textAlign: 'center',
-      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-      maxWidth: '100%',
-      animation: 'logStreamFade 4s ease-out forwards',
-    });
-    line.textContent = entry.message;
-    container.appendChild(line);
-
-    setTimeout(() => { line.remove(); }, 4200);
-    while (container.children.length > 5) container.removeChild(container.firstChild!);
-  });
-
-  // Inject animation keyframes
   if (!document.getElementById('log-stream-keyframes')) {
-    const style = document.createElement('style');
-    style.id = 'log-stream-keyframes';
-    style.textContent = `
+    const styleEl = document.createElement('style');
+    styleEl.id = 'log-stream-keyframes';
+    styleEl.textContent = `
       @keyframes logStreamFade {
         0% { opacity: 0; transform: translateY(8px); }
         10% { opacity: 1; transform: translateY(0); }
@@ -267,29 +323,57 @@ function createStreamDisplay(filter: LogLevel | 'all'): { element: HTMLElement; 
         100% { opacity: 0; transform: translateY(-16px); }
       }
     `;
-    document.head.appendChild(style);
+    document.head.appendChild(styleEl);
   }
+
+  function addStreamLine(entry: LogEntry) {
+    const isClean = style === 'clean';
+    const line = el('div', {
+      fontFamily: 'monospace', fontSize: '11px',
+      color: LOG_COLORS[entry.level] || TEXT_DIM,
+      opacity: '0', textAlign: 'center',
+      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+      maxWidth: '100%',
+      animation: 'logStreamFade 4s ease-out forwards',
+      ...(isClean ? {
+        padding: '2px 10px',
+        borderRadius: '4px',
+        background: LOG_BG_COLORS[entry.level],
+      } : {}),
+    });
+    if (isClean) {
+      const badge = document.createElement('span');
+      Object.assign(badge.style, {
+        fontSize: '9px', fontWeight: '600',
+        color: LOG_COLORS[entry.level],
+        marginRight: '6px',
+      });
+      badge.textContent = LEVEL_LABELS[entry.level];
+      line.appendChild(badge);
+      line.appendChild(document.createTextNode(entry.message));
+    } else {
+      line.textContent = entry.message;
+    }
+    container.appendChild(line);
+    setTimeout(() => { line.remove(); }, 4200);
+    while (container.children.length > 6) container.removeChild(container.firstChild!);
+  }
+
+  // Replay recent buffer entries with staggered animation
+  const recent = logBuffer.filter(en => matches(en, filter)).slice(-3);
+  recent.forEach((entry, i) => {
+    setTimeout(() => addStreamLine(entry), i * 200);
+  });
+
+  const unsub = onLog((entry) => {
+    if (!matches(entry, filter)) return;
+    addStreamLine(entry);
+  });
 
   return {
     element: container,
     cleanup() { unsub(); container.remove(); },
   };
-}
-
-// ---------------------------------------------------------------------------
-// Shared Helpers
-// ---------------------------------------------------------------------------
-
-function appendLogLine(parent: HTMLElement, entry: LogEntry) {
-  const line = el('div', {
-    padding: '2px 0', color: LOG_COLORS[entry.level] || TEXT_DIM,
-    borderBottom: '1px solid rgba(255,255,255,0.03)',
-    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-  });
-  const time = new Date(entry.timestamp);
-  const ts = `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}:${String(time.getSeconds()).padStart(2, '0')}`;
-  line.textContent = `${ts} [${entry.level}] ${entry.message}`;
-  parent.appendChild(line);
 }
 
 // ---------------------------------------------------------------------------
@@ -304,18 +388,15 @@ export interface LogDisplay {
 export function createLogDisplay(
   mode: LogDisplayMode,
   filter: LogLevel | 'all',
+  style: LogStyle = 'clean',
 ): LogDisplay {
   switch (mode) {
     case 'floating':
-      return createFloatingDisplay(filter);
-    case 'docked-bottom':
-      return createDockedDisplay(filter, 'bottom');
-    case 'docked-left':
-      return createDockedDisplay(filter, 'left');
-    case 'docked-right':
-      return createDockedDisplay(filter, 'right');
+      return createFloatingDisplay(filter, style);
+    case 'fixed':
+      return createFixedDisplay(filter, style);
     case 'stream':
-      return createStreamDisplay(filter);
+      return createStreamDisplay(filter, style);
   }
 }
 

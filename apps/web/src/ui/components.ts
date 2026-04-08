@@ -161,6 +161,114 @@ export function toggleSwitch(opts: ToggleSwitchOpts = {}): HTMLElement {
 }
 
 // ---------------------------------------------------------------------------
+// Info Block (glass-morphism mini-card for key-value data)
+// ---------------------------------------------------------------------------
+
+export interface InfoBlockField {
+  label: string;
+  value: string;
+  color?: string;
+}
+
+export function infoBlock(fields: InfoBlockField[]): HTMLElement {
+  const container = el('div', {
+    background: 'rgba(0, 0, 0, 0.25)',
+    border: `1px solid ${GLASS_BORDER}`,
+    borderRadius: '8px',
+    padding: '8px 10px',
+    marginBottom: '10px',
+  });
+
+  for (let i = 0; i < fields.length; i++) {
+    const field = fields[i];
+    const row = el('div', {
+      display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+      padding: '2px 0',
+      ...(i < fields.length - 1 ? { borderBottom: '1px solid rgba(255,255,255,0.04)' } : {}),
+    });
+    const label = el('span', {
+      fontSize: '10px', color: TEXT_DIM, fontFamily: FONT,
+    });
+    label.textContent = field.label;
+    const value = el('span', {
+      fontSize: '10px', color: field.color || TEXT_PRIMARY,
+      fontFamily: 'monospace', textAlign: 'right', maxWidth: '60%',
+      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+    });
+    value.textContent = field.value;
+    row.append(label, value);
+    container.appendChild(row);
+  }
+
+  return container;
+}
+
+export function updateInfoBlock(container: HTMLElement, fields: InfoBlockField[]): void {
+  const rows = container.children;
+  for (let i = 0; i < fields.length && i < rows.length; i++) {
+    const row = rows[i] as HTMLElement;
+    const valueEl = row.lastElementChild as HTMLElement;
+    if (valueEl) {
+      valueEl.textContent = fields[i].value;
+      if (fields[i].color) valueEl.style.color = fields[i].color!;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Section Label with Right-side Toggle
+// ---------------------------------------------------------------------------
+
+export function sectionLabelWithToggle(
+  text: string,
+  toggleLabels: string[],
+  activeIndex: number,
+  onToggle: (index: number) => void,
+): HTMLElement {
+  const row = el('div', {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    marginBottom: '10px',
+  });
+
+  const lbl = el('span', {
+    fontSize: '10px', fontWeight: '500', letterSpacing: '0.2em',
+    textTransform: 'uppercase', color: TEXT_DIM, fontFamily: FONT,
+  });
+  lbl.textContent = text;
+
+  const toggleGroup = el('div', {
+    display: 'flex', borderRadius: '5px', overflow: 'hidden',
+    border: `1px solid ${GLASS_BORDER}`,
+  });
+
+  const btns: HTMLElement[] = [];
+  for (let i = 0; i < toggleLabels.length; i++) {
+    const isActive = i === activeIndex;
+    const btn = el('button', {
+      padding: '2px 7px', fontSize: '9px', fontFamily: FONT,
+      background: isActive ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.03)',
+      color: isActive ? TEXT_PRIMARY : TEXT_DIM,
+      border: 'none', cursor: 'pointer', outline: 'none',
+      transition: 'all 0.15s ease',
+    });
+    btn.textContent = toggleLabels[i];
+    btn.addEventListener('click', () => {
+      onToggle(i);
+      btns.forEach((b, j) => {
+        const active = j === i;
+        b.style.background = active ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.03)';
+        b.style.color = active ? TEXT_PRIMARY : TEXT_DIM;
+      });
+    });
+    btns.push(btn);
+    toggleGroup.appendChild(btn);
+  }
+
+  row.append(lbl, toggleGroup);
+  return row;
+}
+
+// ---------------------------------------------------------------------------
 // Section Divider (gradient line)
 // ---------------------------------------------------------------------------
 
