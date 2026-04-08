@@ -26,7 +26,8 @@ CyberNoetica/
 │           │   ├── visualizer-manager.ts  # Switching, camera, viewport delegation
 │           │   └── playback-state.ts     # Formal playback state machine
 │           ├── utils/
-│           │   └── track-display.ts      # Track name formatting, folder grouping
+│           │   ├── track-display.ts      # Track name formatting, folder grouping
+│           │   └── launch-params.ts      # URL param + settings.json launch config
 │           ├── ui/
 │           │   ├── index.ts              # createUI() compositor, UIControls
 │           │   ├── styles.ts             # Theme system, glass-morphism constants
@@ -84,12 +85,14 @@ CyberNoetica/
 │       └── wasm/
 ├── crates/
 │   └── audio-analysis/                   # Rust -> WASM via wasm-pack
+├── scripts/
+│   └── upload-audio.sh                   # Audio upload/list/verify for Railway
 ├── data/
 │   └── sample-music/                     # .gitignored audio tracks
 ├── guidebook/
 │   ├── README.md
 │   └── Design-Principles.md             # Core design philosophy
-├── settings.json                         # Dev overrides (title, theme, track display)
+├── settings.json                         # Dev overrides (title, theme, launch config)
 ├── CLAUDE.md                             # Claude Code project instructions
 ├── JUSTFile                              # Development + deployment commands
 ├── Dockerfile
@@ -134,7 +137,9 @@ CyberNoetica/
 
 **View state.** Each visualizer exposes a per-family coordinate system via `getViewState()` / `setViewState()`. The coordinates have intuitive, domain-specific names (e.g., Mandelbrot uses `centerReal`/`centerImaginary`/`zoom`/`rotation`; Orbital uses `orbitAngle`/`elevation`/`distance`). User interactions (drag, scroll, pinch) flow from SceneManager as raw deltas through VisualizerManager, which translates them into the appropriate `setViewState()` calls. The Visual Panel shows live coordinate readouts with editable inputs. Setting a coordinate via `setViewState()` pauses the autonomous animation for that axis.
 
-**Settings override system.** `settings.json` at repo root provides dev-time overrides (app title, UI theme, track display format). The `settings-loader.ts` module loads it via fetch with graceful fallback to defaults.
+**Settings override system.** `settings.json` at repo root provides dev-time overrides (app title, UI theme, track display format, launch config). The `settings-loader.ts` module loads it via fetch with graceful fallback to defaults.
+
+**Launch configuration.** The app supports auto-starting with a specific visualizer, audio source, and/or UI settings. Configuration sources (in ascending priority): `settings.json` `launch` block, URL search params (`?viz=`, `&audio=`, `&log=`, `&autostart`). When a visualizer or audio source is specified, the start screen is skipped and playback begins immediately. See "Launch Configuration" section below.
 
 ## Development
 
@@ -176,6 +181,40 @@ The `settings.json` file at the repo root provides dev-time overrides. If absent
 
 Available themes: `glass-dark` (default), `glass-light`, `minimal`.
 Track formats: `raw`, `hyphen-to-space`, `parenthetical`, `track-number`.
+
+### Launch Configuration
+
+The app can auto-start with a specific visualizer and/or audio source, skipping the start screen. Configuration can come from `settings.json` or URL params.
+
+**URL params** (highest priority):
+- `?viz=mandelbrot` -- start with a specific visualizer type
+- `?audio=system` -- use system audio capture
+- `?audio=mic` -- use microphone
+- `?audio=track-name` -- play a specific sample track (fuzzy match)
+- `?log=stream` -- show log display (stream, floating, or docked)
+- `?autostart` -- skip start screen (implied when viz or audio is set)
+- `?debug` -- enable debug panel
+
+**settings.json** `launch` block:
+```json
+{
+  "launch": {
+    "visualizer": "mandelbrot",
+    "audio_source": "system",
+    "show_log": "stream",
+    "auto_start": true
+  }
+}
+```
+
+**JUSTFile shortcut:**
+```bash
+just launch-with viz=mandelbrot audio=system log=stream
+```
+
+### Dev Refresh Button
+
+In dev mode (`import.meta.env.DEV`), a small glass-morphism button appears in the top-right corner showing the platform-appropriate reload shortcut (Cmd+R on macOS, Ctrl+R elsewhere). Clicking it triggers `location.reload()` for a full refresh.
 
 ## Adding a New Visualizer
 
@@ -239,19 +278,26 @@ The app deploys to Railway as a Dockerized Express server serving the Vite SPA b
 
 - Single Railway service (`cybernoetica-web`) in the `Demo` environment
 - Express 5 server handles static files, audio streaming, auth, and COOP/COEP headers
-- Railway volume at `/data/audio` stores sample music (~458MB, 84 tracks)
+- Railway volume mounted at `/data/audio` stores sample music (84 tracks)
+- `AUDIO_DIR` env var (set in Railway and Dockerfile default) points to the volume mount
+- Server logs audio dir path, existence, and track count at startup for diagnostics
 - PWA service worker pre-caches JS/CSS/WASM
 - Auth gate: email whitelist + universal password, cookie-session based
 
 **Key commands:**
 ```bash
-just deploy              # Deploy to Railway
+just deploy              # Deploy to Railway + verify tracks
 just deploy-auth "a@b.com,c@d.com" "password"
-just upload file.mp3     # Upload audio
+just upload file.mp3     # Upload a single audio file
+just upload-dir dir/     # Upload all audio from a directory
 just list-tracks         # List deployed tracks
+just verify-tracks       # Check that tracks are available
+just reupload-tracks     # Re-upload all local audio (data/sample-music/)
 ```
 
-**Custom domain:** `app.imbasso.com` (CNAME to Railway).
+**Audio management** is handled by `scripts/upload-audio.sh` (subcommands: `upload`, `upload-dir`, `list`, `verify`). The JUSTFile commands are thin wrappers that pass `DEPLOY_HOST` and `GITHUB_TOKEN`.
+
+**Custom domain:** `app.imbasso.com` (CNAME to Railway -- ensure it points to the current Railway service URL).
 
 ## Known Issues
 
@@ -259,3 +305,5 @@ just list-tracks         # List deployed tracks
 - **Waveform vertical positioning** -- bass layer creates visual weight imbalance
 - **Knowledge portal** (GOAL.md Purpose 3) is entirely future work
 - **Cross-modal inputs** (webcam, wearables, gestures) not yet implemented
+- **Custom domain DNS** -- `app.imbasso.com` CNAME must point to the current Railway service URL (`cybernoetica-web-demo.up.railway.app`); if stale, it routes to an old deployment
+- **Railway volume persistence** -- volume data survives redeploys but not volume re-creation; use `just verify-tracks` after deploys and `just reupload-tracks` if empty

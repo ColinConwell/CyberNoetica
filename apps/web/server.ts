@@ -4,7 +4,7 @@ import cookieSession from 'cookie-session';
 import multer from 'multer';
 import { resolve, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
-import { readdirSync, statSync, existsSync, createReadStream, mkdirSync, renameSync } from 'fs';
+import { readdirSync, statSync, existsSync, createReadStream, mkdirSync, copyFileSync, unlinkSync } from 'fs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -148,7 +148,8 @@ app.post('/api/admin/upload', upload.single('file'), async (req, res) => {
   }
 
   mkdirSync(targetDir, { recursive: true });
-  renameSync(req.file.path, targetPath);
+  copyFileSync(req.file.path, targetPath);
+  unlinkSync(req.file.path);
 
   res.json({ success: true, path: subdir ? `${subdir}/${safeName}` : safeName });
 });
@@ -222,8 +223,10 @@ app.get('/{*splat}', (_req, res) => {
 });
 
 app.listen(PORT, () => {
+  const trackCount = scanAudioFiles(AUDIO_DIR).length;
   console.log(`Cybernoetica server on port ${PORT}`);
-  console.log(`  Audio: ${AUDIO_DIR}`);
+  console.log(`  Audio dir: ${AUDIO_DIR} (env AUDIO_DIR=${process.env.AUDIO_DIR ?? '<unset>'})`);
+  console.log(`  Audio dir exists: ${existsSync(AUDIO_DIR)}, tracks found: ${trackCount}`);
   console.log(`  Auth: ${GATE_PASSWORD ? 'enabled' : 'disabled (no GATE_PASSWORD)'}`);
   console.log(`  Admin: push access to ${GITHUB_REPO}`);
 });

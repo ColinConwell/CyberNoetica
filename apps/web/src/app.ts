@@ -1,5 +1,5 @@
 import { MessageBus } from '@cybernoetica/core';
-import { SceneManager } from '@cybernoetica/renderer';
+import { SceneManager, getVisualizerTypes } from '@cybernoetica/renderer';
 import { createUI } from './ui/index.js';
 import type { VisualizerType } from './ui/index.js';
 import { AudioPipeline } from './managers/audio-pipeline.js';
@@ -7,6 +7,7 @@ import { TrackManager } from './managers/track-manager.js';
 import { VisualizerManager } from './managers/visualizer-manager.js';
 import { PlaybackStateMachine } from './managers/playback-state.js';
 import { createAppStore } from './store.js';
+import { resolveLaunchConfig, resolveAudioTarget } from './utils/launch-params.js';
 
 export async function createApp(container: HTMLElement): Promise<void> {
   const bus = new MessageBus();
@@ -170,31 +171,88 @@ export async function createApp(container: HTMLElement): Promise<void> {
   const ui = createUI();
   ui.setSampleTracks(sampleTracks);
 
-  ui.onStart(() => {
-    vizManager.switchRandom();
-    updateAppearanceControls();
-    const type = vizManager.getActiveType();
-    ui.setActiveVisualizer(type as VisualizerType);
-    store.setState({ visualizer: { type, userParams: {} } });
+  const launchConfig = resolveLaunchConfig();
 
-    const track = trackManager.getRandomTrack();
-    if (track) {
-      playback.dispatch({ type: 'START' });
-      trackManager.loadTrack(track.url)
-        .then((loaded) => {
-          if (!loaded) return;
-          playback.dispatch({ type: 'LOADED' });
-          ui.setActiveTrack(track.name);
-          ui.setPlaying(true);
-          store.setState({ audio: { trackName: track.name, source: 'file' } });
-        })
-        .catch(err => {
-          playback.dispatch({ type: 'ERROR', error: (err as Error).message });
-          ui.showError(`Failed to load track: ${(err as Error).message}`);
-        });
+  function startApp(vizType?: string, audioId?: string) {
+    if (vizType && getVisualizerTypes().includes(vizType)) {
+      vizManager.switchTo(vizType);
+    } else {
+      vizManager.switchRandom();
     }
+    updateAppearanceControls();
+    const activeType = vizManager.getActiveType();
+    ui.setActiveVisualizer(activeType as VisualizerType);
+    store.setState({ visualizer: { type: activeType, userParams: {} } });
+
+    const audioTarget = audioId
+      ? resolveAudioTarget(audioId, sampleTracks)
+      : null;
+
+    if (audioTarget?.type === 'system') {
+      startSystemAudio();
+    } else if (audioTarget?.type === 'mic') {
+      startMicrophone();
+    } else if (audioTarget?.type === 'track') {
+      startWithTrack(audioTarget.url, audioTarget.name);
+    } else {
+      const track = trackManager.getRandomTrack();
+      if (track) startWithTrack(track.url, track.name);
+    }
+
     scene.start();
-  });
+  }
+
+  function startWithTrack(url: string, name: string) {
+    playback.dispatch({ type: 'START' });
+    trackManager.loadTrack(url)
+      .then((loaded) => {
+        if (!loaded) return;
+        playback.dispatch({ type: 'LOADED' });
+        ui.setActiveTrack(name);
+        ui.setPlaying(true);
+        store.setState({ audio: { trackName: name, source: 'file' } });
+      })
+      .catch(err => {
+        playback.dispatch({ type: 'ERROR', error: (err as Error).message });
+        ui.showError(`Failed to load track: ${(err as Error).message}`);
+      });
+  }
+
+  async function startSystemAudio() {
+    try {
+      playback.dispatch({ type: 'START' });
+      await audio.source.resume();
+      await audio.source.useSystemAudio();
+      playback.dispatch({ type: 'LOADED' });
+      ui.setActiveTrack('System Audio');
+      ui.setPlaying(true);
+      store.setState({ audio: { trackName: 'System Audio', source: 'system' } });
+    } catch (err) {
+      playback.dispatch({ type: 'ERROR', error: (err as Error).message });
+      ui.showError(`System audio capture failed: ${(err as Error).message}`);
+    }
+  }
+
+  async function startMicrophone() {
+    try {
+      playback.dispatch({ type: 'START' });
+      await audio.source.resume();
+      await audio.source.useMicrophone();
+      playback.dispatch({ type: 'LOADED' });
+      ui.setActiveTrack('Microphone');
+      ui.setPlaying(true);
+      store.setState({ audio: { trackName: 'Microphone', source: 'mic' } });
+    } catch (err) {
+      playback.dispatch({ type: 'ERROR', error: (err as Error).message });
+      ui.showError(`Microphone access denied: ${(err as Error).message}`);
+    }
+  }
+
+  if (launchConfig.autoStart) {
+    startApp(launchConfig.visualizer, launchConfig.audioSource);
+  } else {
+    ui.onStart(() => startApp());
+  }
 
   ui.onPause(() => {
     if (!playback.canDispatch('PAUSE')) return;

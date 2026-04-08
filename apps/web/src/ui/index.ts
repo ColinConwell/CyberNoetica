@@ -229,6 +229,40 @@ export function createUI(): UIControls {
     if (e.key === 'Escape' && activePanel) closePanel();
   });
 
+  // Dev-mode refresh button
+  let devRefreshBtn: HTMLElement | null = null;
+  if (import.meta.env.DEV) {
+    const isMac = navigator.platform.toUpperCase().includes('MAC');
+    const shortcutLabel = isMac ? '\u2318R' : 'Ctrl+R';
+
+    devRefreshBtn = el('button', {
+      position: 'fixed', top: '20px', right: '20px', zIndex: '150',
+      padding: '5px 12px',
+      background: 'rgba(255, 255, 255, 0.06)',
+      backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+      border: `1px solid ${GLASS_BORDER}`,
+      borderRadius: '8px',
+      color: TEXT_SECONDARY, fontFamily: FONT, fontSize: '11px',
+      fontWeight: '400', letterSpacing: '0.04em',
+      cursor: 'pointer', transition: 'all 0.2s ease',
+      opacity: '0.6',
+    });
+    devRefreshBtn.textContent = shortcutLabel;
+    devRefreshBtn.title = 'Full reload';
+
+    devRefreshBtn.addEventListener('mouseenter', () => {
+      devRefreshBtn!.style.opacity = '1';
+      devRefreshBtn!.style.background = 'rgba(255, 255, 255, 0.12)';
+    });
+    devRefreshBtn.addEventListener('mouseleave', () => {
+      devRefreshBtn!.style.opacity = '0.6';
+      devRefreshBtn!.style.background = 'rgba(255, 255, 255, 0.06)';
+    });
+    devRefreshBtn.addEventListener('click', () => location.reload());
+
+    document.body.appendChild(devRefreshBtn);
+  }
+
   return {
     onStart(h) { startScreen.onStart(h); },
     onPause(h) { pauseHandler = h; },
@@ -280,6 +314,7 @@ export function createUI(): UIControls {
       title.remove();
       errorEl.remove();
       fileInput.remove();
+      devRefreshBtn?.remove();
     },
   };
 }

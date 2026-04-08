@@ -3,10 +3,19 @@ export interface TrackDisplaySettings {
   show_folder_name?: boolean;
 }
 
+export interface LaunchSettings {
+  visualizer?: string;
+  audio_source?: string;
+  auto_start?: boolean;
+  show_log?: 'stream' | 'floating' | 'docked';
+  debug?: boolean;
+}
+
 export interface DevSettings {
   app_title?: string;
   track_display?: TrackDisplaySettings;
   ui_theme?: string;
+  launch?: LaunchSettings;
 }
 
 let _settings: DevSettings = {};

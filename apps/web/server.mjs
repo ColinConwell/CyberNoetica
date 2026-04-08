@@ -190,8 +190,10 @@ app.get("/{*splat}", (_req, res) => {
   res.sendFile(resolve(DIST_DIR, "index.html"));
 });
 app.listen(PORT, () => {
+  const trackCount = scanAudioFiles(AUDIO_DIR).length;
   console.log(`Cybernoetica server on port ${PORT}`);
-  console.log(`  Audio: ${AUDIO_DIR}`);
+  console.log(`  Audio dir: ${AUDIO_DIR} (env AUDIO_DIR=${process.env.AUDIO_DIR ?? "<unset>"})`);
+  console.log(`  Audio dir exists: ${existsSync(AUDIO_DIR)}, tracks found: ${trackCount}`);
   console.log(`  Auth: ${GATE_PASSWORD ? "enabled" : "disabled (no GATE_PASSWORD)"}`);
   console.log(`  Admin: push access to ${GITHUB_REPO}`);
 });

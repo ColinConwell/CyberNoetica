@@ -32,5 +32,6 @@ COPY --from=builder /app/apps/web/auth-page.html ./auth-page.html
 RUN npm install --no-save express compression cookie-session multer
 
 ENV NODE_ENV=production
+ENV AUDIO_DIR=/data/audio
 EXPOSE 3000
 CMD ["node", "server.mjs"]

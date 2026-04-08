@@ -29,9 +29,10 @@ TypeScript + Vite 6 + Three.js + GLSL. pnpm workspaces. Vitest with jsdom. Optio
 - Parameters use `category: 'appearance' | 'audio-mapping'`
 - Audio-mapping params are multipliers (0-2, default 1) on audio-driven computations
 - View state fields use `viewStateFields` in metadata + `getViewState()`/`setViewState()` methods
-- `settings.json` at repo root provides dev-time overrides (title, theme, track display) -- these are transient and should NOT be treated as canonical values
+- `settings.json` at repo root provides dev-time overrides (title, theme, track display, launch config) -- these are transient and should NOT be treated as canonical values
+- Launch config: URL params (`?viz=`, `&audio=`, `&autostart`) or `settings.json` `launch` block can auto-start with specific visualizer/audio source
 - Use `.env.local` for local env overrides (gitignored)
-- The JUSTFile contains all dev/deploy commands
+- The JUSTFile contains all dev/deploy commands; audio management via `scripts/upload-audio.sh`
 
 ## Design Principles
 
