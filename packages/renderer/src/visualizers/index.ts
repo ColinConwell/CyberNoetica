@@ -12,6 +12,10 @@ import './hyperbolic/index.js';
 import './chladni/index.js';
 import './phyllotaxis/index.js';
 import './superformula/index.js';
+import './quasicrystal/index.js';
+import './domainwarp/index.js';
+import './truchet/index.js';
+import './clifford/index.js';
 
 // Registry API
 export { registerVisualizer, getVisualizerEntry, listVisualizers, getVisualizerTypes } from './registry.js';
@@ -35,3 +39,7 @@ export { HyperbolicVisualizer } from './hyperbolic/index.js';
 export { ChladniVisualizer } from './chladni/index.js';
 export { PhyllotaxisVisualizer } from './phyllotaxis/index.js';
 export { SuperformulaVisualizer } from './superformula/index.js';
+export { QuasicrystalVisualizer } from './quasicrystal/index.js';
+export { DomainWarpVisualizer } from './domainwarp/index.js';
+export { TruchetVisualizer } from './truchet/index.js';
+export { CliffordVisualizer } from './clifford/index.js';
