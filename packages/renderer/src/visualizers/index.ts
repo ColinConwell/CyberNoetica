@@ -9,6 +9,9 @@ import './kaleidoscope/index.js';
 import './reaction/index.js';
 import './attractor/index.js';
 import './hyperbolic/index.js';
+import './chladni/index.js';
+import './phyllotaxis/index.js';
+import './superformula/index.js';
 
 // Registry API
 export { registerVisualizer, getVisualizerEntry, listVisualizers, getVisualizerTypes } from './registry.js';
@@ -29,3 +32,6 @@ export { KaleidoscopeVisualizer } from './kaleidoscope/index.js';
 export { ReactionDiffusionVisualizer } from './reaction/index.js';
 export { AttractorVisualizer } from './attractor/index.js';
 export { HyperbolicVisualizer } from './hyperbolic/index.js';
+export { ChladniVisualizer } from './chladni/index.js';
+export { PhyllotaxisVisualizer } from './phyllotaxis/index.js';
+export { SuperformulaVisualizer } from './superformula/index.js';
