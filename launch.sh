@@ -22,6 +22,7 @@ VIZ=""
 AUDIO=""
 LOG_MODE=""
 DEBUG=""
+MUTE=""
 AUTOSTART=""
 NO_OPEN=""
 PROD=""
@@ -52,6 +53,8 @@ OPTIONS
 
   --debug           Enable the debug panel
 
+  --mute            Mute speaker output (audio still drives visualizers)
+
   --autostart       Skip the start screen (implied when --viz or --audio set)
 
   --port PORT       Override the dev server port (default: 5173)
@@ -66,6 +69,7 @@ EXAMPLES
   ./launch.sh --viz orbital-gamma --audio system --debug
   ./launch.sh --audio mic --log stream
   ./launch.sh --prod --port 3000
+  ./launch.sh --viz mandelbrot --mute
   ./launch.sh --viz mandelbrot --no-open
 
 HELP
@@ -78,6 +82,7 @@ while [[ $# -gt 0 ]]; do
     --audio)     AUDIO="$2"; shift 2 ;;
     --log)       LOG_MODE="$2"; shift 2 ;;
     --debug)     DEBUG="1"; shift ;;
+    --mute)      MUTE="1"; shift ;;
     --autostart) AUTOSTART="1"; shift ;;
     --port)      PORT="$2"; shift 2 ;;
     --no-open)   NO_OPEN="1"; shift ;;
@@ -128,6 +133,7 @@ build_query() {
   [[ -n "$AUDIO" ]]     && _append "audio" "$AUDIO"
   [[ -n "$LOG_MODE" ]]  && _append "log" "$LOG_MODE"
   [[ -n "$DEBUG" ]]     && _append "debug" ""
+  [[ -n "$MUTE" ]]      && _append "mute" ""
   [[ -n "$AUTOSTART" ]] && _append "autostart" ""
 
   echo "$query"
@@ -152,6 +158,7 @@ echo "Starting Cybernoetica dev server on port ${PORT}..."
 [[ -n "$AUDIO" ]]    && echo "  Audio:      $AUDIO"
 [[ -n "$LOG_MODE" ]] && echo "  Log:        $LOG_MODE"
 [[ -n "$DEBUG" ]]    && echo "  Debug:      enabled"
+[[ -n "$MUTE" ]]     && echo "  Mute:       enabled"
 
 # Start dev server in background
 pnpm dev -- --port "$PORT" &

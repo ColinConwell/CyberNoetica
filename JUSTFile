@@ -80,6 +80,23 @@ test-watch:
 test-rust:
     cd crates/audio-analysis && cargo test
 
+# ─── Test / Dev Modes ─────────────────────────────────────────────────
+
+# Launch a muted visualizer test (audio drives visuals, no speaker output)
+# Examples:
+#   just test-viz                          # random viz + random track, muted
+#   just test-viz viz=mandelbrot           # specific viz, random track, muted
+#   just test-viz viz=orbital audio=system # specific viz + audio source, muted
+test-viz +params="":
+    #!/usr/bin/env bash
+    args="--mute --autostart"
+    for kv in {{params}}; do
+        key="${kv%%=*}"
+        val="${kv#*=}"
+        args="$args --$key $val"
+    done
+    ./launch.sh $args
+
 # ─── Install ──────────────────────────────────────────────────────────
 
 # Install all dependencies

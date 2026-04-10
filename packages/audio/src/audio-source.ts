@@ -3,18 +3,30 @@ export type AudioSourceType = 'none' | 'file' | 'mic' | 'system';
 export class AudioSource {
   private audioContext: AudioContext | null = null;
   private analyserNode: AnalyserNode | null = null;
+  private gainNode: GainNode | null = null;
   private sourceNode: AudioNode | null = null;
   private activeStream: MediaStream | null = null;
   private timeDomainData: Float32Array | null = null;
   private onEndedCallback: (() => void) | null = null;
   private _sourceType: AudioSourceType = 'none';
+  private _muted = false;
 
   get sourceType(): AudioSourceType { return this._sourceType; }
+  get muted(): boolean { return this._muted; }
+
+  setMuted(muted: boolean): void {
+    this._muted = muted;
+    if (this.gainNode) this.gainNode.gain.value = muted ? 0 : 1;
+  }
 
   async init(): Promise<void> {
     this.audioContext = new AudioContext();
     this.analyserNode = this.audioContext.createAnalyser();
     this.analyserNode.fftSize = 2048;
+    this.gainNode = this.audioContext.createGain();
+    if (this._muted) this.gainNode.gain.value = 0;
+    this.analyserNode.connect(this.gainNode);
+    this.gainNode.connect(this.audioContext.destination);
     this.timeDomainData = new Float32Array(this.analyserNode.fftSize);
   }
 
@@ -39,7 +51,6 @@ export class AudioSource {
     const source = this.audioContext.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(this.analyserNode);
-    this.analyserNode.connect(this.audioContext.destination);
     this.stopCurrentSource();
     this.sourceNode = source;
     this._sourceType = 'file';
@@ -119,6 +130,7 @@ export class AudioSource {
     this.audioContext?.close();
     this.audioContext = null;
     this.analyserNode = null;
+    this.gainNode = null;
     this._sourceType = 'none';
   }
 }

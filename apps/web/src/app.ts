@@ -153,6 +153,10 @@ export async function createApp(container: HTMLElement): Promise<void> {
 
   const launchConfig = resolveLaunchConfig();
 
+  if (launchConfig.mute) {
+    audio.source.setMuted(true);
+  }
+
   if (launchConfig.debug) {
     window.__cybernoetica_debug_enabled = true;
   }

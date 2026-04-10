@@ -6,6 +6,7 @@ export interface LaunchConfig {
   autoStart: boolean;
   showLog?: 'stream' | 'floating' | 'docked';
   debug?: boolean;
+  mute?: boolean;
 }
 
 const LOG_MODES = new Set(['stream', 'floating', 'docked']);
@@ -34,6 +35,7 @@ export function resolveLaunchConfig(): LaunchConfig {
     : undefined;
 
   const debug = params.has('debug') || (launch?.debug === true) || undefined;
+  const mute = params.has('mute') || (launch?.mute === true) || undefined;
 
   const explicitAutoStart = params.has('autostart')
     || launch?.auto_start === true;
@@ -42,7 +44,7 @@ export function resolveLaunchConfig(): LaunchConfig {
     || visualizer !== undefined
     || audioSource !== undefined;
 
-  return { visualizer, audioSource, autoStart, showLog, debug };
+  return { visualizer, audioSource, autoStart, showLog, debug, mute };
 }
 
 /**

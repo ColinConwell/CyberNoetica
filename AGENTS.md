@@ -106,7 +106,7 @@ CyberNoetica/
 │   ├── README.md
 │   └── Design-Principles.md             # Core design philosophy
 ├── settings.json                         # Dev + prod overrides (title, theme, launch config)
-├── launch.sh                             # Centralized launch script (--viz, --audio, --debug, etc.)
+├── launch.sh                             # Centralized launch script (--viz, --audio, --mute, --debug, etc.)
 ├── CLAUDE.md                             # Claude Code project instructions
 ├── JUSTFile                              # Development + deployment commands
 ├── Dockerfile
@@ -213,6 +213,7 @@ The app can auto-start with a specific visualizer and/or audio source, skipping 
 - `?audio=mic` -- use microphone
 - `?audio=track-name` -- play a specific sample track (fuzzy match)
 - `?log=stream` -- show log display (stream, floating, or docked)
+- `?mute` -- mute speaker output (audio still drives visualizers)
 - `?autostart` -- skip start screen (implied when viz or audio is set)
 - `?debug` -- enable debug panel
 
@@ -223,14 +224,18 @@ The app can auto-start with a specific visualizer and/or audio source, skipping 
     "visualizer": "mandelbrot",
     "audio_source": "system",
     "show_log": "stream",
-    "auto_start": true
+    "auto_start": true,
+    "mute": true
   }
 }
 ```
 
-**JUSTFile shortcut:**
+**JUSTFile shortcuts:**
 ```bash
 just launch-with viz=mandelbrot audio=system log=stream
+just test-viz                          # random viz + random track, muted
+just test-viz viz=mandelbrot           # specific viz, random track, muted
+just test-viz viz=orbital audio=system # specific viz + audio source, muted
 ```
 
 ### Dev Refresh Button

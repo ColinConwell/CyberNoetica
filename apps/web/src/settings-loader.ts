@@ -9,6 +9,7 @@ export interface LaunchSettings {
   auto_start?: boolean;
   show_log?: 'stream' | 'floating' | 'docked';
   debug?: boolean;
+  mute?: boolean;
 }
 
 export interface DevSettings {
