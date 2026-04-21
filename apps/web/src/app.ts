@@ -7,7 +7,9 @@ import { AudioPipeline } from './managers/audio-pipeline.js';
 import { TrackManager } from './managers/track-manager.js';
 import { VisualizerManager } from './managers/visualizer-manager.js';
 import { PlaybackStateMachine } from './managers/playback-state.js';
+import { QualityManager } from './managers/quality-manager.js';
 import { createAppStore } from './store.js';
+import type { QualityMode } from './store.js';
 import { resolveLaunchConfig, resolveAudioTarget } from './utils/launch-params.js';
 import type { CyberNoeticaGlobals } from './globals.js';
 import './globals.js';
@@ -33,8 +35,47 @@ export async function createApp(container: HTMLElement): Promise<void> {
   const sampleTracks = await trackManager.fetchSampleTracks();
   const playback = new PlaybackStateMachine(bus);
 
+  // Quality tier + adaptive governor. Owns pixel-ratio and frame cadence.
+  const quality = new QualityManager({
+    bus,
+    applyTier: (tier) => {
+      scene.setQualityTier(tier);
+      vizManager.resize(window.innerWidth, window.innerHeight);
+    },
+    getDebugInfo: () => scene.getRendererDebugInfo(),
+  });
+  quality.initialize();
+  const savedQuality = store.getState().ui.quality ?? 'auto';
+  quality.setMode(savedQuality);
+
+  const QUALITY_CYCLE: QualityMode[] = ['auto', 'performance', 'balanced', 'high', 'ultra'];
   window.__cybernoetica!.playback = playback;
   window.__cybernoetica!.vizManager = vizManager;
+  window.__cybernoetica!.quality = {
+    getMode: () => quality.getMode(),
+    getTier: () => quality.getTier(),
+    setMode: (mode) => {
+      quality.setMode(mode);
+      store.setState({ ui: { quality: mode } });
+    },
+    cycle: () => {
+      const current = quality.getMode();
+      const idx = QUALITY_CYCLE.indexOf(current);
+      const next = QUALITY_CYCLE[(idx + 1) % QUALITY_CYCLE.length];
+      quality.setMode(next);
+      store.setState({ ui: { quality: next } });
+    },
+  };
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'q' || e.key === 'Q') {
+      if (e.target instanceof HTMLElement) {
+        const tag = e.target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target.isContentEditable) return;
+      }
+      window.__cybernoetica!.quality!.cycle();
+    }
+  });
 
   const saved = store.getState();
   if (saved.ui.autoPlay !== undefined || saved.ui.shuffle !== undefined) {
@@ -107,8 +148,11 @@ export async function createApp(container: HTMLElement): Promise<void> {
       setViewState: (partial) => viz.setViewState(partial),
       onResetView: () => {
         const type = vizManager.getActiveType();
-        if (type) vizManager.switchTo(type);
-        updateAppearanceControls();
+        if (type) {
+          void vizManager.switchTo(type).then(() => updateAppearanceControls());
+        } else {
+          updateAppearanceControls();
+        }
       },
     });
 
@@ -166,11 +210,15 @@ export async function createApp(container: HTMLElement): Promise<void> {
     ui.openLogDisplay((logModeMap[launchConfig.showLog] ?? 'stream') as any);
   }
 
-  function startApp(vizType?: string, audioId?: string) {
+  async function startApp(vizType?: string, audioId?: string) {
+    // Start rAF early so the loading indicator (if any) renders. switchTo
+    // is async now because the selected visualizer may not yet be loaded.
+    scene.start();
+
     if (vizType && getVisualizerTypes().includes(vizType)) {
-      vizManager.switchTo(vizType);
+      await vizManager.switchTo(vizType);
     } else {
-      vizManager.switchRandom();
+      await vizManager.switchRandom();
     }
     updateAppearanceControls();
     const activeType = vizManager.getActiveType();
@@ -182,17 +230,15 @@ export async function createApp(container: HTMLElement): Promise<void> {
       : null;
 
     if (audioTarget?.type === 'system') {
-      startSystemAudio();
+      void startSystemAudio();
     } else if (audioTarget?.type === 'mic') {
-      startMicrophone();
+      void startMicrophone();
     } else if (audioTarget?.type === 'track') {
       startWithTrack(audioTarget.url, audioTarget.name);
     } else {
       const track = trackManager.getRandomTrack();
       if (track) startWithTrack(track.url, track.name);
     }
-
-    scene.start();
   }
 
   function startWithTrack(url: string, name: string) {
@@ -242,9 +288,9 @@ export async function createApp(container: HTMLElement): Promise<void> {
   }
 
   if (launchConfig.autoStart) {
-    startApp(launchConfig.visualizer, launchConfig.audioSource);
+    void startApp(launchConfig.visualizer, launchConfig.audioSource);
   } else {
-    ui.onStart(() => startApp());
+    ui.onStart(() => { void startApp(); });
   }
 
   ui.onPause(() => {
@@ -262,27 +308,28 @@ export async function createApp(container: HTMLElement): Promise<void> {
   });
 
   ui.onVisualizerChange((type) => {
-    vizManager.switchTo(type);
-    updateAppearanceControls();
-    ui.setActiveVisualizer(type);
-    ui.updateKeyboardShortcuts();
-    store.setState({ visualizer: { type, userParams: {} } });
+    void vizManager.switchTo(type).then(() => {
+      updateAppearanceControls();
+      ui.setActiveVisualizer(type);
+      ui.updateKeyboardShortcuts();
+      store.setState({ visualizer: { type, userParams: {} } });
+    });
   });
 
   ui.onRandomVisualizer(() => {
-    vizManager.switchRandom(vizManager.getActiveType());
-    updateAppearanceControls();
-    const type = vizManager.getActiveType();
-    ui.setActiveVisualizer(type as VisualizerType);
-    ui.updateKeyboardShortcuts();
-    store.setState({ visualizer: { type, userParams: {} } });
+    void vizManager.switchRandom(vizManager.getActiveType()).then(() => {
+      updateAppearanceControls();
+      const type = vizManager.getActiveType();
+      ui.setActiveVisualizer(type as VisualizerType);
+      ui.updateKeyboardShortcuts();
+      store.setState({ visualizer: { type, userParams: {} } });
+    });
   });
 
   ui.onResetVisualizer(() => {
     const type = vizManager.getActiveType();
     if (type) {
-      vizManager.switchTo(type);
-      updateAppearanceControls();
+      void vizManager.switchTo(type).then(() => updateAppearanceControls());
     }
   });
 
@@ -380,35 +427,39 @@ export async function createApp(container: HTMLElement): Promise<void> {
     vizManager.resize(w, h);
   });
 
-  // Render loop
+  // Render loop. Frame cadence is owned by QualityManager — it decides when to
+  // skip frames (60 Hz cap, auto governor stepping). The gate below short-circuits
+  // both the JS tick and the GPU render in sync, which the old `powerSaver` knob
+  // failed to do (it skipped tick but still re-rendered every rAF).
   let pauseFade = 1.0;
-  let lastFrameTime = performance.now();
+  let lastRenderMs = performance.now();
   let frameCount = 0;
   let fps = 0;
   let fpsTimer = performance.now();
-  let skipFrame = false;
+  let shouldRenderThisFrame = false;
 
+  // Legacy compat — powerSaver now just toggles between auto and performance tier.
   window.__cybernoetica!.powerSaver = false;
   window.__cybernoetica!.setPowerSaver = (enabled: boolean) => {
     window.__cybernoetica!.powerSaver = enabled;
+    quality.setMode(enabled ? 'performance' : 'auto');
   };
 
-  scene.onRender(() => {
-    const powerSaver = window.__cybernoetica?.powerSaver;
-    if (powerSaver) {
-      skipFrame = !skipFrame;
-      if (skipFrame) return;
-    }
+  scene.setFrameGate(() => shouldRenderThisFrame);
 
+  scene.onRender(() => {
     const now = performance.now();
+    shouldRenderThisFrame = quality.tick(now);
+    if (!shouldRenderThisFrame) return;
+
     frameCount++;
     if (now - fpsTimer >= 1000) {
       fps = frameCount;
       frameCount = 0;
       fpsTimer = now;
     }
-    const frameTime = now - lastFrameTime;
-    lastFrameTime = now;
+    const frameTime = now - lastRenderMs;
+    lastRenderMs = now;
 
     if (playback.isPlaying) {
       audio.pushFrame();
@@ -420,10 +471,13 @@ export async function createApp(container: HTMLElement): Promise<void> {
     vizManager.tick();
 
     if (frameCount % 6 === 0) {
+      const snap = quality.getDebugSnapshot();
       window.__cybernoetica_debug = {
         fps, frameTime: Math.round(frameTime * 10) / 10,
         vizType: vizManager.getActiveType(),
         playbackState: playback.state,
+        qualityTier: snap.tier,
+        qualityMode: snap.mode,
       };
     }
   });

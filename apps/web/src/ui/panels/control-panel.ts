@@ -212,27 +212,77 @@ function renderEnergySection(container: HTMLElement): () => void {
     container.appendChild(memoryBar.outer);
   }
 
-  // Power saver toggle
-  const powerSaverContainer = el('div', {
-    marginTop: '6px', marginBottom: '4px',
+  // Quality mode selector (replaces the old binary power-saver toggle).
+  // The governor adjusts pixelRatio + frame cadence based on this setting.
+  const qualityContainer = el('div', {
+    marginTop: '8px', marginBottom: '4px',
   });
-  const isPowerSaver = globals?.powerSaver ?? false;
-  const powerSaverToggle = toggleSwitch({
-    checked: isPowerSaver,
-    label: 'Power saver (30 fps)',
-    onChange(checked) {
-      if (globals?.setPowerSaver) globals.setPowerSaver(checked);
-    },
+  const qualityHeader = el('div', {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: '6px', fontSize: '11px', color: TEXT_DIM,
   });
-  powerSaverContainer.appendChild(powerSaverToggle);
-  container.appendChild(powerSaverContainer);
+  const qualityLabel = el('span', {});
+  qualityLabel.textContent = 'Quality';
+  const qualityTierLabel = el('span', { fontFamily: 'monospace', color: TEXT_PRIMARY });
+  qualityHeader.append(qualityLabel, qualityTierLabel);
+  qualityContainer.appendChild(qualityHeader);
+
+  const qualityRow = el('div', {
+    display: 'flex', gap: '4px', flexWrap: 'wrap',
+  });
+  const QUALITY_MODES: Array<{ key: 'auto' | 'performance' | 'balanced' | 'high' | 'ultra'; label: string }> = [
+    { key: 'auto', label: 'Auto' },
+    { key: 'performance', label: 'Perf' },
+    { key: 'balanced', label: 'Bal' },
+    { key: 'high', label: 'High' },
+    { key: 'ultra', label: 'Ultra' },
+  ];
+  const qualityButtons: Array<{ key: string; el: HTMLElement }> = [];
+  for (const mode of QUALITY_MODES) {
+    const btn = el('button', {
+      flex: '1 1 auto', minWidth: '40px', padding: '4px 6px',
+      fontSize: '10px', fontFamily: FONT, cursor: 'pointer',
+      borderRadius: '6px', border: `1px solid ${GLASS_BORDER}`,
+      background: 'rgba(255,255,255,0.03)', color: TEXT_SECONDARY,
+      transition: 'all 0.15s ease',
+    });
+    btn.textContent = mode.label;
+    btn.addEventListener('click', () => {
+      globals?.quality?.setMode(mode.key);
+      updateQualityUI();
+    });
+    qualityRow.appendChild(btn);
+    qualityButtons.push({ key: mode.key, el: btn });
+  }
+  qualityContainer.appendChild(qualityRow);
+
+  const qualityHint = el('div', {
+    fontSize: '10px', color: TEXT_DIM, marginTop: '4px',
+  });
+  qualityHint.textContent = 'Press Q to cycle';
+  qualityContainer.appendChild(qualityHint);
+
+  container.appendChild(qualityContainer);
+
+  function updateQualityUI() {
+    const mode = globals?.quality?.getMode() ?? 'auto';
+    const tier = globals?.quality?.getTier() ?? 'balanced';
+    qualityTierLabel.textContent = mode === 'auto' ? `Auto \u2192 ${tier}` : tier;
+    for (const { key, el: btn } of qualityButtons) {
+      const active = key === mode;
+      btn.style.background = active ? 'rgba(140, 160, 255, 0.2)' : 'rgba(255,255,255,0.03)';
+      btn.style.color = active ? TEXT_PRIMARY : TEXT_SECONDARY;
+      btn.style.borderColor = active ? 'rgba(140, 160, 255, 0.45)' : GLASS_BORDER;
+    }
+  }
+  updateQualityUI();
 
   const interval = setInterval(() => {
+    updateQualityUI();
     const info = debugInfo();
     const frameTime = info?.frameTime ?? 0;
-    const isPowerSaverActive = globals?.powerSaver ?? false;
-    const targetMs = isPowerSaverActive ? 33.33 : 16.67;
-    const targetFps = isPowerSaverActive ? 30 : 60;
+    const targetMs = 16.67;
+    const targetFps = 60;
     const usage = Math.min(frameTime / targetMs, 2.0);
     const pct = Math.round(usage * 100);
 

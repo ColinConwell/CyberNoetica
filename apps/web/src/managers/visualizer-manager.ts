@@ -4,15 +4,20 @@ import {
   getVisualizerEntry,
   getVisualizerTypes,
   listVisualizers,
+  loadVisualizer,
 } from '@cybernoetica/renderer';
 import type { Visualizer, VisualizerMetadata } from '@cybernoetica/renderer';
 
 const DEFAULT_DRIFT_SPEED = 0.08;
 
+export type SwitchHook = (type: string, phase: 'loading' | 'ready' | 'error', detail?: Error) => void;
+
 export class VisualizerManager {
   private activeViz: Visualizer | null = null;
   private activeType = '';
   private driftEnabled = true;
+  private pendingType: string | null = null;
+  private switchHook: SwitchHook | null = null;
 
   constructor(
     private bus: MessageBus,
@@ -23,15 +28,37 @@ export class VisualizerManager {
     scene.onViewportReset(() => this.handleReset());
   }
 
-  switchTo(type: string): Visualizer | null {
+  onSwitch(hook: SwitchHook | null): void {
+    this.switchHook = hook;
+  }
+
+  async switchTo(type: string): Promise<Visualizer | null> {
+    // Mark pending so concurrent rapid switches resolve to the last requested type.
+    this.pendingType = type;
+    let entry = getVisualizerEntry(type);
+    if (!entry) {
+      this.switchHook?.(type, 'loading');
+      try {
+        entry = await loadVisualizer(type) ?? undefined;
+      } catch (err) {
+        this.switchHook?.(type, 'error', err as Error);
+        return null;
+      }
+      if (this.pendingType !== type) {
+        // A newer switch has overridden this one — abandon silently.
+        return null;
+      }
+      if (!entry) {
+        this.switchHook?.(type, 'error', new Error(`Visualizer not found: ${type}`));
+        return null;
+      }
+    }
+
     if (this.activeViz) {
       this.activeViz.dispose();
       while (this.scene.scene.children.length > 0)
         this.scene.scene.remove(this.scene.scene.children[0]);
     }
-
-    const entry = getVisualizerEntry(type);
-    if (!entry) return null;
 
     this.activeType = type;
     this.activeViz = entry.create(this.bus);
@@ -51,10 +78,14 @@ export class VisualizerManager {
     this.scene.setViewportCapabilities(this.activeViz.metadata.viewport);
     this.driftEnabled = true;
 
+    // Move first-frame shader compile off the critical path.
+    this.scene.precompile();
+
+    this.switchHook?.(type, 'ready');
     return this.activeViz;
   }
 
-  switchRandom(exclude?: string): Visualizer | null {
+  async switchRandom(exclude?: string): Promise<Visualizer | null> {
     const types = getVisualizerTypes();
     const candidates = exclude ? types.filter(t => t !== exclude) : types;
     const pick = candidates.length > 0 ? candidates : types;
@@ -153,7 +184,7 @@ export class VisualizerManager {
   private handleReset(): void {
     // Re-create the visualizer to reset all state
     if (this.activeType) {
-      this.switchTo(this.activeType);
+      void this.switchTo(this.activeType);
     }
   }
 }

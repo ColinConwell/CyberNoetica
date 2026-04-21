@@ -1,6 +1,8 @@
 import { createStore } from '@cybernoetica/core';
 import type { Store } from '@cybernoetica/core';
 
+export type QualityMode = 'auto' | 'performance' | 'balanced' | 'high' | 'ultra';
+
 export interface AppState {
   visualizer: {
     type: string;
@@ -21,6 +23,7 @@ export interface AppState {
     activePanel: string | null;
     autoPlay: boolean;
     shuffle: boolean;
+    quality: QualityMode;
   };
 }
 
@@ -30,7 +33,7 @@ const INITIAL_STATE: AppState = {
   visualizer: { type: '', userParams: {} },
   audio: { source: 'none', trackName: '', playing: false, wasm: false },
   viewport: { panX: 0, panY: 0, zoom: 1 },
-  ui: { activePanel: null, autoPlay: true, shuffle: true },
+  ui: { activePanel: null, autoPlay: true, shuffle: true, quality: 'auto' },
 };
 
 export function createAppStore(): Store<AppState> {
@@ -51,7 +54,7 @@ export function createAppStore(): Store<AppState> {
 function saveToStorage(state: Readonly<AppState>): void {
   try {
     const persistable = {
-      ui: { autoPlay: state.ui.autoPlay, shuffle: state.ui.shuffle },
+      ui: { autoPlay: state.ui.autoPlay, shuffle: state.ui.shuffle, quality: state.ui.quality },
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(persistable));
   } catch { /* localStorage unavailable */ }

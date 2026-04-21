@@ -127,6 +127,21 @@ function createRepulsorMesh(): THREE.Object3D {
   return group;
 }
 
+function disposeFieldMesh(obj: THREE.Object3D): void {
+  obj.traverse((node) => {
+    const mesh = node as THREE.Mesh;
+    if (mesh.geometry && typeof mesh.geometry.dispose === 'function') {
+      mesh.geometry.dispose();
+    }
+    const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+    if (Array.isArray(mat)) {
+      for (const m of mat) m.dispose?.();
+    } else if (mat && typeof mat.dispose === 'function') {
+      mat.dispose();
+    }
+  });
+}
+
 const PARTICLE_VERTEX_SHADER = /* glsl */ `
   attribute float a_age;
   attribute float a_lifetime;
@@ -534,6 +549,7 @@ export class OrbitalGammaVisualizer implements Visualizer {
       if (this.particlePoints) this.sceneRef.remove(this.particlePoints);
       for (const ff of this.forceFields) {
         this.sceneRef.remove(ff.mesh);
+        disposeFieldMesh(ff.mesh);
       }
     }
     this.forceFields = [];
@@ -591,6 +607,7 @@ export class OrbitalGammaVisualizer implements Visualizer {
     if (this.forceFields.length >= MAX_FORCE_FIELDS) {
       const oldest = this.forceFields.shift()!;
       this.sceneRef.remove(oldest.mesh);
+      disposeFieldMesh(oldest.mesh);
     }
 
     const mesh = type === 'attractor' ? createAttractorMesh() : createRepulsorMesh();
@@ -614,6 +631,7 @@ export class OrbitalGammaVisualizer implements Visualizer {
 
       if (ff.age >= ff.lifetime) {
         if (this.sceneRef) this.sceneRef.remove(ff.mesh);
+        disposeFieldMesh(ff.mesh);
         this.forceFields.splice(i, 1);
         continue;
       }

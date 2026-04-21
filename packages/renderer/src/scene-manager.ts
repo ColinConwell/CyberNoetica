@@ -3,6 +3,22 @@ import type { ViewportCapabilities } from './visualizers/types.js';
 
 export type CursorMode = 'pan' | 'orbit' | 'sculpt' | 'default';
 
+export type QualityTier = 'performance' | 'balanced' | 'high' | 'ultra';
+
+const QUALITY_PIXEL_RATIO_CAP: Record<QualityTier, number> = {
+  performance: 1.0,
+  balanced: 1.5,
+  high: 2.0,
+  ultra: Infinity,
+};
+
+export function pixelRatioForTier(tier: QualityTier, deviceRatio: number): number {
+  const cap = QUALITY_PIXEL_RATIO_CAP[tier];
+  return Math.min(deviceRatio, cap);
+}
+
+export type FrameGate = () => boolean;
+
 function buildCursorSvg(opts: { strokeAlpha: number; fillAlpha: number; circleRadius: number; ringAlpha: number }): string {
   const s = opts.strokeAlpha;
   const f = opts.fillAlpha;
@@ -57,6 +73,10 @@ export class SceneManager {
   private renderer: THREE.WebGLRenderer | null = null;
   private animationId: number | null = null;
   private renderCallbacks: Array<(time: number) => void> = [];
+  private frameGate: FrameGate | null = null;
+  private qualityTier: QualityTier = 'high';
+  private paused = false;
+  private visibilityListener: (() => void) | null = null;
 
   private dragging = false;
   private lastPointerX = 0;
@@ -83,7 +103,7 @@ export class SceneManager {
   attach(container: HTMLElement): void {
     this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
     this.renderer.setSize(this.width, this.height);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(pixelRatioForTier(this.qualityTier, window.devicePixelRatio));
     this.renderer.domElement.style.position = 'fixed';
     this.renderer.domElement.style.inset = '0';
     this.renderer.domElement.style.zIndex = '0';
@@ -217,10 +237,24 @@ export class SceneManager {
     return () => { this.renderCallbacks = this.renderCallbacks.filter(cb => cb !== callback); };
   }
 
+  setFrameGate(gate: FrameGate | null): void {
+    this.frameGate = gate;
+  }
+
   start(): void {
+    if (this.animationId !== null) return;
+    if (this.visibilityListener === null) {
+      this.visibilityListener = () => {
+        if (document.hidden) this._pause();
+        else this._resume();
+      };
+      document.addEventListener('visibilitychange', this.visibilityListener);
+    }
     const loop = (time: number) => {
       this.animationId = requestAnimationFrame(loop);
+      if (this.paused) return;
       for (const cb of this.renderCallbacks) cb(time);
+      if (this.frameGate && !this.frameGate()) return;
       this.renderer?.render(this.scene, this.activeCamera);
     };
     this.animationId = requestAnimationFrame(loop);
@@ -228,6 +262,42 @@ export class SceneManager {
 
   stop(): void {
     if (this.animationId !== null) { cancelAnimationFrame(this.animationId); this.animationId = null; }
+    if (this.visibilityListener) {
+      document.removeEventListener('visibilitychange', this.visibilityListener);
+      this.visibilityListener = null;
+    }
+  }
+
+  private _pause(): void { this.paused = true; }
+  private _resume(): void { this.paused = false; }
+
+  isPaused(): boolean { return this.paused; }
+
+  setQualityTier(tier: QualityTier): void {
+    this.qualityTier = tier;
+    if (this.renderer) {
+      const ratio = pixelRatioForTier(tier, window.devicePixelRatio);
+      this.renderer.setPixelRatio(ratio);
+      this.renderer.setSize(this.width, this.height);
+    }
+  }
+
+  getQualityTier(): QualityTier { return this.qualityTier; }
+
+  precompile(): void {
+    if (!this.renderer) return;
+    this.renderer.compile(this.scene, this.activeCamera);
+  }
+
+  getRendererDebugInfo(): { vendor: string; renderer: string } | null {
+    if (!this.renderer) return null;
+    const gl = this.renderer.getContext();
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    if (!ext) return null;
+    return {
+      vendor: String(gl.getParameter(ext.UNMASKED_VENDOR_WEBGL) ?? ''),
+      renderer: String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) ?? ''),
+    };
   }
 
   resize(width: number, height: number): void {

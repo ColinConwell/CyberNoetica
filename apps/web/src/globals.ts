@@ -1,5 +1,6 @@
 import type { MessageBus, Store } from '@cybernoetica/core';
-import type { SceneManager } from '@cybernoetica/renderer';
+import type { SceneManager, QualityTier } from '@cybernoetica/renderer';
+import type { QualityMode } from './store.js';
 
 // ---------------------------------------------------------------------------
 // Typed Global State
@@ -21,10 +22,16 @@ export interface CyberNoeticaGlobals {
   vizManager?: {
     getActive(): any;
     getActiveType(): string;
-    switchTo(type: string): any;
+    switchTo(type: string): Promise<any>;
   };
   powerSaver: boolean;
   setPowerSaver: (enabled: boolean) => void;
+  quality?: {
+    getMode(): QualityMode;
+    getTier(): QualityTier;
+    setMode(mode: QualityMode): void;
+    cycle(): void;
+  };
 }
 
 export interface CyberNoeticaDebugInfo {
@@ -32,6 +39,8 @@ export interface CyberNoeticaDebugInfo {
   frameTime: number;
   vizType: string;
   playbackState?: string;
+  qualityTier?: string;
+  qualityMode?: string;
 }
 
 declare global {

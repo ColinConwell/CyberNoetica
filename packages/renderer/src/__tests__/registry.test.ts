@@ -1,7 +1,20 @@
-import { describe, it, expect } from 'vitest';
-import '../visualizers/index.js';
-import { getVisualizerTypes, listVisualizers, getVisualizerEntry } from '../visualizers/registry.js';
+import { describe, it, expect, beforeAll } from 'vitest';
+import {
+  getVisualizerTypes,
+  listVisualizers,
+  getVisualizerEntry,
+  loadVisualizer,
+  VISUALIZER_MANIFEST,
+} from '../visualizers/index.js';
 import { MessageBus } from '@cybernoetica/core';
+
+// The registry is lazy — ensure every visualizer in the manifest has been loaded
+// before running the integrity checks below.
+beforeAll(async () => {
+  for (const entry of VISUALIZER_MANIFEST) {
+    await loadVisualizer(entry.type);
+  }
+});
 
 describe('Visualizer Registry', () => {
   it('contains all expected visualizer types', () => {
@@ -17,8 +30,15 @@ describe('Visualizer Registry', () => {
     expect(types).toContain('kaleidoscope');
   });
 
-  it('has at least 9 registered visualizers', () => {
+  it('has at least 9 entries in the manifest', () => {
     expect(getVisualizerTypes().length).toBeGreaterThanOrEqual(9);
+  });
+
+  it('manifest types match registered types one-to-one', () => {
+    const registeredTypes = VISUALIZER_MANIFEST.map(e => e.type);
+    for (const type of registeredTypes) {
+      expect(getVisualizerEntry(type), `expected entry for ${type}`).toBeDefined();
+    }
   });
 
   it('listVisualizers returns metadata for all entries', () => {
@@ -37,7 +57,7 @@ describe('Visualizer Registry', () => {
     const bus = new MessageBus();
     for (const type of getVisualizerTypes()) {
       const entry = getVisualizerEntry(type);
-      expect(entry).toBeDefined();
+      expect(entry, `missing entry for ${type}`).toBeDefined();
       const viz = entry!.create(bus);
       expect(viz).toBeDefined();
       expect(viz.metadata.type).toBe(type);
@@ -70,5 +90,17 @@ describe('Visualizer Registry', () => {
         expect(['appearance', 'audio-mapping']).toContain(param.category);
       }
     }
+  });
+
+  it('loadVisualizer returns the same entry for repeated calls', async () => {
+    const first = await loadVisualizer('mandelbrot');
+    const second = await loadVisualizer('mandelbrot');
+    expect(first).toBeDefined();
+    expect(first).toBe(second);
+  });
+
+  it('loadVisualizer returns undefined for unknown types', async () => {
+    const entry = await loadVisualizer('does-not-exist');
+    expect(entry).toBeUndefined();
   });
 });
