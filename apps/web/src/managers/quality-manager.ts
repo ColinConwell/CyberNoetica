@@ -3,7 +3,7 @@ import type { QualityTier } from '@cybernoetica/renderer';
 
 export type QualityMode = 'auto' | QualityTier;
 
-const TIER_ORDER: QualityTier[] = ['performance', 'balanced', 'high', 'ultra'];
+const TIER_ORDER: QualityTier[] = ['sub-performance', 'performance', 'balanced', 'high', 'ultra'];
 
 const GOVERNOR_WINDOW = 60;           // frames
 const GOVERNOR_STEP_DOWN_MS = 20;     // >20ms avg (below 50 FPS) → step down

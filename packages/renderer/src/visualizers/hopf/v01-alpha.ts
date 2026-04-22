@@ -112,7 +112,7 @@ export class HopfVisualizer implements Visualizer {
   }
 
   attach(scene: THREE.Scene): void {
-    this.material = new THREE.ShaderMaterial({
+    this.material = new THREE.RawShaderMaterial({
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
@@ -247,6 +247,8 @@ registerVisualizer({
 });
 
 const VERTEX_SHADER = /* glsl */ `
+  attribute vec3 position;
+  attribute vec2 uv;
   attribute vec3 color;
   varying vec3 vColor;
   varying float vDepth;

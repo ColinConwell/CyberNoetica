@@ -1,11 +1,15 @@
 import * as THREE from 'three';
 import type { ViewportCapabilities } from './visualizers/types.js';
+import { registerShaderChunks } from './shaders/chunks/index.js';
+
+registerShaderChunks();
 
 export type CursorMode = 'pan' | 'orbit' | 'sculpt' | 'default';
 
-export type QualityTier = 'performance' | 'balanced' | 'high' | 'ultra';
+export type QualityTier = 'sub-performance' | 'performance' | 'balanced' | 'high' | 'ultra';
 
 const QUALITY_PIXEL_RATIO_CAP: Record<QualityTier, number> = {
+  'sub-performance': 0.5,
   performance: 1.0,
   balanced: 1.5,
   high: 2.0,
@@ -197,9 +201,22 @@ export class SceneManager {
         lastPinchDist = dist;
       }
     }, { passive: true });
-
     canvas.addEventListener('touchend', () => { lastPinchDist = 0; }, { passive: true });
-  }
+
+    // ── WebGL Context Loss Handling ───────────────────────────────
+    canvas.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault();
+      console.warn('CyberNoetica: WebGL context lost. Pausing render loop.');
+      this.stop();
+    });
+
+    canvas.addEventListener('webglcontextrestored', () => {
+      console.info('CyberNoetica: WebGL context restored. Re-initialization required.');
+      // The VisualizerManager listens for this via the bus or handles it implicitly.
+      // For now, we just resume the render loop, though the active visualizer needs re-attachment.
+      this.start();
+    });
+    }
 
   setViewportCapabilities(caps: ViewportCapabilities): void {
     this.viewportCaps = caps;

@@ -98,7 +98,7 @@ export class ChladniVisualizer implements Visualizer {
   }
 
   attach(scene: THREE.Scene): void {
-    this.material = new THREE.ShaderMaterial({
+    this.material = new THREE.RawShaderMaterial({
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
@@ -220,6 +220,8 @@ registerVisualizer({
 });
 
 const VERTEX_SHADER = /* glsl */ `
+  attribute vec3 position;
+  attribute vec2 uv;
   varying vec2 vUv;
   void main() {
     vUv = uv;
@@ -277,25 +279,20 @@ const FRAGMENT_SHADER = /* glsl */ `
   }
 
   // --- HSV to RGB ---
-  vec3 hsv2rgb(vec3 c) {
-    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
-    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
-  }
+  #include <cyber_hsv2rgb>
 
   // --- Chladni equation ---
-  // f(x,y) = a*sin(n*PI*x)*sin(m*PI*y) + b*cos(n*PI*x)*cos(m*PI*y)
-  // Nodal lines occur where f(x,y) ~ 0
-  float chladni(vec2 p, float n, float m, float a, float b) {
-    return a * sin(PI * n * p.x) * sin(PI * m * p.y)
-         + b * cos(PI * n * p.x) * cos(PI * m * p.y);
+  // Chladni equation for center-mounted square plate
+  float chladni(vec2 p, float n, float m) {
+    return cos(PI * n * p.x) * cos(PI * m * p.y) - cos(PI * m * p.x) * cos(PI * n * p.y);
   }
 
   // Superposition of two Chladni modes for richer patterns
   float chladniSuper(vec2 p, float n, float m, float blend) {
-    float f1 = chladni(p, n, m, blend, 1.0 - blend);
-    float f2 = chladni(p, m, n, 1.0 - blend, blend);
-    return f1 * 0.6 + f2 * 0.4;
+    float f1 = chladni(p, n, m);
+    // Interpolate to a different mode pair using blend
+    float f2 = chladni(p, n + 1.0, m + 1.0);
+    return mix(f1, f2, blend);
   }
 
   void main() {

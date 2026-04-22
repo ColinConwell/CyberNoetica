@@ -49,7 +49,7 @@ export async function createApp(container: HTMLElement): Promise<void> {
   const savedQuality = store.getState().ui.quality ?? 'auto';
   quality.setMode(savedQuality);
 
-  const QUALITY_CYCLE: QualityMode[] = ['auto', 'performance', 'balanced', 'high', 'ultra'];
+  const QUALITY_CYCLE: QualityMode[] = ['auto', 'sub-performance', 'performance', 'balanced', 'high', 'ultra'];
   window.__cybernoetica!.playback = playback;
   window.__cybernoetica!.vizManager = vizManager;
   window.__cybernoetica!.quality = {

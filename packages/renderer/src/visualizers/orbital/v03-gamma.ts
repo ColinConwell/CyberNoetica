@@ -176,10 +176,7 @@ const PARTICLE_FRAGMENT_SHADER = /* glsl */ `
   uniform float u_time;
   varying float v_life;
   varying float v_speed;
-  vec3 hsv2rgb(vec3 c) {
-    vec3 p = abs(fract(c.xxx + vec3(1.0, 2.0/3.0, 1.0/3.0)) * 6.0 - 3.0);
-    return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);
-  }
+  #include <cyber_hsv2rgb>
   void main() {
     vec2 cxy = 2.0 * gl_PointCoord - 1.0;
     float r = dot(cxy, cxy);
@@ -319,7 +316,7 @@ export class OrbitalGammaVisualizer implements Visualizer {
     this.particleGeometry.setAttribute('a_size', new THREE.BufferAttribute(this.sizes, 1));
     this.particleGeometry.setAttribute('a_speed', new THREE.BufferAttribute(this.speeds, 1));
 
-    this.particleMaterial = new THREE.ShaderMaterial({
+    this.particleMaterial = new THREE.RawShaderMaterial({
       vertexShader: PARTICLE_VERTEX_SHADER,
       fragmentShader: PARTICLE_FRAGMENT_SHADER,
       uniforms: {

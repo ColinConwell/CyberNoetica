@@ -116,7 +116,7 @@ export class MetaballsVisualizer implements Visualizer {
   }
 
   attach(scene: THREE.Scene): void {
-    this.material = new THREE.ShaderMaterial({
+    this.material = new THREE.RawShaderMaterial({
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
@@ -233,6 +233,8 @@ registerVisualizer({
 // ── Shaders ────────────────────────────────────────────
 
 const VERTEX_SHADER = /* glsl */ `
+  attribute vec3 position;
+  attribute vec2 uv;
   varying vec2 vUv;
   void main() {
     vUv = uv;
@@ -266,11 +268,7 @@ const FRAGMENT_SHADER = /* glsl */ `
 
   varying vec2 vUv;
 
-  vec3 hsv2rgb(vec3 c) {
-    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
-    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
-  }
+  #include <cyber_hsv2rgb>
 
   vec2 ballPosition(int i) {
     float fx = u_phases[i * 4 + 0];

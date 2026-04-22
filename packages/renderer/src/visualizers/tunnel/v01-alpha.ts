@@ -96,7 +96,7 @@ export class TunnelVisualizer implements Visualizer {
   }
 
   attach(scene: THREE.Scene): void {
-    this.material = new THREE.ShaderMaterial({
+    this.material = new THREE.RawShaderMaterial({
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
@@ -225,6 +225,8 @@ registerVisualizer({
 // ── Shaders ────────────────────────────────────────────
 
 const VERTEX_SHADER = /* glsl */ `
+  attribute vec3 position;
+  attribute vec2 uv;
   varying vec2 vUv;
   void main() {
     vUv = uv;

@@ -26,6 +26,16 @@ export class VisualizerManager {
     scene.onViewportDrag((dx, dy) => this.handleDrag(dx, dy));
     scene.onViewportZoom((delta) => this.handleZoom(delta));
     scene.onViewportReset(() => this.handleReset());
+
+    const canvas = scene.getCanvasElement();
+    if (canvas) {
+      canvas.addEventListener('webglcontextrestored', () => {
+        if (this.activeType) {
+          console.info('VisualizerManager: Re-initializing active visualizer after context restore.');
+          void this.switchTo(this.activeType);
+        }
+      });
+    }
   }
 
   onSwitch(hook: SwitchHook | null): void {
