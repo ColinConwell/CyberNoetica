@@ -5,6 +5,12 @@ import { EMASmoothing } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
+/**
+ * Math:
+ *   z_(n+1) = z_n^2 + c, with z_0 = 0 and c sampled from the complex plane.
+ * Reference: https://mathworld.wolfram.com/MandelbrotSet.html
+ */
+
 export interface MandelbrotUniforms {
   zoom: number;
   colorSpeed: number;

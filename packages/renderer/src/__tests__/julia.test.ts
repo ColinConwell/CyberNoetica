@@ -65,6 +65,32 @@ describe('JuliaVisualizer', () => {
     expect(after.seedReal).toBeCloseTo(before.seedReal, 2);
   });
 
+  it('preserves user seed and zoom overrides across audio-driven ticks', () => {
+    const bus = new MessageBus();
+    const viz = new JuliaVisualizer(bus);
+    viz.setViewState({ seedReal: -0.8, seedImaginary: 0.156, zoom: 2.5 });
+
+    bus.publish('audio:features', {
+      fftBins: new Float32Array(1024),
+      bass: 1.0,
+      mid: 1.0,
+      high: 0.4,
+      spectralCentroid: 0.7,
+      spectralFlux: 0.25,
+      rms: 0.8,
+      beatOnset: true,
+      beatConfidence: 1.0,
+      degraded: false,
+    } as AudioFeatures);
+
+    for (let i = 0; i < 10; i++) viz.tick();
+
+    const after = viz.getViewState();
+    expect(after.seedReal).toBeCloseTo(-0.8, 3);
+    expect(after.seedImaginary).toBeCloseTo(0.156, 3);
+    expect(after.zoom).toBeCloseTo(2.5, 3);
+  });
+
   it('metadata includes viewStateFields', () => {
     const bus = new MessageBus();
     const viz = new JuliaVisualizer(bus);

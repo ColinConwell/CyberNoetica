@@ -8,12 +8,17 @@ import { registerVisualizer } from '../registry.js';
 /**
  * Julia Set visualizer — the Mandelbrot's shape-shifting sibling.
  *
+ * Math:
+ *   z_(n+1) = z_n^2 + c
+ *
  * Every point c in the complex plane defines a unique Julia set.
  * Small changes in c produce dramatic visual transformations:
  * connected ↔ dust, spirals ↔ dendrites, symmetry changes.
  *
  * Audio drives the c parameter on a slow orbit through interesting regions,
  * creating an endlessly morphing fractal that breathes with the music.
+ *
+ * Reference: https://mathworld.wolfram.com/JuliaSet.html
  */
 
 /** Interesting c-values that produce beautiful Julia sets */
@@ -154,12 +159,18 @@ export class JuliaVisualizer implements Visualizer {
       const f = this.latestFeatures;
       const am = this.audioMapStrengths;
       const audioRadius = this.orbitRadius * (0.5 + f.bass * 1.5 * am.bassToOrbit);
-      const cx = this.baseCx + Math.cos(this.orbitPhase) * audioRadius;
-      const cy = this.baseCy + Math.sin(this.orbitPhase) * audioRadius;
+      const cx = this.viewOverrides.seed
+        ? this.smoothers.cx.value
+        : this.baseCx + Math.cos(this.orbitPhase) * audioRadius;
+      const cy = this.viewOverrides.seed
+        ? this.smoothers.cy.value
+        : this.baseCy + Math.sin(this.orbitPhase) * audioRadius;
 
       this.smoothers.cx.update(cx);
       this.smoothers.cy.update(cy);
-      this.smoothers.zoom.update(1.4 + f.mid * 0.5 * am.midToZoom);
+      if (!this.viewOverrides.zoom) {
+        this.smoothers.zoom.update(1.4 + f.mid * 0.5 * am.midToZoom);
+      }
       this.smoothers.colorSpeed.update(0.3 + f.mid * 2.0);
       this.smoothers.iterations.update(150 + f.high * 350);
       this.smoothers.brightness.update(0.5 + f.rms * 0.8 * am.rmsToBrightness);
@@ -174,8 +185,12 @@ export class JuliaVisualizer implements Visualizer {
       }
     } else {
       // Idle: gentle orbit
-      const cx = this.baseCx + Math.cos(this.orbitPhase) * this.orbitRadius;
-      const cy = this.baseCy + Math.sin(this.orbitPhase) * this.orbitRadius;
+      const cx = this.viewOverrides.seed
+        ? this.smoothers.cx.value
+        : this.baseCx + Math.cos(this.orbitPhase) * this.orbitRadius;
+      const cy = this.viewOverrides.seed
+        ? this.smoothers.cy.value
+        : this.baseCy + Math.sin(this.orbitPhase) * this.orbitRadius;
       this.smoothers.cx.update(cx);
       this.smoothers.cy.update(cy);
       this.smoothers.beatPulse.update(0);

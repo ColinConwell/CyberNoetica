@@ -65,8 +65,16 @@ export class VisualizerManager {
 
     // Inject renderer for visualizers that need off-screen rendering (e.g. FBO ping-pong)
     const renderer = this.scene.getRenderer();
-    if (renderer && 'setRenderer' in this.activeViz && typeof (this.activeViz as any).setRenderer === 'function') {
-      (this.activeViz as any).setRenderer(renderer);
+    if (renderer) {
+      this.activeViz.setRenderer?.(renderer);
+    }
+
+    const canvas = this.scene.getCanvasElement();
+    if (canvas) {
+      this.activeViz.setInteractionContext?.({
+        canvas,
+        getPerspectiveCamera: () => this.scene.perspCamera,
+      });
     }
 
     this.activeViz.attach(this.scene.scene);
@@ -76,6 +84,7 @@ export class VisualizerManager {
     this.scene.activeCamera = this.activeViz.metadata.usesPerspective
       ? this.scene.perspCamera : this.scene.camera;
     this.scene.setViewportCapabilities(this.activeViz.metadata.viewport);
+    this.scene.setCursorMode(this.activeViz.getCursorMode?.() ?? 'default');
     this.driftEnabled = true;
 
     // Move first-frame shader compile off the critical path.
@@ -126,6 +135,7 @@ export class VisualizerManager {
     }
 
     this.activeViz.tick();
+    this.scene.setCursorMode(this.activeViz.getCursorMode?.() ?? 'default');
   }
 
   // ── Viewport interaction translation ────────────────────────────

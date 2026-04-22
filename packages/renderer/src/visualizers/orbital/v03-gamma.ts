@@ -2,11 +2,22 @@ import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
 import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
 import { EMASmoothing } from '../../smoothing.js';
-import type { Visualizer, VisualizerMetadata } from '../types.js';
+import type {
+  Visualizer,
+  VisualizerCursorMode,
+  VisualizerInteractionContext,
+  VisualizerMetadata,
+} from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
 /**
  * Orbital Gamma -- interactive sculpt mode.
+ *
+ * Math note:
+ *   This remains a stylized particle system driven by inverse-square-like
+ *   attraction/repulsion plus damping and turbulence; the sculpt layer adds
+ *   temporary user-placed force fields to that same field model.
+ * Reference: https://scienceworld.wolfram.com/physics/InverseSquareLaw.html
  *
  * Builds on Beta's chaotic particle system and adds user-placeable
  * force fields (attractors / repulsors). Inspired by Cosmic-Conway.
@@ -268,6 +279,7 @@ export class OrbitalGammaVisualizer implements Visualizer {
   private boundPointerDownHandler: ((e: PointerEvent) => void) | null = null;
   private pointerDownPos: { x: number; y: number } | null = null;
   private sculptHint: HTMLElement | null = null;
+  private interactionContext: VisualizerInteractionContext | null = null;
 
   private _orbitAngle = 0;
   private _elevation = 0;
@@ -323,21 +335,7 @@ export class OrbitalGammaVisualizer implements Visualizer {
     this.particlePoints = new THREE.Points(this.particleGeometry, this.particleMaterial);
     scene.add(this.particlePoints);
 
-    // Attach sculpt interaction handlers
-    const canvas = document.querySelector('canvas');
-    if (canvas) {
-      this.boundPointerDownHandler = (e: PointerEvent) => {
-        this.pointerDownPos = { x: e.clientX, y: e.clientY };
-      };
-      this.boundClickHandler = (e: MouseEvent) => this._handleSculptClick(e, canvas, 'attractor');
-      this.boundContextHandler = (e: MouseEvent) => {
-        e.preventDefault();
-        this._handleSculptClick(e, canvas, 'repulsor');
-      };
-      canvas.addEventListener('pointerdown', this.boundPointerDownHandler);
-      canvas.addEventListener('click', this.boundClickHandler);
-      canvas.addEventListener('contextmenu', this.boundContextHandler);
-    }
+    this._installInteractionHandlers();
 
     // Sculpt mode hint overlay
     this.sculptHint = document.createElement('div');
@@ -523,6 +521,16 @@ export class OrbitalGammaVisualizer implements Visualizer {
     if (key in this.userParams) this.userParams[key] = value;
   }
 
+  setInteractionContext(context: VisualizerInteractionContext | null): void {
+    this._removeInteractionHandlers();
+    this.interactionContext = context;
+    this._installInteractionHandlers();
+  }
+
+  getCursorMode(): VisualizerCursorMode {
+    return this.userParams.sculptMode >= 0.5 ? 'sculpt' : 'default';
+  }
+
   getViewState(): Record<string, number> {
     return { orbitAngle: this._orbitAngle, elevation: this._elevation, distance: this._distance };
   }
@@ -553,12 +561,8 @@ export class OrbitalGammaVisualizer implements Visualizer {
       }
     }
     this.forceFields = [];
-    const canvas = document.querySelector('canvas');
-    if (canvas) {
-      if (this.boundClickHandler) canvas.removeEventListener('click', this.boundClickHandler);
-      if (this.boundContextHandler) canvas.removeEventListener('contextmenu', this.boundContextHandler);
-      if (this.boundPointerDownHandler) canvas.removeEventListener('pointerdown', this.boundPointerDownHandler);
-    }
+    this._removeInteractionHandlers();
+    this.interactionContext = null;
     if (this.sculptHint) {
       this.sculptHint.remove();
       this.sculptHint = null;
@@ -584,8 +588,7 @@ export class OrbitalGammaVisualizer implements Visualizer {
       -((e.clientY - rect.top) / rect.height) * 2 + 1,
     );
 
-    const globals = (window as any).__cybernoetica;
-    const perspCamera = globals?.scene?.perspCamera as THREE.PerspectiveCamera | undefined;
+    const perspCamera = this.interactionContext?.getPerspectiveCamera();
     if (!perspCamera) return;
 
     this.raycaster.setFromCamera(mouse, perspCamera);
@@ -598,6 +601,40 @@ export class OrbitalGammaVisualizer implements Visualizer {
     if (!this.raycaster.ray.intersectPlane(this.clickPlane, intersection)) return;
 
     this._addForceField(intersection, fieldType);
+  }
+
+  private _installInteractionHandlers(): void {
+    const canvas = this.interactionContext?.canvas;
+    if (!canvas || this.boundClickHandler || this.boundContextHandler || this.boundPointerDownHandler) {
+      return;
+    }
+
+    this.boundPointerDownHandler = (e: PointerEvent) => {
+      this.pointerDownPos = { x: e.clientX, y: e.clientY };
+    };
+    this.boundClickHandler = (e: MouseEvent) => this._handleSculptClick(e, canvas, 'attractor');
+    this.boundContextHandler = (e: MouseEvent) => {
+      e.preventDefault();
+      this._handleSculptClick(e, canvas, 'repulsor');
+    };
+
+    canvas.addEventListener('pointerdown', this.boundPointerDownHandler);
+    canvas.addEventListener('click', this.boundClickHandler);
+    canvas.addEventListener('contextmenu', this.boundContextHandler);
+  }
+
+  private _removeInteractionHandlers(): void {
+    const canvas = this.interactionContext?.canvas;
+    if (!canvas) return;
+
+    if (this.boundClickHandler) canvas.removeEventListener('click', this.boundClickHandler);
+    if (this.boundContextHandler) canvas.removeEventListener('contextmenu', this.boundContextHandler);
+    if (this.boundPointerDownHandler) canvas.removeEventListener('pointerdown', this.boundPointerDownHandler);
+
+    this.boundClickHandler = null;
+    this.boundContextHandler = null;
+    this.boundPointerDownHandler = null;
+    this.pointerDownPos = null;
   }
 
   private _addForceField(position: THREE.Vector3, type: 'attractor' | 'repulsor'): void {

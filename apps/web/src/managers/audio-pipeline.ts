@@ -9,23 +9,43 @@ function bandAvg(data: Float32Array, from: number, to: number): number {
   return sum / (end - from);
 }
 
-function fallbackFeatures(freqData: Float32Array): AudioFeatures {
-  const len = freqData.length;
-  const linear = new Float32Array(len);
-  let totalEnergy = 0;
-  for (let i = 0; i < len; i++) {
-    linear[i] = Math.max(0, (freqData[i] + 100) / 100);
-    totalEnergy += linear[i];
+function normalizeFrequencyData(freqData: Float32Array): Float32Array {
+  const linear = new Float32Array(freqData.length);
+  for (let i = 0; i < freqData.length; i++) {
+    // Web Audio returns dB values in roughly [-100, 0]. Map into [0, 1]
+    // so spectrum-driven visualizers behave consistently across analyzer paths.
+    linear[i] = Math.max(0, Math.min(1, (freqData[i] + 100) / 100));
   }
-  const bassEnd = Math.floor(250 / 21);
-  const midEnd = Math.floor(4000 / 21);
+  return linear;
+}
+
+function bandEndForHz(hz: number, binWidthHz: number, length: number): number {
+  if (binWidthHz <= 0 || length <= 0) return 0;
+  return Math.max(0, Math.min(length, Math.floor(hz / binWidthHz)));
+}
+
+function fallbackFeatures(freqData: Float32Array, binWidthHz = 21): AudioFeatures {
+  const linear = normalizeFrequencyData(freqData);
+  const len = linear.length;
+  let totalEnergy = 0;
+  let weightedFrequency = 0;
+  const safeBinWidth = binWidthHz > 0 ? binWidthHz : 21;
+  const nyquistHz = safeBinWidth * len;
+  for (let i = 0; i < len; i++) {
+    totalEnergy += linear[i];
+    weightedFrequency += linear[i] * i * safeBinWidth;
+  }
+  const bassStart = len > 1 ? 1 : 0;
+  const bassEnd = Math.max(bassStart + 1, bandEndForHz(250, safeBinWidth, len));
+  const midEnd = Math.max(bassEnd + 1, bandEndForHz(4000, safeBinWidth, len));
   return {
     fftBins: linear,
-    bass: bandAvg(linear, 1, bassEnd),
+    bass: bandAvg(linear, bassStart, bassEnd),
     mid: bandAvg(linear, bassEnd, midEnd),
     high: bandAvg(linear, midEnd, len),
     spectralCentroid: totalEnergy > 0
-      ? Array.from(linear).reduce((sum, v, i) => sum + v * i, 0) / totalEnergy / len : 0,
+      ? weightedFrequency / totalEnergy / Math.max(nyquistHz, 1)
+      : 0,
     spectralFlux: 0,
     rms: totalEnergy / len,
     beatOnset: false,
@@ -51,13 +71,17 @@ export class AudioPipeline {
   }
 
   pushFrame(): void {
+    const freqData = this.source.getFrequencyData();
+    const fftBins = freqData ? normalizeFrequencyData(freqData) : new Float32Array(0);
+    const binWidthHz = this.source.getFrequencyBinWidth() ?? 21;
+
     if (this.wasmAnalyzer) {
       const samples = this.source.getSamples();
       if (samples) {
         try {
           const f = this.wasmAnalyzer.analyze(samples);
           this.processor.pushFeatures({
-            fftBins: new Float32Array(0),
+            fftBins,
             bass: f.bass, mid: f.mid, high: f.high,
             spectralCentroid: f.spectral_centroid,
             spectralFlux: f.spectral_flux,
@@ -69,8 +93,7 @@ export class AudioPipeline {
         } catch { /* skip frame */ }
       }
     } else {
-      const freqData = this.source.getFrequencyData();
-      if (freqData) this.processor.pushFeatures(fallbackFeatures(freqData));
+      if (freqData) this.processor.pushFeatures(fallbackFeatures(freqData, binWidthHz));
     }
   }
 

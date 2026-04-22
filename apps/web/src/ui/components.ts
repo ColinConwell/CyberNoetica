@@ -1,12 +1,16 @@
 import { FONT, GLASS_BORDER, TEXT_PRIMARY, TEXT_DIM, ACCENT } from './styles.js';
 
+export type StyleDeclarationPatch = Partial<CSSStyleDeclaration> & {
+  WebkitBackdropFilter?: string;
+};
+
 // ---------------------------------------------------------------------------
 // Core Element Helper
 // ---------------------------------------------------------------------------
 
 export function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
-  styles: Partial<CSSStyleDeclaration>,
+  styles: StyleDeclarationPatch,
   attrs?: Record<string, string>,
 ): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -102,7 +106,12 @@ export interface ToggleSwitchOpts {
   onChange?: (checked: boolean) => void;
 }
 
-export function toggleSwitch(opts: ToggleSwitchOpts = {}): HTMLElement {
+export interface ToggleSwitchHandle extends HTMLElement {
+  getChecked(): boolean;
+  setChecked(value: boolean): void;
+}
+
+export function toggleSwitch(opts: ToggleSwitchOpts = {}): ToggleSwitchHandle {
   let checked = opts.checked ?? false;
 
   const container = el('label', {
@@ -154,10 +163,11 @@ export function toggleSwitch(opts: ToggleSwitchOpts = {}): HTMLElement {
     if (opts.onChange) opts.onChange(checked);
   });
 
-  (container as any).getChecked = () => checked;
-  (container as any).setChecked = (v: boolean) => { checked = v; update(); };
+  const handle = container as unknown as ToggleSwitchHandle;
+  handle.getChecked = () => checked;
+  handle.setChecked = (v: boolean) => { checked = v; update(); };
 
-  return container;
+  return handle;
 }
 
 // ---------------------------------------------------------------------------

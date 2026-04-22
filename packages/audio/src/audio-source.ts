@@ -6,7 +6,7 @@ export class AudioSource {
   private gainNode: GainNode | null = null;
   private sourceNode: AudioNode | null = null;
   private activeStream: MediaStream | null = null;
-  private timeDomainData: Float32Array | null = null;
+  private timeDomainData: Float32Array<ArrayBuffer> | null = null;
   private onEndedCallback: (() => void) | null = null;
   private _sourceType: AudioSourceType = 'none';
   private _muted = false;
@@ -27,7 +27,7 @@ export class AudioSource {
     if (this._muted) this.gainNode.gain.value = 0;
     this.analyserNode.connect(this.gainNode);
     this.gainNode.connect(this.audioContext.destination);
-    this.timeDomainData = new Float32Array(this.analyserNode.fftSize);
+    this.timeDomainData = new Float32Array(this.analyserNode.fftSize) as Float32Array<ArrayBuffer>;
   }
 
   private stopCurrentSource(): void {
@@ -100,17 +100,26 @@ export class AudioSource {
     this._sourceType = 'system';
   }
 
-  getSamples(): Float32Array | null {
+  getSamples(): Float32Array<ArrayBuffer> | null {
     if (!this.analyserNode || !this.timeDomainData) return null;
     this.analyserNode.getFloatTimeDomainData(this.timeDomainData);
     return this.timeDomainData;
   }
 
-  getFrequencyData(): Float32Array | null {
+  getFrequencyData(): Float32Array<ArrayBuffer> | null {
     if (!this.analyserNode) return null;
-    const data = new Float32Array(this.analyserNode.frequencyBinCount);
+    const data = new Float32Array(this.analyserNode.frequencyBinCount) as Float32Array<ArrayBuffer>;
     this.analyserNode.getFloatFrequencyData(data);
     return data;
+  }
+
+  getSampleRate(): number | null {
+    return this.audioContext?.sampleRate ?? null;
+  }
+
+  getFrequencyBinWidth(): number | null {
+    if (!this.audioContext || !this.analyserNode) return null;
+    return this.audioContext.sampleRate / this.analyserNode.fftSize;
   }
 
   async resume(): Promise<void> {

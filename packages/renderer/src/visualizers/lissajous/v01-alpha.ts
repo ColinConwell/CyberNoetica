@@ -8,6 +8,14 @@ import { registerVisualizer } from '../registry.js';
 /**
  * Lissajous / Harmonograph visualizer — oscilloscope art.
  *
+ * Math:
+ *   Pure Lissajous figures follow x = A cos(omega_x t - delta_x),
+ *   y = B cos(omega_y t - delta_y). This shader adds damping and
+ *   a second harmonic layer for harmonograph-like richness.
+ * References:
+ *   https://mathworld.wolfram.com/LissajousCurve.html
+ *   https://mathworld.wolfram.com/Harmonograph.html
+ *
  * Renders damped Lissajous curves as glowing light trails.
  * Two superimposed pendulum pairs trace parametric curves;
  * the frequency ratios determine pattern complexity.

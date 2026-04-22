@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import {
+  getVisualizerDocumentation,
   getVisualizerTypes,
   listVisualizers,
+  listVisualizerDocumentation,
   getVisualizerEntry,
   loadVisualizer,
   VISUALIZER_MANIFEST,
@@ -30,8 +32,18 @@ describe('Visualizer Registry', () => {
     expect(types).toContain('kaleidoscope');
   });
 
-  it('has at least 9 entries in the manifest', () => {
-    expect(getVisualizerTypes().length).toBeGreaterThanOrEqual(9);
+  it('manifest exposes a documented entry for every visualizer type', () => {
+    const documentedTypes = new Set(listVisualizerDocumentation().map(entry => entry.type));
+    expect(documentedTypes.size).toBe(VISUALIZER_MANIFEST.length);
+    for (const entry of VISUALIZER_MANIFEST) {
+      expect(entry.documentation.summary).toBeTruthy();
+      expect(documentedTypes.has(entry.type)).toBe(true);
+      expect(getVisualizerDocumentation(entry.type)).toEqual(entry.documentation);
+      for (const reference of entry.documentation.references) {
+        expect(reference.label).toBeTruthy();
+        expect(reference.url.startsWith('https://')).toBe(true);
+      }
+    }
   });
 
   it('manifest types match registered types one-to-one', () => {

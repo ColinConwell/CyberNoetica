@@ -8,6 +8,11 @@ import { registerVisualizer } from '../registry.js';
 /**
  * Voronoi / Worley Noise visualizer — living stained glass.
  *
+ * Math:
+ *   Each fragment is assigned to the nearest seed point under the chosen metric.
+ *   This implementation shades with nearest/next-nearest cell distances (F1/F2).
+ * Reference: https://mathworld.wolfram.com/VoronoiDiagram.html
+ *
  * Renders animated Voronoi cells using distance-field techniques.
  * Cell seed points drift with time; audio modulates jitter, scale,
  * edge thickness, and the blend between distance metrics (Euclidean

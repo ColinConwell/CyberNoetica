@@ -2,6 +2,7 @@ import { MessageBus } from '@cybernoetica/core';
 import { SceneManager, getVisualizerTypes } from '@cybernoetica/renderer';
 import { createUI } from './ui/index.js';
 import type { VisualizerType } from './ui/index.js';
+import type { LogDisplayMode } from './ui/log-display.js';
 import { paramSlider } from './ui/components.js';
 import { AudioPipeline } from './managers/audio-pipeline.js';
 import { TrackManager } from './managers/track-manager.js';
@@ -206,8 +207,12 @@ export async function createApp(container: HTMLElement): Promise<void> {
   }
 
   if (launchConfig.showLog) {
-    const logModeMap: Record<string, string> = { stream: 'stream', floating: 'floating', docked: 'stream' };
-    ui.openLogDisplay((logModeMap[launchConfig.showLog] ?? 'stream') as any);
+    const logModeMap: Record<string, LogDisplayMode> = {
+      stream: 'stream',
+      floating: 'floating',
+      docked: 'fixed',
+    };
+    ui.openLogDisplay(logModeMap[launchConfig.showLog] ?? 'stream');
   }
 
   async function startApp(vizType?: string, audioId?: string) {

@@ -8,6 +8,12 @@ import { registerVisualizer } from '../registry.js';
 /**
  * Orbital Beta -- a more chaotic, variable variant of the orbital visualizer.
  *
+ * Math note:
+ * - Still a stylized particle system rather than a canonical closed-form model.
+ * - Uses inverse-square-like attraction, damping, tilted emitter frames,
+ *   and 3D tangential launch vectors.
+ * Reference: https://scienceworld.wolfram.com/physics/InverseSquareLaw.html
+ *
  * Key differences from Alpha:
  * - 6-8 emitters with randomized parameters (wider tilt, varied radii)
  * - Reduced damping and weaker gravity for wider, less predictable arcs

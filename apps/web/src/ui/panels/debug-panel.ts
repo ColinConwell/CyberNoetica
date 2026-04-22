@@ -245,7 +245,7 @@ export function renderDebugPanel(container: HTMLElement): () => void {
   let activeLogDisplay: LogDisplay | null = null;
   let currentLogFilter: LogLevel | 'all' = 'all';
   let currentLogMode: LogDisplayMode = 'stream';
-  let currentLogStyle: 'raw' | 'clean' = 'clean';
+  let currentLogStyle: LogStyle = 'clean';
 
   const logControlRow = el('div', {
     display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '6px', alignItems: 'center',
@@ -278,10 +278,11 @@ export function renderDebugPanel(container: HTMLElement): () => void {
     display: 'flex', borderRadius: '6px', overflow: 'hidden',
     border: `1px solid ${GLASS_BORDER}`,
   });
+  const isRawStyle = () => currentLogStyle === 'raw';
   const styleRawBtn = el('button', {
     padding: '3px 8px', fontSize: '9px', fontFamily: FONT,
-    background: currentLogStyle === 'raw' ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.03)',
-    color: currentLogStyle === 'raw' ? TEXT_PRIMARY : TEXT_DIM,
+    background: isRawStyle() ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.03)',
+    color: isRawStyle() ? TEXT_PRIMARY : TEXT_DIM,
     border: 'none', cursor: 'pointer', outline: 'none',
   });
   styleRawBtn.textContent = 'Raw';
@@ -294,8 +295,8 @@ export function renderDebugPanel(container: HTMLElement): () => void {
   styleCleanBtn.textContent = 'Clean';
 
   function updateStyleButtons() {
-    styleRawBtn.style.background = currentLogStyle === 'raw' ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.03)';
-    styleRawBtn.style.color = currentLogStyle === 'raw' ? TEXT_PRIMARY : TEXT_DIM;
+    styleRawBtn.style.background = isRawStyle() ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.03)';
+    styleRawBtn.style.color = isRawStyle() ? TEXT_PRIMARY : TEXT_DIM;
     styleCleanBtn.style.background = currentLogStyle === 'clean' ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.03)';
     styleCleanBtn.style.color = currentLogStyle === 'clean' ? TEXT_PRIMARY : TEXT_DIM;
   }

@@ -9,15 +9,19 @@
  * on the registry entry once the module has been loaded.
  */
 
+import type { VisualizerDocumentation } from './types.js';
+import { VISUALIZER_DOCUMENTATION } from './documentation.js';
+
 export interface VisualizerManifestEntry {
   type: string;
   label: string;
   description: string;
   group: 'fractal' | '3d' | 'pattern' | 'particle' | 'wave';
+  documentation: VisualizerDocumentation;
   loader: () => Promise<unknown>;
 }
 
-export const VISUALIZER_MANIFEST: VisualizerManifestEntry[] = [
+const MANIFEST_ENTRIES: Omit<VisualizerManifestEntry, 'documentation'>[] = [
   // --- Particle / 3D ---
   { type: 'orbital', label: 'Orbital', description: 'Audio-reactive particle orbitals', group: 'particle',
     loader: () => import('./orbital/v01-alpha.js') },
@@ -162,6 +166,14 @@ export const VISUALIZER_MANIFEST: VisualizerManifestEntry[] = [
   { type: 'torusknot', label: 'Torus Knot', description: 'Raymarched mathematical knots with iridescent shading', group: '3d',
     loader: () => import('./torusknot/v01-alpha.js') },
 ];
+
+export const VISUALIZER_MANIFEST: VisualizerManifestEntry[] = MANIFEST_ENTRIES.map((entry) => {
+  const documentation = VISUALIZER_DOCUMENTATION[entry.type];
+  if (!documentation) {
+    throw new Error(`Missing visualizer documentation for manifest type "${entry.type}"`);
+  }
+  return { ...entry, documentation };
+});
 
 const manifestByType = new Map(VISUALIZER_MANIFEST.map(e => [e.type, e]));
 

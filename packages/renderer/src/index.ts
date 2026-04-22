@@ -11,15 +11,24 @@ export {
   loadVisualizer,
   isVisualizerLoaded,
   VISUALIZER_MANIFEST,
+  VISUALIZER_DOCUMENTATION,
   getManifestEntry,
+  getVisualizerDocumentation,
   listManifestEntries,
   listManifestTypes,
+  listVisualizerDocumentation,
 } from './visualizers/index.js';
 export type { VisualizerEntry, VisualizerManifestEntry } from './visualizers/index.js';
 export type {
   Visualizer,
+  VisualizerAudioInput,
+  VisualizerCursorMode,
+  VisualizerDocumentation,
+  VisualizerInteractionContext,
   VisualizerMetadata,
   VisualizerParam,
+  VisualizerPerfTier,
+  VisualizerReference,
   ViewStateField,
   ViewportCapabilities,
 } from './visualizers/index.js';

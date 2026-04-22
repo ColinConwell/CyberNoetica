@@ -21,9 +21,22 @@ export {
 } from './manifest.js';
 export type { VisualizerManifestEntry } from './manifest.js';
 
+// Documentation API — math notes, references, audio-input expectations.
+export {
+  VISUALIZER_DOCUMENTATION,
+  getVisualizerDocumentation,
+  listVisualizerDocumentation,
+} from './documentation.js';
+
 // Types
 export type {
   Visualizer,
+  VisualizerAudioInput,
+  VisualizerCursorMode,
+  VisualizerDocumentation,
+  VisualizerInteractionContext,
+  VisualizerPerfTier,
+  VisualizerReference,
   VisualizerMetadata,
   VisualizerParam,
   ViewStateField,

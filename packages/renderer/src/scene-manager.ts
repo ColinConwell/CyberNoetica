@@ -325,5 +325,9 @@ export class SceneManager {
     return this.renderer;
   }
 
+  getCanvasElement(): HTMLCanvasElement | null {
+    return this.renderer?.domElement ?? null;
+  }
+
   dispose(): void { this.stop(); this.renderer?.dispose(); this.renderer = null; }
 }

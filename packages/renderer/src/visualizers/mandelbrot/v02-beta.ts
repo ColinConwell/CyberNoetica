@@ -23,6 +23,8 @@ import { registerVisualizer } from '../registry.js';
  *   high   -> boundary shimmer
  *   rms    -> overall brightness
  *   beat   -> parameter jolt
+ *
+ * Reference: https://www.paulbourke.net/fractals/burnship/
  */
 
 // Interesting regions of the Burning Ship fractal

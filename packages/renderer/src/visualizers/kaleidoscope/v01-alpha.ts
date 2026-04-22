@@ -8,6 +8,11 @@ import { registerVisualizer } from '../registry.js';
 /**
  * Kaleidoscope visualizer — psychedelic mandala generator.
  *
+ * Math:
+ *   Polar coordinates are folded into a wedge of angle 2pi / n and mirrored,
+ *   which corresponds to the dihedral symmetry group D_n.
+ * Reference: https://mathworld.wolfram.com/DihedralGroup.html
+ *
  * Uses angular domain folding (dihedral symmetry groups) to create
  * N-fold kaleidoscopic patterns from a generative noise base.
  * The underlying pattern combines layered simplex noise with

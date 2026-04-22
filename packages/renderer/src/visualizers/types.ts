@@ -1,4 +1,4 @@
-import type { Scene } from 'three';
+import type { PerspectiveCamera, Scene, WebGLRenderer } from 'three';
 
 export interface VisualizerParam {
   key: string;
@@ -31,6 +31,36 @@ export interface VisualizerInteractivity {
   toggleParam?: string;
 }
 
+export type VisualizerCursorMode = 'pan' | 'orbit' | 'sculpt' | 'default';
+export type VisualizerAudioInput =
+  | 'fft'
+  | 'bands'
+  | 'rms'
+  | 'spectral-centroid'
+  | 'spectral-flux'
+  | 'beat';
+export type VisualizerPerfTier = 'low' | 'medium' | 'high' | 'extreme';
+
+export interface VisualizerReference {
+  label: string;
+  url: string;
+}
+
+export interface VisualizerDocumentation {
+  summary: string;
+  math?: string;
+  references: VisualizerReference[];
+  audioInputsUsed: VisualizerAudioInput[];
+  requiresFFT: boolean;
+  perfTier: VisualizerPerfTier;
+  mobileSafe: boolean;
+}
+
+export interface VisualizerInteractionContext {
+  canvas: HTMLCanvasElement;
+  getPerspectiveCamera: () => PerspectiveCamera;
+}
+
 export interface VisualizerMetadata {
   type: string;
   label: string;
@@ -51,4 +81,7 @@ export interface Visualizer {
   setUserParam(key: string, value: number): void;
   getViewState(): Record<string, number>;
   setViewState(partial: Record<string, number>): void;
+  setRenderer?(renderer: WebGLRenderer): void;
+  setInteractionContext?(context: VisualizerInteractionContext | null): void;
+  getCursorMode?(): VisualizerCursorMode;
 }

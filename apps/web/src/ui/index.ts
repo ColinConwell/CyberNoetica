@@ -188,9 +188,15 @@ export function createUI(): UIControls {
 
   let fixedLogHeight = 0;
   let keyOverlay: KeyboardOverlayAPI | null = null;
+  const panelWithCleanup = panel as HTMLElement & { __viewStateCleanup?: () => void };
+
+  function cleanupViewStatePolling() {
+    panelWithCleanup.__viewStateCleanup?.();
+    delete panelWithCleanup.__viewStateCleanup;
+  }
 
   function updateBottomLayout() {
-    let cursor = LAYOUT_GAP;
+    let cursor: number = LAYOUT_GAP;
 
     if (fixedLogHeight > 0) {
       cursor = fixedLogHeight + LAYOUT_GAP;
@@ -242,6 +248,7 @@ export function createUI(): UIControls {
     panel.style.opacity = '0';
     panel.style.transform = 'translateX(-50%) translateY(20px)';
     panelBackdrop.style.display = 'none';
+    cleanupViewStatePolling();
     if (debugCleanup) { debugCleanup(); debugCleanup = null; }
     if (energyCleanup) { energyCleanup(); energyCleanup = null; }
     setTimeout(() => { if (!activePanel) panel.style.display = 'none'; }, 300);
@@ -253,6 +260,7 @@ export function createUI(): UIControls {
     setButtonActive(cbar.visualBtn, type === 'visual');
     setButtonActive(cbar.soundBtn, type === 'sound');
     setButtonActive(cbar.controlBtn, type === 'control');
+    cleanupViewStatePolling();
     panel.innerHTML = '';
 
     if (type === 'visual') {
@@ -454,6 +462,7 @@ export function createUI(): UIControls {
       fade.destroy();
       keyOverlay?.destroy();
       layoutObserver.disconnect();
+      cleanupViewStatePolling();
       if (errorTimer) clearTimeout(errorTimer);
       if (standaloneLogDisplay) { standaloneLogDisplay.cleanup(); standaloneLogDisplay = null; }
       startScreen.element.remove();

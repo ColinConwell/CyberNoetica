@@ -5,6 +5,15 @@ import { EMASmoothing } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
+/**
+ * Math:
+ *   The renderer samples FFT magnitudes over frequency bins from 0 Hz to Nyquist,
+ *   then uses those amplitudes to displace and color stacked waveform layers.
+ * References:
+ *   https://mathworld.wolfram.com/FourierTransform.html
+ *   https://mathworld.wolfram.com/NyquistFrequency.html
+ */
+
 const NUM_LAYERS = 5;
 const FFT_SIZE = 1024;
 
@@ -118,15 +127,20 @@ export class WaveformVisualizer implements Visualizer {
       this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
 
       // Update FFT texture data
-      if (f.fftBins) {
-        this.fftData.set(f.fftBins);
-        if (this.fftTexture) {
-          this.fftTexture.needsUpdate = true;
-        }
+      if (f.fftBins.length > 0) {
+        this.fftData.fill(0);
+        this.fftData.set(f.fftBins.subarray(0, Math.min(f.fftBins.length, FFT_SIZE)));
+      } else {
+        this.fftData.fill(0);
+      }
+      if (this.fftTexture) {
+        this.fftTexture.needsUpdate = true;
       }
     } else {
       // Decay beat pulse when idle
       this.smoothers.beatPulse.update(0.0);
+      this.fftData.fill(0);
+      if (this.fftTexture) this.fftTexture.needsUpdate = true;
     }
 
     if (this.material) {

@@ -15,6 +15,10 @@ export interface VisualPanelOpts {
   onResetView: () => void;
 }
 
+type VisualPanelElement = HTMLElement & {
+  __viewStateCleanup?: () => void;
+};
+
 export function renderVisualPanel(panel: HTMLElement, opts: VisualPanelOpts): void {
   panel.innerHTML = '';
 
@@ -173,7 +177,7 @@ export function renderVisualPanel(panel: HTMLElement, opts: VisualPanelOpts): vo
     }, 250);
 
     // Store cleanup ref on the panel element
-    (panel as any).__viewStateCleanup = () => clearInterval(updateInterval);
+    (panel as VisualPanelElement).__viewStateCleanup = () => clearInterval(updateInterval);
 
     const resetBtn = glassButton('Reset View');
     resetBtn.style.marginTop = '6px';

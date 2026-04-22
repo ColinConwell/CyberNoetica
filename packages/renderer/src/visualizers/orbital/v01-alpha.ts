@@ -5,6 +5,14 @@ import { EMASmoothing } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
+/**
+ * Math note:
+ *   This is a stylized particle system, not a direct simulation of a named
+ *   dynamical system. Its central pull is implemented as an inverse-square-like
+ *   force with damping plus procedural turbulence.
+ * Reference: https://scienceworld.wolfram.com/physics/InverseSquareLaw.html
+ */
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -577,10 +585,20 @@ export class OrbitalVisualizer implements Visualizer {
     const baseSpeed = burst ? 0.8 : 0.2;
     const speedNoise = Math.random() * velocityVariance;
 
-    // Add some tangential motion (cross product of radial with up-ish vector)
-    const tangX = -ey / radial;
-    const tangY = ex / radial;
-    const tangZ = 0;
+    // Build a real 3D tangent so tilted emitters do not collapse back into the XY plane.
+    const rx = ex / radial;
+    const ry = ey / radial;
+    const rz = ez / radial;
+    const refX = Math.abs(rz) > 0.9 ? 0 : 0;
+    const refY = Math.abs(rz) > 0.9 ? 1 : 0;
+    const refZ = Math.abs(rz) > 0.9 ? 0 : 1;
+    let tangX = ry * refZ - rz * refY;
+    let tangY = rz * refX - rx * refZ;
+    let tangZ = rx * refY - ry * refX;
+    const tangLen = Math.hypot(tangX, tangY, tangZ) || 1;
+    tangX /= tangLen;
+    tangY /= tangLen;
+    tangZ /= tangLen;
 
     this.velocities[idx] = tangX * (baseSpeed + speedNoise) + (Math.random() - 0.5) * 0.15;
     this.velocities[idx + 1] = tangY * (baseSpeed + speedNoise) + (Math.random() - 0.5) * 0.15;
