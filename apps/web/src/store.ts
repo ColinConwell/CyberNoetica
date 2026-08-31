@@ -9,7 +9,7 @@ export interface AppState {
     userParams: Record<string, number>;
   };
   audio: {
-    source: 'file' | 'mic' | 'system' | 'none';
+    source: 'file' | 'mic' | 'system' | 'soundscape' | 'none';
     trackName: string;
     playing: boolean;
     wasm: boolean;

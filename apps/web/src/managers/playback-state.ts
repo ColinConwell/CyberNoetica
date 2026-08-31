@@ -19,7 +19,7 @@ export type PlaybackAction =
   | { type: 'RESUME' }
   | { type: 'NEXT_TRACK' }
   | { type: 'SELECT_TRACK' }
-  | { type: 'SWITCH_SOURCE'; source: 'file' | 'mic' | 'system' }
+  | { type: 'SWITCH_SOURCE'; source: 'file' | 'mic' | 'system' | 'soundscape' }
   | { type: 'SOURCE_READY' };
 
 const VALID_TRANSITIONS: Record<PlaybackState, Set<PlaybackAction['type']>> = {

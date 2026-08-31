@@ -1,4 +1,15 @@
-export type AudioSourceType = 'none' | 'file' | 'mic' | 'system';
+import {
+  clampSoundscapeParams,
+  DEFAULT_SOUNDSCAPE_PARAMS,
+  soundscapeGainsAt,
+  soundscapePhase,
+  soundscapeBeatIndex,
+  type SoundscapeParams,
+} from './soundscape-loop.js';
+
+export type AudioSourceType = 'none' | 'file' | 'mic' | 'system' | 'soundscape';
+
+type Stoppable = { stop: (when?: number) => void };
 
 export class AudioSource {
   private audioContext: AudioContext | null = null;
@@ -11,8 +22,24 @@ export class AudioSource {
   private _sourceType: AudioSourceType = 'none';
   private _muted = false;
 
+  private extraNodes: AudioNode[] = [];
+  private stoppables: Stoppable[] = [];
+  private soundscapeTimer: ReturnType<typeof setInterval> | null = null;
+  private soundscapeParams: SoundscapeParams = { ...DEFAULT_SOUNDSCAPE_PARAMS };
+  private soundscapeOrigin = 0;
+  private lastBeatIndex = -1;
+  private bassGainNode: GainNode | null = null;
+  private midGainNode: GainNode | null = null;
+  private highGainNode: GainNode | null = null;
+  private noiseGainNode: GainNode | null = null;
+  private clickGainNode: GainNode | null = null;
+  private bassFilter: BiquadFilterNode | null = null;
+  private midFilter: BiquadFilterNode | null = null;
+  private highFilter: BiquadFilterNode | null = null;
+
   get sourceType(): AudioSourceType { return this._sourceType; }
   get muted(): boolean { return this._muted; }
+  getSoundscapeParams(): SoundscapeParams { return { ...this.soundscapeParams }; }
 
   setMuted(muted: boolean): void {
     this._muted = muted;
@@ -31,6 +58,27 @@ export class AudioSource {
   }
 
   private stopCurrentSource(): void {
+    if (this.soundscapeTimer !== null) {
+      clearInterval(this.soundscapeTimer);
+      this.soundscapeTimer = null;
+    }
+    for (const node of this.stoppables) {
+      try { node.stop(); } catch { /* already stopped */ }
+    }
+    this.stoppables = [];
+    for (const node of this.extraNodes) {
+      try { node.disconnect(); } catch { /* already disconnected */ }
+    }
+    this.extraNodes = [];
+    this.bassGainNode = null;
+    this.midGainNode = null;
+    this.highGainNode = null;
+    this.noiseGainNode = null;
+    this.clickGainNode = null;
+    this.bassFilter = null;
+    this.midFilter = null;
+    this.highFilter = null;
+
     if (this.sourceNode) {
       if ('stop' in this.sourceNode) {
         try { (this.sourceNode as AudioBufferSourceNode).stop(); } catch { /* already stopped */ }
@@ -82,7 +130,6 @@ export class AudioSource {
       audio: true,
       video: true,
     };
-    // Chrome 105+ supports systemAudio and preferCurrentTab
     if ('getDisplayMedia' in navigator.mediaDevices) {
       (constraints as any).systemAudio = 'include';
       (constraints as any).preferCurrentTab = true;
@@ -98,6 +145,127 @@ export class AudioSource {
     this.sourceNode = source;
     this.activeStream = stream;
     this._sourceType = 'system';
+  }
+
+  startSoundscape(params?: Partial<SoundscapeParams>): void {
+    if (!this.audioContext || !this.analyserNode) throw new Error('AudioSource not initialized');
+    this.stopCurrentSource();
+    this.soundscapeParams = clampSoundscapeParams(params ?? {}, DEFAULT_SOUNDSCAPE_PARAMS);
+
+    const ctx = this.audioContext;
+    const mix = ctx.createGain();
+    mix.gain.value = 0.85;
+    mix.connect(this.analyserNode);
+    this.sourceNode = mix;
+    this.extraNodes.push(mix);
+
+    const noise = ctx.createBufferSource();
+    noise.buffer = this.createNoiseBuffer(ctx);
+    noise.loop = true;
+    const noiseFilter = ctx.createBiquadFilter();
+    noiseFilter.type = 'bandpass';
+    noiseFilter.frequency.value = 1200;
+    noiseFilter.Q.value = 0.7;
+    const noiseGain = ctx.createGain();
+    noiseGain.gain.value = 0.08;
+    noise.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(mix);
+    this.noiseGainNode = noiseGain;
+    this.extraNodes.push(noise, noiseFilter, noiseGain);
+    this.stoppables.push(noise);
+    noise.start();
+
+    this.bassFilter = this.makeOscBand(ctx, mix, 70, 'lowpass', 0.18);
+    this.midFilter = this.makeOscBand(ctx, mix, 420, 'bandpass', 0.16);
+    this.highFilter = this.makeOscBand(ctx, mix, 2400, 'highpass', 0.1);
+
+    const click = ctx.createOscillator();
+    click.type = 'square';
+    click.frequency.value = 180;
+    const clickGain = ctx.createGain();
+    clickGain.gain.value = 0.0001;
+    click.connect(clickGain);
+    clickGain.connect(mix);
+    this.clickGainNode = clickGain;
+    this.extraNodes.push(click, clickGain);
+    this.stoppables.push(click);
+    click.start();
+
+    this.soundscapeOrigin = ctx.currentTime;
+    this.lastBeatIndex = -1;
+    this._sourceType = 'soundscape';
+    this.tickSoundscape();
+    this.soundscapeTimer = setInterval(() => this.tickSoundscape(), 40);
+  }
+
+  setSoundscapeParams(partial: Partial<SoundscapeParams>): void {
+    this.soundscapeParams = clampSoundscapeParams(partial, this.soundscapeParams);
+  }
+
+  private makeOscBand(
+    ctx: AudioContext,
+    mix: AudioNode,
+    freq: number,
+    filterType: BiquadFilterType,
+    initialGain: number,
+  ): BiquadFilterNode {
+    const osc = ctx.createOscillator();
+    osc.type = freq < 120 ? 'sine' : freq < 800 ? 'triangle' : 'sawtooth';
+    osc.frequency.value = freq;
+    const filter = ctx.createBiquadFilter();
+    filter.type = filterType;
+    filter.frequency.value = freq;
+    filter.Q.value = filterType === 'bandpass' ? 1.1 : 0.7;
+    const gain = ctx.createGain();
+    gain.gain.value = initialGain;
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(mix);
+    this.extraNodes.push(osc, filter, gain);
+    this.stoppables.push(osc);
+    osc.start();
+    if (filterType === 'lowpass') this.bassGainNode = gain;
+    else if (filterType === 'bandpass') this.midGainNode = gain;
+    else this.highGainNode = gain;
+    return filter;
+  }
+
+  private createNoiseBuffer(ctx: AudioContext): AudioBuffer {
+    const length = ctx.sampleRate * 2;
+    const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+    return buffer;
+  }
+
+  private tickSoundscape(): void {
+    const ctx = this.audioContext;
+    if (!ctx || this._sourceType !== 'soundscape') return;
+    const elapsed = Math.max(0, ctx.currentTime - this.soundscapeOrigin);
+    const phase = soundscapePhase(elapsed, this.soundscapeParams.cycleLength);
+    const beatIndex = soundscapeBeatIndex(elapsed, this.soundscapeParams.beatRate);
+    const gains = soundscapeGainsAt(phase, this.soundscapeParams, elapsed, this.lastBeatIndex);
+    this.lastBeatIndex = beatIndex;
+
+    const now = ctx.currentTime;
+    const ramp = 0.05;
+    this.bassGainNode?.gain.setTargetAtTime(gains.bass * 0.45, now, ramp);
+    this.midGainNode?.gain.setTargetAtTime(gains.mid * 0.28, now, ramp);
+    this.highGainNode?.gain.setTargetAtTime(gains.high * 0.16, now, ramp);
+    this.noiseGainNode?.gain.setTargetAtTime(gains.noise * 0.22, now, ramp);
+
+    const cutoffHz = 280 + gains.cutoff * 4200;
+    this.midFilter?.frequency.setTargetAtTime(cutoffHz * 0.35, now, ramp);
+    this.highFilter?.frequency.setTargetAtTime(900 + gains.cutoff * 5000, now, ramp);
+
+    if (gains.beat && this.clickGainNode) {
+      const g = this.clickGainNode.gain;
+      g.cancelScheduledValues(now);
+      g.setValueAtTime(0.0001, now);
+      g.exponentialRampToValueAtTime(0.35 * this.soundscapeParams.energy + 0.05, now + 0.004);
+      g.exponentialRampToValueAtTime(0.0001, now + 0.05);
+    }
   }
 
   getSamples(): Float32Array<ArrayBuffer> | null {

@@ -127,8 +127,6 @@ const PARTICLE_VERTEX_SHADER = /* glsl */ `
 `;
 
 const PARTICLE_FRAGMENT_SHADER = /* glsl */ `
-  precision highp float;
-
   uniform float u_hueShift;
   uniform float u_glowIntensity;
   uniform float u_time;
@@ -296,7 +294,7 @@ export class OrbitalVisualizer implements Visualizer {
     this.particleGeometry.setAttribute('a_size', new THREE.BufferAttribute(this.sizes, 1));
     this.particleGeometry.setAttribute('a_speed', new THREE.BufferAttribute(this.speeds, 1));
 
-    this.particleMaterial = new THREE.RawShaderMaterial({
+    this.particleMaterial = new THREE.ShaderMaterial({
       vertexShader: PARTICLE_VERTEX_SHADER,
       fragmentShader: PARTICLE_FRAGMENT_SHADER,
       uniforms: {
@@ -310,6 +308,7 @@ export class OrbitalVisualizer implements Visualizer {
     });
 
     this.particlePoints = new THREE.Points(this.particleGeometry, this.particleMaterial);
+    this.particlePoints.frustumCulled = false;
     scene.add(this.particlePoints);
   }
 

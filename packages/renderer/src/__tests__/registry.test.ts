@@ -142,4 +142,12 @@ describe('Visualizer Registry', () => {
     const entry = await loadVisualizer('does-not-exist');
     expect(entry).toBeUndefined();
   });
+
+  it('manifest usesPerspective matches loaded metadata', () => {
+    for (const m of VISUALIZER_MANIFEST) {
+      const entry = getVisualizerEntry(m.type);
+      expect(entry, m.type).toBeDefined();
+      expect(m.usesPerspective, m.type).toBe(entry!.metadata.usesPerspective);
+    }
+  });
 });

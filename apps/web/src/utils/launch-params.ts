@@ -55,10 +55,11 @@ export function resolveLaunchConfig(): LaunchConfig {
 export function resolveAudioTarget(
   identifier: string,
   sampleTracks: string[],
-): { type: 'system' } | { type: 'mic' } | { type: 'track'; url: string; name: string } | null {
+): { type: 'system' } | { type: 'mic' } | { type: 'soundscape' } | { type: 'track'; url: string; name: string } | null {
   const lower = identifier.toLowerCase();
   if (lower === 'system') return { type: 'system' };
   if (lower === 'mic' || lower === 'microphone') return { type: 'mic' };
+  if (lower === 'soundscape' || lower === 'loop') return { type: 'soundscape' };
 
   const match = sampleTracks.find(t => {
     const name = t.split('/').pop()?.replace(/\.[^.]+$/, '') ?? '';

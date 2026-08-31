@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { detectInitialTier } from '../managers/quality-manager.js';
+import { detectInitialTier, QualityManager } from '../managers/quality-manager.js';
+import { MessageBus } from '@cybernoetica/core';
 
 describe('detectInitialTier', () => {
   it('picks high for Apple Silicon', () => {
@@ -40,5 +41,17 @@ describe('detectInitialTier', () => {
   it('defaults to performance when no signals are available', () => {
     expect(detectInitialTier(null)).toBe('performance');
     expect(detectInitialTier('')).toBe('performance');
+  });
+
+  it('resetGovernor clears the rolling frame window', () => {
+    const bus = new MessageBus();
+    const quality = new QualityManager({
+      bus,
+      applyTier: () => {},
+    });
+    for (let i = 1; i <= 10; i++) quality.tick(i * 20);
+    expect(quality.getDebugSnapshot().avgFrameMs).toBeGreaterThan(0);
+    quality.resetGovernor();
+    expect(quality.getDebugSnapshot().avgFrameMs).toBe(0);
   });
 });

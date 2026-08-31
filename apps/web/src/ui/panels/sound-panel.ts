@@ -1,8 +1,10 @@
-import { el, glassButton, sectionLabel, toggleSwitch } from '../components.js';
-import { GLASS_BORDER, TEXT_PRIMARY, TEXT_SECONDARY, ACCENT, TEXT_DIM } from '../styles.js';
+import { el, glassButton, sectionLabel, toggleSwitch, paramSlider } from '../components.js';
+import { GLASS_BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_DIM } from '../styles.js';
 import { formatTrackName, formatFolderName, groupTracksByFolder, trackFileName } from '../../utils/track-display.js';
 import { getSetting } from '../../settings-loader.js';
 import type { TrackDisplayFormat } from '../../utils/track-display.js';
+import type { AudioSourceType } from '@cybernoetica/audio';
+import type { SoundscapeParams } from '@cybernoetica/audio';
 
 export interface SoundPanelOpts {
   activeTrackName: string;
@@ -11,10 +13,14 @@ export interface SoundPanelOpts {
   shuffleMode: boolean;
   trackListExpanded: boolean;
   expandedFolders: Set<string>;
+  activeSource: AudioSourceType | 'file' | 'none';
+  soundscapeParams: SoundscapeParams;
   onRandomTrack: (() => void) | null;
   onSystemAudio: (() => void) | null;
   onFileClick: () => void;
   onMicClick: (() => void) | null;
+  onSoundscapeLoop: (() => void) | null;
+  onSoundscapeParamsChange: ((partial: Partial<SoundscapeParams>) => void) | null;
   onTrackSelect: ((url: string, name: string) => void) | null;
   onAutoPlayChange: ((enabled: boolean, shuffle: boolean) => void) | null;
   onToggleTrackList: () => void;
@@ -28,6 +34,7 @@ export function renderSoundPanel(panel: HTMLElement, opts: SoundPanelOpts): void
   const trackSettings = getSetting('track_display', { format: 'track-number' as const, show_folder_name: true });
   const displayFormat: TrackDisplayFormat = trackSettings.format ?? 'track-number';
   const showFolders = trackSettings.show_folder_name !== false;
+  const loopActive = opts.activeSource === 'soundscape';
 
   if (opts.activeTrackName) {
     const nowPlaying = el('div', {
@@ -54,14 +61,17 @@ export function renderSoundPanel(panel: HTMLElement, opts: SoundPanelOpts): void
     display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap', marginBottom: '14px',
   });
 
-  const sysBtn = glassButton('System Audio');
+  const sysBtn = glassButton('System Audio', { active: opts.activeSource === 'system' });
   sysBtn.addEventListener('click', () => { if (opts.onSystemAudio) opts.onSystemAudio(); opts.onClose(); });
 
   const loadBtn = glassButton('Load Local Audio');
   loadBtn.addEventListener('click', () => { opts.onFileClick(); opts.onClose(); });
 
-  const micBtn = glassButton('Microphone');
+  const micBtn = glassButton('Microphone', { active: opts.activeSource === 'mic' });
   micBtn.addEventListener('click', () => { if (opts.onMicClick) opts.onMicClick(); opts.onClose(); });
+
+  const loopBtn = glassButton('Soundscape Loop', { active: loopActive });
+  loopBtn.addEventListener('click', () => { if (opts.onSoundscapeLoop) opts.onSoundscapeLoop(); });
 
   const sampleToggle = glassButton(
     `Sample Tracks (${opts.sampleTracks.length})`,
@@ -69,10 +79,45 @@ export function renderSoundPanel(panel: HTMLElement, opts: SoundPanelOpts): void
   );
   sampleToggle.addEventListener('click', () => opts.onToggleTrackList());
 
-  sourceRow.append(sysBtn, loadBtn, micBtn, sampleToggle);
+  sourceRow.append(sysBtn, loadBtn, micBtn, loopBtn, sampleToggle);
   panel.appendChild(sourceRow);
 
-  // ── Track list (hierarchical by folder) ─────────────────────────
+  if (loopActive) {
+    panel.appendChild(sectionLabel('Loop'));
+    panel.appendChild(paramSlider({
+      key: 'cycleLength',
+      label: 'Cycle',
+      description: 'Seconds to traverse the full soundscape',
+      min: 8, max: 60, step: 1,
+      initial: opts.soundscapeParams.cycleLength,
+      onChange: (_key, val) => opts.onSoundscapeParamsChange?.({ cycleLength: val }),
+    }));
+    panel.appendChild(paramSlider({
+      key: 'energy',
+      label: 'Energy',
+      description: 'Overall loudness of the probe',
+      min: 0, max: 1, step: 0.05,
+      initial: opts.soundscapeParams.energy,
+      onChange: (_key, val) => opts.onSoundscapeParamsChange?.({ energy: val }),
+    }));
+    panel.appendChild(paramSlider({
+      key: 'brightness',
+      label: 'Brightness',
+      description: 'Tilt toward high frequencies',
+      min: 0, max: 1, step: 0.05,
+      initial: opts.soundscapeParams.brightness,
+      onChange: (_key, val) => opts.onSoundscapeParamsChange?.({ brightness: val }),
+    }));
+    panel.appendChild(paramSlider({
+      key: 'beatRate',
+      label: 'Beat Rate',
+      description: 'Click tempo in BPM',
+      min: 40, max: 180, step: 1,
+      initial: opts.soundscapeParams.beatRate,
+      onChange: (_key, val) => opts.onSoundscapeParamsChange?.({ beatRate: val }),
+    }));
+  }
+
   if (opts.trackListExpanded && opts.sampleTracks.length > 0) {
     const trackList = el('div', {
       maxHeight: '220px', overflowY: 'auto', marginBottom: '14px',
@@ -146,7 +191,6 @@ export function renderSoundPanel(panel: HTMLElement, opts: SoundPanelOpts): void
     panel.appendChild(trackList);
   }
 
-  // ── Playback controls ───────────────────────────────────────────
   panel.appendChild(sectionLabel('Playback'));
   const playbackRow = el('div', {
     display: 'flex', gap: '12px', alignItems: 'center', fontSize: '12px', color: TEXT_SECONDARY,

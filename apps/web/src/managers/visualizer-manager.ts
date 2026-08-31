@@ -12,30 +12,41 @@ const DEFAULT_DRIFT_SPEED = 0.08;
 
 export type SwitchHook = (type: string, phase: 'loading' | 'ready' | 'error', detail?: Error) => void;
 
+export interface VisualizerManagerOptions {
+  resetGovernor?: () => void;
+}
+
 export class VisualizerManager {
   private activeViz: Visualizer | null = null;
   private activeType = '';
   private driftEnabled = true;
   private pendingType: string | null = null;
+  private switchGen = 0;
   private switchHook: SwitchHook | null = null;
+  private resetGovernor: (() => void) | null;
 
   constructor(
     private bus: MessageBus,
     private scene: SceneManager,
+    options: VisualizerManagerOptions = {},
   ) {
+    this.resetGovernor = options.resetGovernor ?? null;
     scene.onViewportDrag((dx, dy) => this.handleDrag(dx, dy));
     scene.onViewportZoom((delta) => this.handleZoom(delta));
     scene.onViewportReset(() => this.handleReset());
+    scene.onContextRestored(() => {
+      const type = this.activeType;
+      if (!type) {
+        this.scene.start();
+        return;
+      }
+      console.info('VisualizerManager: Re-initializing active visualizer after context restore.');
+      void this.switchTo(type).then(() => this.scene.start());
+    });
+  }
 
-    const canvas = scene.getCanvasElement();
-    if (canvas) {
-      canvas.addEventListener('webglcontextrestored', () => {
-        if (this.activeType) {
-          console.info('VisualizerManager: Re-initializing active visualizer after context restore.');
-          void this.switchTo(this.activeType);
-        }
-      });
-    }
+  setResetGovernor(fn: (() => void) | null): void {
+    this.resetGovernor = fn;
   }
 
   onSwitch(hook: SwitchHook | null): void {
@@ -43,7 +54,7 @@ export class VisualizerManager {
   }
 
   async switchTo(type: string): Promise<Visualizer | null> {
-    // Mark pending so concurrent rapid switches resolve to the last requested type.
+    const gen = ++this.switchGen;
     this.pendingType = type;
     let entry = getVisualizerEntry(type);
     if (!entry) {
@@ -51,11 +62,10 @@ export class VisualizerManager {
       try {
         entry = await loadVisualizer(type) ?? undefined;
       } catch (err) {
-        this.switchHook?.(type, 'error', err as Error);
+        if (gen === this.switchGen) this.switchHook?.(type, 'error', err as Error);
         return null;
       }
-      if (this.pendingType !== type) {
-        // A newer switch has overridden this one — abandon silently.
+      if (gen !== this.switchGen || this.pendingType !== type) {
         return null;
       }
       if (!entry) {
@@ -64,16 +74,14 @@ export class VisualizerManager {
       }
     }
 
-    if (this.activeViz) {
-      this.activeViz.dispose();
-      while (this.scene.scene.children.length > 0)
-        this.scene.scene.remove(this.scene.scene.children[0]);
-    }
+    if (gen !== this.switchGen) return null;
+
+    this.teardownActive();
+    this.resetGovernor?.();
 
     this.activeType = type;
     this.activeViz = entry.create(this.bus);
 
-    // Inject renderer for visualizers that need off-screen rendering (e.g. FBO ping-pong)
     const renderer = this.scene.getRenderer();
     if (renderer) {
       this.activeViz.setRenderer?.(renderer);
@@ -96,9 +104,14 @@ export class VisualizerManager {
     this.scene.setViewportCapabilities(this.activeViz.metadata.viewport);
     this.scene.setCursorMode(this.activeViz.getCursorMode?.() ?? 'default');
     this.driftEnabled = true;
+    this.applyPerspectiveCamera();
 
-    // Move first-frame shader compile off the critical path.
     this.scene.precompile();
+
+    if (gen !== this.switchGen) {
+      this.teardownActive();
+      return null;
+    }
 
     this.switchHook?.(type, 'ready');
     return this.activeViz;
@@ -125,7 +138,6 @@ export class VisualizerManager {
   tick(): void {
     if (!this.activeViz) return;
 
-    // For perspective visualizers: apply auto-drift and update camera from view state
     if (this.activeViz.metadata.usesPerspective) {
       if (this.driftEnabled && !this.scene.isDragging()) {
         const vs = this.activeViz.getViewState();
@@ -133,22 +145,34 @@ export class VisualizerManager {
           orbitAngle: (vs.orbitAngle ?? 0) + DEFAULT_DRIFT_SPEED / 60,
         });
       }
-      const vs = this.activeViz.getViewState();
-      const dist = vs.distance ?? 12;
-      const angle = vs.orbitAngle ?? 0;
-      const elev = vs.elevation ?? 0;
-      this.scene.setCameraPosition(
-        Math.sin(angle) * dist,
-        elev * dist * 0.3,
-        Math.cos(angle) * dist,
-      );
+      this.applyPerspectiveCamera();
     }
 
     this.activeViz.tick();
     this.scene.setCursorMode(this.activeViz.getCursorMode?.() ?? 'default');
   }
 
-  // ── Viewport interaction translation ────────────────────────────
+  private teardownActive(): void {
+    if (this.activeViz) {
+      this.activeViz.setInteractionContext?.(null);
+      this.activeViz.dispose();
+      this.activeViz = null;
+    }
+    this.scene.clearScene();
+  }
+
+  private applyPerspectiveCamera(): void {
+    if (!this.activeViz?.metadata.usesPerspective) return;
+    const vs = this.activeViz.getViewState();
+    const dist = vs.distance ?? 12;
+    const angle = vs.orbitAngle ?? 0;
+    const elev = vs.elevation ?? 0;
+    this.scene.setCameraPosition(
+      Math.sin(angle) * dist,
+      elev * dist * 0.3,
+      Math.cos(angle) * dist,
+    );
+  }
 
   private handleDrag(dx: number, dy: number): void {
     if (!this.activeViz) return;
@@ -202,7 +226,6 @@ export class VisualizerManager {
   }
 
   private handleReset(): void {
-    // Re-create the visualizer to reset all state
     if (this.activeType) {
       void this.switchTo(this.activeType);
     }

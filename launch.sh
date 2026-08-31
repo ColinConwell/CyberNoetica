@@ -46,7 +46,7 @@ OPTIONS
                            voronoi, lissajous, kaleidoscope
 
   --audio SOURCE    Set audio source
-                    Values: system, mic, or a track name (fuzzy match)
+                    Values: system, mic, soundscape (or loop), or a track name (fuzzy match)
 
   --log MODE        Enable log display
                     Modes: stream, floating, docked

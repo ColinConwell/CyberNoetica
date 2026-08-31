@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { VoronoiBetaVisualizer } from '../visualizers/voronoi/v02-beta.js';
+import { foamLoadStillCurrent } from '../visualizers/voronoi/foam-engine.js';
 import { MessageBus } from '@cybernoetica/core';
 import type { AudioFeatures } from '@cybernoetica/core';
 
@@ -94,5 +95,19 @@ describe('VoronoiBetaVisualizer', () => {
     expect(viz.metadata.viewStateFields.length).toBe(3);
     const keys = viz.metadata.viewStateFields.map(f => f.key);
     expect(keys).toEqual(['orbitAngle', 'elevation', 'distance']);
+  });
+
+  it('dispose then tick is a no-op', () => {
+    const bus = new MessageBus();
+    const viz = new VoronoiBetaVisualizer(bus);
+    viz.dispose();
+    expect(() => viz.tick()).not.toThrow();
+    expect(() => viz.dispose()).not.toThrow();
+  });
+
+  it('drops a late WASM backend after dispose', () => {
+    expect(foamLoadStillCurrent(false, 1, 1)).toBe(true);
+    expect(foamLoadStillCurrent(true, 1, 1)).toBe(false);
+    expect(foamLoadStillCurrent(false, 1, 2)).toBe(false);
   });
 });

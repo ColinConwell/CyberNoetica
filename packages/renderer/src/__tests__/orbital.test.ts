@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { OrbitalVisualizer } from '../visualizers/orbital/v01-alpha.js';
 import { MessageBus } from '@cybernoetica/core';
 import type { AudioFeatures } from '@cybernoetica/core';
+import * as THREE from 'three';
 
 describe('OrbitalVisualizer', () => {
   it('can be constructed', () => {
@@ -83,5 +84,18 @@ describe('OrbitalVisualizer', () => {
     expect(viz.metadata.viewStateFields.length).toBe(3);
     expect(viz.metadata.viewStateFields.map(f => f.key))
       .toEqual(['orbitAngle', 'elevation', 'distance']);
+  });
+
+  it('attaches with ShaderMaterial and disabled frustum culling', () => {
+    const bus = new MessageBus();
+    const viz = new OrbitalVisualizer(bus);
+    const scene = new THREE.Scene();
+    viz.attach(scene);
+    expect(scene.children.length).toBe(1);
+    const points = scene.children[0] as THREE.Points;
+    expect(points.frustumCulled).toBe(false);
+    expect((points.material as THREE.ShaderMaterial).type).toBe('ShaderMaterial');
+    viz.dispose();
+    expect(scene.children.length).toBe(0);
   });
 });

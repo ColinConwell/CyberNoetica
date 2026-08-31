@@ -66,6 +66,54 @@ const CURSOR_SCULPT_ACTIVE = `url("data:image/svg+xml,${encodeURIComponent(
 export type ViewportDragHandler = (dx: number, dy: number) => void;
 export type ViewportZoomHandler = (delta: number) => void;
 export type ViewportResetHandler = () => void;
+export type ContextRestoredHandler = () => void;
+
+const TEXTURE_KEYS = [
+  'map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap',
+  'aoMap', 'bumpMap', 'displacementMap', 'alphaMap', 'envMap',
+  'lightMap', 'specularMap', 'gradientMap',
+] as const;
+
+function disposeTexture(value: unknown): void {
+  if (value && typeof value === 'object' && 'isTexture' in value) {
+    (value as THREE.Texture).dispose();
+  }
+}
+
+function disposeMaterial(material: THREE.Material): void {
+  const rec = material as THREE.Material & Record<string, unknown>;
+  for (const key of TEXTURE_KEYS) disposeTexture(rec[key]);
+  if ('uniforms' in material && material.uniforms && typeof material.uniforms === 'object') {
+    for (const uniform of Object.values(material.uniforms as Record<string, { value?: unknown }>)) {
+      disposeTexture(uniform?.value);
+    }
+  }
+  material.dispose();
+}
+
+function disposeObject3D(root: THREE.Object3D): void {
+  const seenGeom = new Set<THREE.BufferGeometry>();
+  const seenMat = new Set<THREE.Material>();
+  root.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (mesh.geometry && !seenGeom.has(mesh.geometry)) {
+      seenGeom.add(mesh.geometry);
+      mesh.geometry.dispose();
+    }
+    const mat = mesh.material;
+    if (Array.isArray(mat)) {
+      for (const m of mat) {
+        if (m && !seenMat.has(m)) {
+          seenMat.add(m);
+          disposeMaterial(m);
+        }
+      }
+    } else if (mat && !seenMat.has(mat)) {
+      seenMat.add(mat);
+      disposeMaterial(mat);
+    }
+  });
+}
 
 export class SceneManager {
   public width: number;
@@ -92,6 +140,7 @@ export class SceneManager {
   private _onDrag: ViewportDragHandler | null = null;
   private _onZoom: ViewportZoomHandler | null = null;
   private _onReset: ViewportResetHandler | null = null;
+  private _onContextRestored: ContextRestoredHandler | null = null;
 
   constructor(width: number, height: number) {
     this.width = width;
@@ -212,9 +261,8 @@ export class SceneManager {
 
     canvas.addEventListener('webglcontextrestored', () => {
       console.info('CyberNoetica: WebGL context restored. Re-initialization required.');
-      // The VisualizerManager listens for this via the bus or handles it implicitly.
-      // For now, we just resume the render loop, though the active visualizer needs re-attachment.
-      this.start();
+      if (this._onContextRestored) this._onContextRestored();
+      else this.start();
     });
     }
 
@@ -241,6 +289,35 @@ export class SceneManager {
   onViewportDrag(handler: ViewportDragHandler): void { this._onDrag = handler; }
   onViewportZoom(handler: ViewportZoomHandler): void { this._onZoom = handler; }
   onViewportReset(handler: ViewportResetHandler): void { this._onReset = handler; }
+  onContextRestored(handler: ContextRestoredHandler | null): void { this._onContextRestored = handler; }
+
+  resetPerspectiveCamera(): void {
+    this.perspCamera.fov = 60;
+    this.perspCamera.near = 0.1;
+    this.perspCamera.far = 100;
+    this.perspCamera.aspect = this.width / Math.max(this.height, 1);
+    this.perspCamera.position.set(0, 0, 12);
+    this.perspCamera.up.set(0, 1, 0);
+    this.perspCamera.lookAt(0, 0, 0);
+    this.perspCamera.updateProjectionMatrix();
+  }
+
+  /**
+   * Dispose leftover GPU resources and empty the scene graph. Safe when the
+   * renderer has not been attached (unit tests).
+   */
+  clearScene(): void {
+    const children = this.scene.children.slice();
+    for (const child of children) {
+      disposeObject3D(child);
+      this.scene.remove(child);
+    }
+    if (this.renderer) {
+      this.renderer.setRenderTarget(null);
+      this.renderer.autoClear = true;
+    }
+    this.resetPerspectiveCamera();
+  }
 
   isDragging(): boolean { return this.dragging; }
 

@@ -100,6 +100,19 @@ export class QualityManager {
   getAutoTier(): QualityTier { return this.autoTier; }
 
   /**
+   * Drop rolling frame-time samples after a visualizer switch so a heavy viz
+   * cannot keep the auto governor pinned to a lower tier.
+   */
+  resetGovernor(): void {
+    this.slowSinceMs = 0;
+    this.fastSinceMs = 0;
+    this.frameTimes = [];
+    this.lastFrameAt = 0;
+    this.lastRenderedAt = 0;
+    this.cooldownUntilMs = 0;
+  }
+
+  /**
    * Called once per rAF — decides whether this frame should render, feeds
    * the rolling frame-time window, and adapts the auto tier. Returns true
    * when the caller should proceed with full tick + render.

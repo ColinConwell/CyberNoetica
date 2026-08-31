@@ -13,6 +13,7 @@ import { createAppStore } from './store.js';
 import type { QualityMode } from './store.js';
 import { resolveLaunchConfig, resolveAudioTarget } from './utils/launch-params.js';
 import type { CyberNoeticaGlobals } from './globals.js';
+import type { SoundscapeParams } from '@cybernoetica/audio';
 import './globals.js';
 
 export async function createApp(container: HTMLElement): Promise<void> {
@@ -46,6 +47,7 @@ export async function createApp(container: HTMLElement): Promise<void> {
     getDebugInfo: () => scene.getRendererDebugInfo(),
   });
   quality.initialize();
+  vizManager.setResetGovernor(() => quality.resetGovernor());
   const savedQuality = store.getState().ui.quality ?? 'auto';
   quality.setMode(savedQuality);
 
@@ -118,6 +120,7 @@ export async function createApp(container: HTMLElement): Promise<void> {
       playback.dispatch({ type: 'LOADED' });
       ui.setActiveTrack(name);
       ui.setPlaying(true);
+      ui.setActiveAudioSource('file');
       store.setState({ audio: { trackName: name, source: 'file' } });
     } catch (err) {
       playback.dispatch({ type: 'ERROR', error: (err as Error).message });
@@ -238,6 +241,8 @@ export async function createApp(container: HTMLElement): Promise<void> {
       void startSystemAudio();
     } else if (audioTarget?.type === 'mic') {
       void startMicrophone();
+    } else if (audioTarget?.type === 'soundscape') {
+      void startSoundscape();
     } else if (audioTarget?.type === 'track') {
       startWithTrack(audioTarget.url, audioTarget.name);
     } else {
@@ -254,6 +259,7 @@ export async function createApp(container: HTMLElement): Promise<void> {
         playback.dispatch({ type: 'LOADED' });
         ui.setActiveTrack(name);
         ui.setPlaying(true);
+        ui.setActiveAudioSource('file');
         store.setState({ audio: { trackName: name, source: 'file' } });
       })
       .catch(err => {
@@ -270,6 +276,7 @@ export async function createApp(container: HTMLElement): Promise<void> {
       playback.dispatch({ type: 'LOADED' });
       ui.setActiveTrack('System Audio');
       ui.setPlaying(true);
+      ui.setActiveAudioSource('system');
       store.setState({ audio: { trackName: 'System Audio', source: 'system' } });
     } catch (err) {
       playback.dispatch({ type: 'ERROR', error: (err as Error).message });
@@ -285,10 +292,38 @@ export async function createApp(container: HTMLElement): Promise<void> {
       playback.dispatch({ type: 'LOADED' });
       ui.setActiveTrack('Microphone');
       ui.setPlaying(true);
+      ui.setActiveAudioSource('mic');
       store.setState({ audio: { trackName: 'Microphone', source: 'mic' } });
     } catch (err) {
       playback.dispatch({ type: 'ERROR', error: (err as Error).message });
       ui.showError(`Microphone access denied: ${(err as Error).message}`);
+    }
+  }
+
+  async function startSoundscape(params?: Partial<SoundscapeParams>) {
+    try {
+      const canSwitch = playback.canDispatch('SWITCH_SOURCE');
+      if (canSwitch) {
+        playback.dispatch({ type: 'SWITCH_SOURCE', source: 'soundscape' });
+      } else if (playback.canDispatch('START')) {
+        playback.dispatch({ type: 'START' });
+      }
+      await audio.source.resume();
+      audio.source.startSoundscape(params ?? audio.source.getSoundscapeParams());
+      if (canSwitch) {
+        playback.dispatch({ type: 'SOURCE_READY' });
+      } else {
+        playback.dispatch({ type: 'LOADED' });
+      }
+      const current = audio.source.getSoundscapeParams();
+      ui.setSoundscapeParams(current);
+      ui.setActiveTrack('Soundscape Loop');
+      ui.setPlaying(true);
+      ui.setActiveAudioSource('soundscape');
+      store.setState({ audio: { trackName: 'Soundscape Loop', source: 'soundscape' } });
+    } catch (err) {
+      playback.dispatch({ type: 'ERROR', error: (err as Error).message });
+      ui.showError(`Soundscape loop failed: ${(err as Error).message}`);
     }
   }
 
@@ -365,6 +400,7 @@ export async function createApp(container: HTMLElement): Promise<void> {
       const name = file.name.replace(/\.[^.]+$/, '');
       ui.setActiveTrack(name);
       ui.setPlaying(true);
+      ui.setActiveAudioSource('file');
       store.setState({ audio: { trackName: name, source: 'file' } });
     } catch (err) {
       playback.dispatch({ type: 'ERROR', error: (err as Error).message });
@@ -389,6 +425,7 @@ export async function createApp(container: HTMLElement): Promise<void> {
       }
       ui.setActiveTrack('Microphone');
       ui.setPlaying(true);
+      ui.setActiveAudioSource('mic');
       store.setState({ audio: { trackName: 'Microphone', source: 'mic' } });
     } catch (err) {
       playback.dispatch({ type: 'ERROR', error: (err as Error).message });
@@ -418,11 +455,21 @@ export async function createApp(container: HTMLElement): Promise<void> {
       }
       ui.setActiveTrack('System Audio');
       ui.setPlaying(true);
+      ui.setActiveAudioSource('system');
       store.setState({ audio: { trackName: 'System Audio', source: 'system' } });
     } catch (err) {
       playback.dispatch({ type: 'ERROR', error: (err as Error).message });
       ui.showError(`System audio capture failed: ${(err as Error).message}`);
     }
+  });
+
+  ui.onSoundscapeLoop(() => {
+    void startSoundscape();
+  });
+
+  ui.onSoundscapeParamsChange((partial) => {
+    audio.source.setSoundscapeParams(partial);
+    ui.setSoundscapeParams(audio.source.getSoundscapeParams());
   });
 
   window.addEventListener('resize', () => {

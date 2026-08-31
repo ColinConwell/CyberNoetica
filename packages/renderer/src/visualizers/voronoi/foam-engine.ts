@@ -83,6 +83,15 @@ function wrapCoord(v: number, h: number): number {
   return ((v + h) % w + w) % w - h;
 }
 
+/** True when a resolved Voro++ backend still belongs to this foam instance. */
+export function foamLoadStillCurrent(
+  disposed: boolean,
+  startedGen: number,
+  currentGen: number,
+): boolean {
+  return !disposed && startedGen === currentGen;
+}
+
 export class VoronoiFoamVisualizer implements Visualizer {
   readonly metadata: VisualizerMetadata;
 
@@ -128,6 +137,7 @@ export class VoronoiFoamVisualizer implements Visualizer {
   private faceColorScratch = new Float32Array(0);
   private edgeScratch = new Float32Array(0);
   private edgeColorScratch = new Float32Array(0);
+  private sceneRef: THREE.Scene | null = null;
 
   constructor(
     private readonly config: FoamConfig,
@@ -154,6 +164,7 @@ export class VoronoiFoamVisualizer implements Visualizer {
   }
 
   attach(scene: THREE.Scene): void {
+    this.sceneRef = scene;
     this.faceMaterial = new THREE.ShaderMaterial({
       vertexShader: FACE_VERT,
       fragmentShader: FACE_FRAG,
@@ -217,15 +228,25 @@ export class VoronoiFoamVisualizer implements Visualizer {
 
   private async startBackend(): Promise<void> {
     const gen = ++this.loadGen;
-    const { loadVoroBackend } = await import('../../voro/backend.js');
-    if (this.disposed || gen !== this.loadGen) return;
-    this.backend = await loadVoroBackend({
-      halfExtent: this.halfExtent,
-      grid: 3,
-      mode: this.config.mode,
-      sphereRadius: this.userParams.sphereRadius,
-    });
-    this.lastSphereR = this.userParams.sphereRadius ?? -1;
+    try {
+      const { loadVoroBackend } = await import('../../voro/backend.js');
+      if (!foamLoadStillCurrent(this.disposed, gen, this.loadGen)) return;
+      const backend = await loadVoroBackend({
+        halfExtent: this.halfExtent,
+        grid: 3,
+        mode: this.config.mode,
+        sphereRadius: this.userParams.sphereRadius,
+      });
+      if (!foamLoadStillCurrent(this.disposed, gen, this.loadGen)) {
+        backend?.dispose();
+        return;
+      }
+      this.backend = backend;
+      this.lastSphereR = this.userParams.sphereRadius ?? -1;
+    } catch (err) {
+      if (!foamLoadStillCurrent(this.disposed, gen, this.loadGen)) return;
+      console.warn('Voro++ backend failed to load', err);
+    }
   }
 
   private rebuildSeeds(count: number): void {
@@ -494,11 +515,13 @@ export class VoronoiFoamVisualizer implements Visualizer {
       (attr.array as Float32Array).set(data);
       attr.needsUpdate = true;
     } else {
+      geom.deleteAttribute(name);
       geom.setAttribute(name, new THREE.BufferAttribute(data.slice(), itemSize));
     }
   }
 
   tick(): void {
+    if (this.disposed) return;
     this.time += 1 / 60;
 
     if (this.latestFeatures) {
@@ -606,9 +629,15 @@ export class VoronoiFoamVisualizer implements Visualizer {
     this.faceMesh?.geometry.dispose();
     this.edgeLines?.geometry.dispose();
     this.seedPoints?.geometry.dispose();
+    if (this.sceneRef) {
+      if (this.faceMesh) this.sceneRef.remove(this.faceMesh);
+      if (this.edgeLines) this.sceneRef.remove(this.edgeLines);
+      if (this.seedPoints) this.sceneRef.remove(this.seedPoints);
+    }
     this.faceMesh = null;
     this.edgeLines = null;
     this.seedPoints = null;
+    this.sceneRef = null;
   }
 }
 

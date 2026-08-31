@@ -25,6 +25,7 @@ export function getVisualizerEntry(type: string): VisualizerEntry | undefined {
  */
 export function listVisualizers(): VisualizerMetadata[] {
   const defaultViewport: ViewportCapabilities = { pan: true, zoom: true, orbit: false };
+  const orbitViewport: ViewportCapabilities = { pan: false, zoom: true, orbit: true };
   return VISUALIZER_MANIFEST.map(m => {
     const loaded = entries.get(m.type);
     if (loaded) return loaded.metadata;
@@ -32,9 +33,9 @@ export function listVisualizers(): VisualizerMetadata[] {
       type: m.type,
       label: m.label,
       description: m.description,
-      usesPerspective: false,
+      usesPerspective: m.usesPerspective,
       params: [],
-      viewport: defaultViewport,
+      viewport: m.usesPerspective ? orbitViewport : defaultViewport,
       viewStateFields: [],
     };
   });

@@ -24,7 +24,8 @@ CyberNoetica/
 │           ├── managers/
 │           │   ├── audio-pipeline.ts     # WASM/JS audio analysis, feature push
 │           │   ├── track-manager.ts      # Track loading (generation counter), auto-play
-│           │   ├── visualizer-manager.ts  # Switching, camera, viewport delegation
+│           │   ├── visualizer-manager.ts  # Switching with generation guard + scene teardown
+│           │   ├── quality-manager.ts    # Pixel-ratio tiers + adaptive governor
 │           │   └── playback-state.ts     # Formal playback state machine
 │           ├── utils/
 │           │   ├── track-display.ts      # Track name formatting, folder grouping
@@ -47,7 +48,9 @@ CyberNoetica/
 │           └── __tests__/
 │               ├── playback-state.test.ts
 │               ├── settings-loader.test.ts
-│               └── track-display.test.ts
+│               ├── track-display.test.ts
+│               ├── launch-params.test.ts
+│               └── quality-manager.test.ts
 ├── packages/
 │   ├── core/                             # @cybernoetica/core
 │   │   └── src/
@@ -108,10 +111,11 @@ CyberNoetica/
 │   │   └── wasm/
 │   │       └── voro/                     # Committed Voro++ WASM (voro.js + voro.wasm)
 │   └── audio/                            # @cybernoetica/audio
-│       └── src/
-│           ├── index.ts
-│           ├── audio-source.ts           # Web Audio: file, mic, system (with cleanup)
-│           └── audio-processor.ts        # Publishes AudioFeatures to bus
+│       ├── src/
+│       │   ├── index.ts
+│       │   ├── audio-source.ts           # Web Audio: file, mic, system, soundscape
+│       │   ├── audio-processor.ts        # Publishes AudioFeatures to bus
+│       │   └── soundscape-loop.ts        # Parametric looping probe (gains vs phase)
 ├── crates/
 │   └── audio-analysis/                   # Rust -> WASM via wasm-pack
 ├── native/
@@ -165,12 +169,14 @@ CyberNoetica/
 **Audio source cleanup.** `AudioSource` now calls `stopCurrentSource()` before switching to any new source, properly stopping `MediaStream` tracks (mic/system) and disconnecting nodes. This prevents stream leaks when switching from mic/system audio to file playback.
 
 **Data flow:**
-1. `AudioSource` captures audio (file, microphone, or system audio via getDisplayMedia)
+1. `AudioSource` captures audio (file, microphone, system audio via getDisplayMedia, or the parametric Soundscape Loop)
 2. `AudioPipeline` extracts features (via Rust/WASM FFT or JS fallback) and publishes via `AudioProcessor` on `audio:features`
 3. Visualizers subscribe to audio features and modulate their parameters
 4. `SceneManager` drives the Three.js render loop with pointer/touch viewport interaction
 
-**Visualizer system:** Self-registering visualizers organized in versioned folders. Each family has a folder with `v{NN}-{greek}.ts` files. Parameters are categorized as `'appearance'` or `'audio-mapping'`. The UI groups controls accordingly. The orbital family has three versions: alpha (classic), beta (chaotic with drift), and gamma (interactive sculpt mode with user-placeable force fields). The voronoi family has five versions: alpha (2D Worley/F1-F2 shader), beta (non-periodic 3D foam), gamma (periodic crystal), delta (radical/Laguerre weighted cells), and epsilon (spherical-wall globe). Beta through epsilon share `foam-engine.ts` and tessellate via Voro++ compiled to WASM. The lorenz family has three versions: alpha (Lorenz 1963 butterfly), beta (Rössler single-scroll), and gamma (Chen dual-wing). All three share `engine.ts` (RK4 integration + additive 3D trails).
+**Visualizer switching.** `VisualizerManager.switchTo()` uses a generation counter (same idea as track loading) so a stale lazy-load cannot attach after a newer switch. Teardown calls `setInteractionContext(null)`, `dispose()`, then `SceneManager.clearScene()`, which traverses leftover children, disposes geometries/materials/textures, resets the perspective camera, and clears the renderer target. Perspective camera pose is applied immediately from the new viz `getViewState()` (not deferred to the next rAF). `QualityManager.resetGovernor()` clears the auto-tier window so a heavy viz does not leave a cheap viz stuck on a low tier. WebGL context restore is serialized: SceneManager does not `start()` until VisualizerManager has rebuilt the active viz.
+
+**Visualizer system:** Self-registering visualizers organized in versioned folders. Each family has a folder with `v{NN}-{greek}.ts` files. Parameters are categorized as `'appearance'` or `'audio-mapping'`. The UI groups controls accordingly. The orbital family has three versions: alpha (classic), beta (chaotic with drift), and gamma (interactive sculpt mode with user-placeable force fields). Orbital α/β/γ and Hopf use `THREE.ShaderMaterial` (not `RawShaderMaterial`) so Three.js injects `modelViewMatrix` / `projectionMatrix`; particle `Points` set `frustumCulled = false`. The voronoi family has five versions: alpha (2D Worley/F1-F2 shader), beta (non-periodic 3D foam), gamma (periodic crystal), delta (radical/Laguerre weighted cells), and epsilon (spherical-wall globe). Beta through epsilon share `foam-engine.ts` and tessellate via Voro++ compiled to WASM; foam re-checks `disposed` after `await loadVoroBackend()` and early-returns from `tick()` when disposed. The lorenz family has three versions: alpha (Lorenz 1963 butterfly), beta (Rössler single-scroll), and gamma (Chen dual-wing). All three share `engine.ts` (RK4 integration + additive 3D trails). `listVisualizers()` copies `usesPerspective` from the static manifest onto stubs so the Visual panel View section is correct before a lazy module loads.
 
 **View state.** Each visualizer exposes a per-family coordinate system via `getViewState()` / `setViewState()`. The coordinates have intuitive, domain-specific names (e.g., Mandelbrot uses `centerReal`/`centerImaginary`/`zoom`/`rotation`; Orbital uses `orbitAngle`/`elevation`/`distance`; Voronoi alpha uses `centerX`/`centerY`/`zoom`; Voronoi beta through epsilon and Lorenz alpha through gamma use `orbitAngle`/`elevation`/`distance`). User interactions (drag, scroll, pinch) flow from SceneManager as raw deltas through VisualizerManager, which translates them into the appropriate `setViewState()` calls. The pan handler in VisualizerManager supports multiple field name patterns: `centerReal`/`centerImaginary` (Mandelbrot), `centerX`/`centerY` (Voronoi, Lissajous), and `seedReal`/`seedImaginary` (Julia). The canvas shows a crosshair cursor with surrounding circle on hover when drag is available, with a brighter variant while dragging. SceneManager supports context-sensitive cursor modes (`pan`, `orbit`, `sculpt`, `default`) via `setCursorMode()`, with a dedicated blue crosshair cursor for sculpt mode.
 
@@ -235,6 +241,7 @@ The app can auto-start with a specific visualizer and/or audio source, skipping 
 - `?viz=mandelbrot` -- start with a specific visualizer type
 - `?audio=system` -- use system audio capture
 - `?audio=mic` -- use microphone
+- `?audio=soundscape` (or `loop`) -- parametric Soundscape Loop (cycle/energy/brightness/BPM in the Sound panel)
 - `?audio=track-name` -- play a specific sample track (fuzzy match)
 - `?log=stream` -- show log display (stream, floating, or docked)
 - `?mute` -- mute speaker output (audio still drives visualizers)
@@ -257,6 +264,7 @@ The app can auto-start with a specific visualizer and/or audio source, skipping 
 **JUSTFile shortcuts:**
 ```bash
 just launch-with viz=mandelbrot audio=system log=stream
+just launch-with audio=soundscape      # parametric looping probe (Sound panel sliders)
 just test-viz                          # random viz + random track, muted
 just test-viz viz=mandelbrot           # specific viz, random track, muted
 just test-viz viz=orbital audio=system # specific viz + audio source, muted
@@ -309,6 +317,7 @@ Every visualizer must implement `getViewState()` and `setViewState(partial)` and
 | Lorenz | `orbitAngle`, `elevation`, `distance` | Spherical camera around the butterfly |
 | Lorenz β | `orbitAngle`, `elevation`, `distance` | Spherical camera around the Rössler scroll |
 | Lorenz γ | `orbitAngle`, `elevation`, `distance` | Spherical camera around the Chen dual-wing |
+| Hopf | `orbitAngle`, `elevation`, `distance` | Spherical camera around the fiber bundle |
 | Lissajous | `centerX`, `centerY`, `zoom`, `phase` | 2D pan + zoom (phase is read-only) |
 | Kaleidoscope | `zoom`, `rotation` | Zoom + fold rotation |
 

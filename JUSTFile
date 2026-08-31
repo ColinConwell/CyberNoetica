@@ -30,6 +30,7 @@ launch:
 # Examples:
 #   just launch-with viz=mandelbrot
 #   just launch-with audio=system
+#   just launch-with audio=soundscape
 #   just launch-with viz=orbital audio=system log=stream
 launch-with +params="":
     #!/usr/bin/env bash

@@ -78,6 +78,14 @@ describe('PlaybackStateMachine', () => {
     expect(sm.state).toBe('playing');
   });
 
+  it('transitions playing -> switching-source for soundscape', () => {
+    const sm = new PlaybackStateMachine();
+    sm.dispatch({ type: 'START' });
+    sm.dispatch({ type: 'LOADED' });
+    expect(sm.dispatch({ type: 'SWITCH_SOURCE', source: 'soundscape' })).toBe(true);
+    expect(sm.state).toBe('switching-source');
+  });
+
   it('transitions paused -> switching-source -> playing', () => {
     const sm = new PlaybackStateMachine();
     sm.dispatch({ type: 'START' });

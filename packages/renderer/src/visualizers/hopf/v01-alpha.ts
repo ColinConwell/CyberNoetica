@@ -112,7 +112,7 @@ export class HopfVisualizer implements Visualizer {
   }
 
   attach(scene: THREE.Scene): void {
-    this.material = new THREE.RawShaderMaterial({
+    this.material = new THREE.ShaderMaterial({
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
@@ -123,6 +123,7 @@ export class HopfVisualizer implements Visualizer {
       transparent: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
+      vertexColors: true,
     });
 
     for (let f = 0; f < FIBER_COUNT; f++) {
@@ -247,9 +248,6 @@ registerVisualizer({
 });
 
 const VERTEX_SHADER = /* glsl */ `
-  attribute vec3 position;
-  attribute vec2 uv;
-  attribute vec3 color;
   varying vec3 vColor;
   varying float vDepth;
 
@@ -262,8 +260,6 @@ const VERTEX_SHADER = /* glsl */ `
 `;
 
 const FRAGMENT_SHADER = /* glsl */ `
-  precision highp float;
-
   uniform float u_opacity;
   uniform float u_glowIntensity;
   uniform float u_beatPulse;

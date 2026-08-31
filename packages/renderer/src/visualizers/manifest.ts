@@ -17,9 +17,18 @@ export interface VisualizerManifestEntry {
   label: string;
   description: string;
   group: 'fractal' | '3d' | 'pattern' | 'particle' | 'wave';
+  usesPerspective: boolean;
   documentation: VisualizerDocumentation;
   loader: () => Promise<unknown>;
 }
+
+/** Visualizers that drive the shared perspective camera (not fullscreen quads). */
+const PERSPECTIVE_TYPES = new Set([
+  'orbital', 'orbital-beta', 'orbital-gamma',
+  'voronoi-beta', 'voronoi-gamma', 'voronoi-delta', 'voronoi-epsilon',
+  'lorenz', 'lorenz-beta', 'lorenz-gamma',
+  'hopf', 'ferrofluid',
+]);
 
 const MANIFEST_ENTRIES: Omit<VisualizerManifestEntry, 'documentation'>[] = [
   // --- Particle / 3D ---
@@ -186,7 +195,7 @@ export const VISUALIZER_MANIFEST: VisualizerManifestEntry[] = MANIFEST_ENTRIES.m
   if (!documentation) {
     throw new Error(`Missing visualizer documentation for manifest type "${entry.type}"`);
   }
-  return { ...entry, documentation };
+  return { ...entry, documentation, usesPerspective: PERSPECTIVE_TYPES.has(entry.type) };
 });
 
 const manifestByType = new Map(VISUALIZER_MANIFEST.map(e => [e.type, e]));

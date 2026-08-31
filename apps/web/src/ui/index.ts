@@ -15,6 +15,8 @@ import { renderSoundPanel } from './panels/sound-panel.js';
 import { renderControlPanel } from './panels/control-panel.js';
 import { getSetting } from '../settings-loader.js';
 import { groupTracksByFolder } from '../utils/track-display.js';
+import { DEFAULT_SOUNDSCAPE_PARAMS } from '@cybernoetica/audio';
+import type { AudioSourceType, SoundscapeParams } from '@cybernoetica/audio';
 import { installLogInterceptor, createLogDisplay, type LogDisplay, type LogDisplayMode } from './log-display.js';
 import { createKeyboardOverlay, getBaseShortcuts, getVisualizerShortcuts, type KeyboardOverlayAPI } from './keyboard-overlay.js';
 import { Z_INDEX, DIMENSIONS, SPACING, POSITIONS, TIMING, STACK } from './constants.js';
@@ -35,6 +37,8 @@ export interface UIControls {
   onFolderSelect: (handler: (files: FileList) => void) => void;
   onMicClick: (handler: () => void) => void;
   onSystemAudio: (handler: () => void) => void;
+  onSoundscapeLoop: (handler: () => void) => void;
+  onSoundscapeParamsChange: (handler: (partial: Partial<SoundscapeParams>) => void) => void;
   onAutoPlayChange: (handler: (enabled: boolean, shuffle: boolean) => void) => void;
   onSettingsChange: (handler: (settings: AppSettings) => void) => void;
   setAppearanceRenderer: (renderer: ((container: HTMLElement) => void) | null) => void;
@@ -47,6 +51,8 @@ export interface UIControls {
   setPlaying: (playing: boolean) => void;
   setActiveVisualizer: (type: string) => void;
   setActiveTrack: (name: string) => void;
+  setActiveAudioSource: (source: AudioSourceType) => void;
+  setSoundscapeParams: (params: SoundscapeParams) => void;
   setSampleTracks: (tracks: string[]) => void;
   openLogDisplay: (mode: LogDisplayMode) => void;
   closeLogDisplay: () => void;
@@ -83,6 +89,8 @@ export function createUI(): UIControls {
   let fileSelectHandler: ((file: File) => void) | null = null;
   let micClickHandler: (() => void) | null = null;
   let systemAudioHandler: (() => void) | null = null;
+  let soundscapeLoopHandler: (() => void) | null = null;
+  let soundscapeParamsHandler: ((partial: Partial<SoundscapeParams>) => void) | null = null;
   let folderSelectHandler: ((files: FileList) => void) | null = null;
   let autoPlayHandler: ((enabled: boolean, shuffle: boolean) => void) | null = null;
   let settingsChangeHandler: ((s: AppSettings) => void) | null = null;
@@ -94,6 +102,8 @@ export function createUI(): UIControls {
   } | null = null;
   let debugCleanup: (() => void) | null = null;
   let energyCleanup: (() => void) | null = null;
+  let activeAudioSource: AudioSourceType = 'none';
+  let soundscapeParams: SoundscapeParams = { ...DEFAULT_SOUNDSCAPE_PARAMS };
 
   // Hidden file input
   const fileInput = el('input', { display: 'none' }, { type: 'file', accept: 'audio/*' });
@@ -286,10 +296,14 @@ export function createUI(): UIControls {
       renderSoundPanel(panel, {
         activeTrackName, sampleTracks, autoPlay, shuffleMode, trackListExpanded,
         expandedFolders,
+        activeSource: activeAudioSource,
+        soundscapeParams,
         onRandomTrack: randomTrackHandler,
         onSystemAudio: systemAudioHandler,
         onFileClick: () => fileInput.click(),
         onMicClick: micClickHandler,
+        onSoundscapeLoop: soundscapeLoopHandler,
+        onSoundscapeParamsChange: soundscapeParamsHandler,
         onTrackSelect: trackSelectHandler,
         onAutoPlayChange: autoPlayHandler,
         onToggleTrackList() { trackListExpanded = !trackListExpanded; activePanel = null; openPanel('sound'); },
@@ -387,6 +401,8 @@ export function createUI(): UIControls {
     onFileSelect(h) { fileSelectHandler = h; },
     onMicClick(h) { micClickHandler = h; },
     onSystemAudio(h) { systemAudioHandler = h; },
+    onSoundscapeLoop(h) { soundscapeLoopHandler = h; },
+    onSoundscapeParamsChange(h) { soundscapeParamsHandler = h; },
     onFolderSelect(h) { folderSelectHandler = h; },
     onAutoPlayChange(h) { autoPlayHandler = h; },
     onSettingsChange(h) { settingsChangeHandler = h; },
@@ -424,6 +440,14 @@ export function createUI(): UIControls {
       }
     },
     setActiveTrack(name: string) { activeTrackName = name; },
+    setActiveAudioSource(source: AudioSourceType) {
+      activeAudioSource = source;
+      if (activePanel === 'sound') {
+        activePanel = null;
+        openPanel('sound');
+      }
+    },
+    setSoundscapeParams(params: SoundscapeParams) { soundscapeParams = { ...params }; },
     setSampleTracks(tracks: string[]) { sampleTracks = tracks; },
 
     openLogDisplay(mode: LogDisplayMode) {
