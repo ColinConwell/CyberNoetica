@@ -32,6 +32,9 @@ describe('Visualizer Registry', () => {
     expect(types).toContain('voronoi-gamma');
     expect(types).toContain('voronoi-delta');
     expect(types).toContain('voronoi-epsilon');
+    expect(types).toContain('lorenz');
+    expect(types).toContain('lorenz-beta');
+    expect(types).toContain('lorenz-gamma');
     expect(types).toContain('lissajous');
     expect(types).toContain('kaleidoscope');
   });
@@ -99,6 +102,15 @@ describe('Visualizer Registry', () => {
     expect(voronoiTypes).toContain('voronoi-gamma');
     expect(voronoiTypes).toContain('voronoi-delta');
     expect(voronoiTypes).toContain('voronoi-epsilon');
+  });
+
+  it('lorenz family has three versions', () => {
+    const types = getVisualizerTypes();
+    const lorenzTypes = types.filter(t => t.startsWith('lorenz'));
+    expect(lorenzTypes).toHaveLength(3);
+    expect(lorenzTypes).toContain('lorenz');
+    expect(lorenzTypes).toContain('lorenz-beta');
+    expect(lorenzTypes).toContain('lorenz-gamma');
   });
 
   it('all perspective visualizers use orbit viewport', () => {

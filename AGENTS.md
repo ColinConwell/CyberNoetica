@@ -90,6 +90,12 @@ CyberNoetica/
 │   │           │   ├── v05-epsilon.ts    # Spherical-wall foam globe
 │   │           │   ├── foam-engine.ts    # Shared 3D foam renderer for β–ε
 │   │           │   └── index.ts
+│   │           ├── lorenz/
+│   │           │   ├── v01-alpha.ts      # Lorenz 1963 butterfly (RK4 trails)
+│   │           │   ├── v02-beta.ts       # Rössler single-scroll attractor
+│   │           │   ├── v03-gamma.ts      # Chen dual-wing attractor
+│   │           │   ├── engine.ts         # Shared RK4 flow + additive trail renderer
+│   │           │   └── index.ts
 │   │           ├── lissajous/
 │   │           │   ├── v01-alpha.ts      # Harmonograph light curves
 │   │           │   └── index.ts
@@ -164,9 +170,9 @@ CyberNoetica/
 3. Visualizers subscribe to audio features and modulate their parameters
 4. `SceneManager` drives the Three.js render loop with pointer/touch viewport interaction
 
-**Visualizer system:** Self-registering visualizers organized in versioned folders. Each family has a folder with `v{NN}-{greek}.ts` files. Parameters are categorized as `'appearance'` or `'audio-mapping'`. The UI groups controls accordingly. The orbital family has three versions: alpha (classic), beta (chaotic with drift), and gamma (interactive sculpt mode with user-placeable force fields). The voronoi family has five versions: alpha (2D Worley/F1-F2 shader), beta (non-periodic 3D foam), gamma (periodic crystal), delta (radical/Laguerre weighted cells), and epsilon (spherical-wall globe). Beta through epsilon share `foam-engine.ts` and tessellate via Voro++ compiled to WASM.
+**Visualizer system:** Self-registering visualizers organized in versioned folders. Each family has a folder with `v{NN}-{greek}.ts` files. Parameters are categorized as `'appearance'` or `'audio-mapping'`. The UI groups controls accordingly. The orbital family has three versions: alpha (classic), beta (chaotic with drift), and gamma (interactive sculpt mode with user-placeable force fields). The voronoi family has five versions: alpha (2D Worley/F1-F2 shader), beta (non-periodic 3D foam), gamma (periodic crystal), delta (radical/Laguerre weighted cells), and epsilon (spherical-wall globe). Beta through epsilon share `foam-engine.ts` and tessellate via Voro++ compiled to WASM. The lorenz family has three versions: alpha (Lorenz 1963 butterfly), beta (Rössler single-scroll), and gamma (Chen dual-wing). All three share `engine.ts` (RK4 integration + additive 3D trails).
 
-**View state.** Each visualizer exposes a per-family coordinate system via `getViewState()` / `setViewState()`. The coordinates have intuitive, domain-specific names (e.g., Mandelbrot uses `centerReal`/`centerImaginary`/`zoom`/`rotation`; Orbital uses `orbitAngle`/`elevation`/`distance`; Voronoi alpha uses `centerX`/`centerY`/`zoom`; Voronoi beta through epsilon use `orbitAngle`/`elevation`/`distance`). User interactions (drag, scroll, pinch) flow from SceneManager as raw deltas through VisualizerManager, which translates them into the appropriate `setViewState()` calls. The pan handler in VisualizerManager supports multiple field name patterns: `centerReal`/`centerImaginary` (Mandelbrot), `centerX`/`centerY` (Voronoi, Lissajous), and `seedReal`/`seedImaginary` (Julia). The canvas shows a crosshair cursor with surrounding circle on hover when drag is available, with a brighter variant while dragging. SceneManager supports context-sensitive cursor modes (`pan`, `orbit`, `sculpt`, `default`) via `setCursorMode()`, with a dedicated blue crosshair cursor for sculpt mode.
+**View state.** Each visualizer exposes a per-family coordinate system via `getViewState()` / `setViewState()`. The coordinates have intuitive, domain-specific names (e.g., Mandelbrot uses `centerReal`/`centerImaginary`/`zoom`/`rotation`; Orbital uses `orbitAngle`/`elevation`/`distance`; Voronoi alpha uses `centerX`/`centerY`/`zoom`; Voronoi beta through epsilon and Lorenz alpha through gamma use `orbitAngle`/`elevation`/`distance`). User interactions (drag, scroll, pinch) flow from SceneManager as raw deltas through VisualizerManager, which translates them into the appropriate `setViewState()` calls. The pan handler in VisualizerManager supports multiple field name patterns: `centerReal`/`centerImaginary` (Mandelbrot), `centerX`/`centerY` (Voronoi, Lissajous), and `seedReal`/`seedImaginary` (Julia). The canvas shows a crosshair cursor with surrounding circle on hover when drag is available, with a brighter variant while dragging. SceneManager supports context-sensitive cursor modes (`pan`, `orbit`, `sculpt`, `default`) via `setCursorMode()`, with a dedicated blue crosshair cursor for sculpt mode.
 
 **Settings override system.** `settings.json` at repo root provides overrides (app title, UI theme, track display format, launch config). The `settings-loader.ts` module loads it via fetch with graceful fallback to defaults. In production builds, `settings.json` is emitted to `dist/` via a Vite plugin `generateBundle` hook and also copied in the Dockerfile.
 
@@ -300,6 +306,9 @@ Every visualizer must implement `getViewState()` and `setViewState(partial)` and
 | Voronoi γ | `orbitAngle`, `elevation`, `distance` | Spherical camera around the periodic crystal |
 | Voronoi δ | `orbitAngle`, `elevation`, `distance` | Spherical camera around the radical foam |
 | Voronoi ε | `orbitAngle`, `elevation`, `distance` | Spherical camera around the foam globe |
+| Lorenz | `orbitAngle`, `elevation`, `distance` | Spherical camera around the butterfly |
+| Lorenz β | `orbitAngle`, `elevation`, `distance` | Spherical camera around the Rössler scroll |
+| Lorenz γ | `orbitAngle`, `elevation`, `distance` | Spherical camera around the Chen dual-wing |
 | Lissajous | `centerX`, `centerY`, `zoom`, `phase` | 2D pan + zoom (phase is read-only) |
 | Kaleidoscope | `zoom`, `rotation` | Zoom + fold rotation |
 

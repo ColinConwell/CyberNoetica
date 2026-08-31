@@ -135,6 +135,12 @@ const MANIFEST_ENTRIES: Omit<VisualizerManifestEntry, 'documentation'>[] = [
     loader: () => import('./attractor/v04-delta.js') },
   { type: 'aizawa', label: 'Aizawa', description: '3D chaotic torus with vertical spike', group: 'particle',
     loader: () => import('./attractor/v05-epsilon.js') },
+  { type: 'lorenz', label: 'Lorenz', description: 'Classic 1963 butterfly attractor', group: 'particle',
+    loader: () => import('./lorenz/v01-alpha.js') },
+  { type: 'lorenz-beta', label: 'Rössler', description: 'Rössler single-scroll attractor', group: 'particle',
+    loader: () => import('./lorenz/v02-beta.js') },
+  { type: 'lorenz-gamma', label: 'Chen', description: 'Chen dual-wing attractor', group: 'particle',
+    loader: () => import('./lorenz/v03-gamma.js') },
 
   // --- Electromagnetic ---
   { type: 'magnetic', label: 'Magnetic Field', description: 'Dipole/multipole field lines', group: 'pattern',
