@@ -64,6 +64,10 @@ build:
 wasm:
     cd crates/audio-analysis && wasm-pack build --target web --out-dir ../../packages/audio/wasm
 
+# Build the Voro++ WASM tessellator (requires emcc or Docker emscripten/emsdk)
+wasm-voro:
+    ./scripts/build-voro-wasm.sh
+
 # ─── Test ─────────────────────────────────────────────────────────────
 
 # Run all Vitest tests (58 tests across 4 packages; use test-rust for Rust)

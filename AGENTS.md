@@ -59,12 +59,12 @@ CyberNoetica/
 │   │           ├── message-bus.test.ts
 │   │           └── store.test.ts
 │   ├── renderer/                         # @cybernoetica/renderer
-│   │   └── src/
+│   │   ├── src/
 │   │       ├── index.ts
 │   │       ├── scene-manager.ts          # Three.js lifecycle, pointer+touch viewport
 │   │       ├── smoothing.ts              # EMA smoothing for audio-reactive params
 │   │       ├── __tests__/
-│   │       └── visualizers/
+│   │       ├── visualizers/
 │   │           ├── types.ts              # Visualizer interface, param taxonomy
 │   │           ├── registry.ts           # VisualizerEntry, registerVisualizer()
 │   │           ├── index.ts              # Barrel imports from subfolder barrels
@@ -83,7 +83,12 @@ CyberNoetica/
 │   │           │   ├── v01-alpha.ts      # Neon soundwaves
 │   │           │   └── index.ts
 │   │           ├── voronoi/
-│   │           │   ├── v01-alpha.ts      # Animated Voronoi cells
+│   │           │   ├── v01-alpha.ts      # Animated Voronoi cells (2D distance field)
+│   │           │   ├── v02-beta.ts       # 3D polyhedral foam (Voro++ WASM, box)
+│   │           │   ├── v03-gamma.ts      # Periodic crystal foam
+│   │           │   ├── v04-delta.ts      # Radical / Laguerre weighted cells
+│   │           │   ├── v05-epsilon.ts    # Spherical-wall foam globe
+│   │           │   ├── foam-engine.ts    # Shared 3D foam renderer for β–ε
 │   │           │   └── index.ts
 │   │           ├── lissajous/
 │   │           │   ├── v01-alpha.ts      # Harmonograph light curves
@@ -91,6 +96,11 @@ CyberNoetica/
 │   │           └── kaleidoscope/
 │   │               ├── v01-alpha.ts      # Psychedelic mandala symmetry
 │   │               └── index.ts
+│   │       └── voro/
+│   │           ├── backend.ts            # Voro++ WASM loader + packed-mesh types
+│   │           └── voro-module.d.ts
+│   │   └── wasm/
+│   │       └── voro/                     # Committed Voro++ WASM (voro.js + voro.wasm)
 │   └── audio/                            # @cybernoetica/audio
 │       └── src/
 │           ├── index.ts
@@ -98,8 +108,14 @@ CyberNoetica/
 │           └── audio-processor.ts        # Publishes AudioFeatures to bus
 ├── crates/
 │   └── audio-analysis/                   # Rust -> WASM via wasm-pack
+├── native/
+│   └── voro-wasm/
+│       └── wrapper.cpp                   # C ABI around Voro++ for WASM
+├── third_party/
+│   └── voro++/                           # Vendored Voro++ library (modified BSD)
 ├── scripts/
-│   └── upload-audio.sh                   # Audio upload/list/verify for Railway
+│   ├── upload-audio.sh                   # Audio upload/list/verify for Railway
+│   └── build-voro-wasm.sh                # emcc/Docker build for Voro++ WASM
 ├── data/
 │   └── sample-music/                     # .gitignored audio tracks
 ├── guidebook/
@@ -126,6 +142,7 @@ CyberNoetica/
 | 3D rendering     | Three.js (r175+), GLSL shaders                       |
 | Testing          | Vitest (jsdom for renderer + web app tests)          |
 | Rust / WASM      | Cargo, wasm-bindgen, rustfft; built via wasm-pack    |
+| C++ / WASM       | Voro++ via Emscripten (`just wasm-voro`)             |
 | Deployment       | Railway (Docker), Express 5 production server        |
 | PWA              | vite-plugin-pwa, Workbox service worker               |
 
@@ -147,9 +164,9 @@ CyberNoetica/
 3. Visualizers subscribe to audio features and modulate their parameters
 4. `SceneManager` drives the Three.js render loop with pointer/touch viewport interaction
 
-**Visualizer system:** Self-registering visualizers organized in versioned folders. Each family (orbital, mandelbrot, julia, waveform, voronoi, lissajous, kaleidoscope) has a folder with `v{NN}-{greek}.ts` files. Parameters are categorized as `'appearance'` or `'audio-mapping'`. The UI groups controls accordingly. The orbital family has three versions: alpha (classic), beta (chaotic with drift), and gamma (interactive sculpt mode with user-placeable force fields).
+**Visualizer system:** Self-registering visualizers organized in versioned folders. Each family has a folder with `v{NN}-{greek}.ts` files. Parameters are categorized as `'appearance'` or `'audio-mapping'`. The UI groups controls accordingly. The orbital family has three versions: alpha (classic), beta (chaotic with drift), and gamma (interactive sculpt mode with user-placeable force fields). The voronoi family has five versions: alpha (2D Worley/F1-F2 shader), beta (non-periodic 3D foam), gamma (periodic crystal), delta (radical/Laguerre weighted cells), and epsilon (spherical-wall globe). Beta through epsilon share `foam-engine.ts` and tessellate via Voro++ compiled to WASM.
 
-**View state.** Each visualizer exposes a per-family coordinate system via `getViewState()` / `setViewState()`. The coordinates have intuitive, domain-specific names (e.g., Mandelbrot uses `centerReal`/`centerImaginary`/`zoom`/`rotation`; Orbital uses `orbitAngle`/`elevation`/`distance`; Voronoi uses `centerX`/`centerY`/`zoom`). User interactions (drag, scroll, pinch) flow from SceneManager as raw deltas through VisualizerManager, which translates them into the appropriate `setViewState()` calls. The pan handler in VisualizerManager supports multiple field name patterns: `centerReal`/`centerImaginary` (Mandelbrot), `centerX`/`centerY` (Voronoi, Lissajous), and `seedReal`/`seedImaginary` (Julia). The canvas shows a crosshair cursor with surrounding circle on hover when drag is available, with a brighter variant while dragging. SceneManager supports context-sensitive cursor modes (`pan`, `orbit`, `sculpt`, `default`) via `setCursorMode()`, with a dedicated blue crosshair cursor for sculpt mode.
+**View state.** Each visualizer exposes a per-family coordinate system via `getViewState()` / `setViewState()`. The coordinates have intuitive, domain-specific names (e.g., Mandelbrot uses `centerReal`/`centerImaginary`/`zoom`/`rotation`; Orbital uses `orbitAngle`/`elevation`/`distance`; Voronoi alpha uses `centerX`/`centerY`/`zoom`; Voronoi beta through epsilon use `orbitAngle`/`elevation`/`distance`). User interactions (drag, scroll, pinch) flow from SceneManager as raw deltas through VisualizerManager, which translates them into the appropriate `setViewState()` calls. The pan handler in VisualizerManager supports multiple field name patterns: `centerReal`/`centerImaginary` (Mandelbrot), `centerX`/`centerY` (Voronoi, Lissajous), and `seedReal`/`seedImaginary` (Julia). The canvas shows a crosshair cursor with surrounding circle on hover when drag is available, with a brighter variant while dragging. SceneManager supports context-sensitive cursor modes (`pan`, `orbit`, `sculpt`, `default`) via `setCursorMode()`, with a dedicated blue crosshair cursor for sculpt mode.
 
 **Settings override system.** `settings.json` at repo root provides overrides (app title, UI theme, track display format, launch config). The `settings-loader.ts` module loads it via fetch with graceful fallback to defaults. In production builds, `settings.json` is emitted to `dist/` via a Vite plugin `generateBundle` hook and also copied in the Dockerfile.
 
@@ -168,8 +185,9 @@ export PATH="$HOME/.volta/bin:$HOME/.cargo/bin:$PATH"
 
 pnpm install          # Install all workspace dependencies
 pnpm dev              # Start Vite dev server (apps/web, port 5173)
-pnpm test             # Run all Vitest suites (58 tests across 4 packages)
+pnpm test             # Run all Vitest suites
 pnpm build            # Build all packages
+just wasm-voro        # Rebuild Voro++ WASM (emcc or Docker emscripten/emsdk)
 ```
 
 ### Debug Panel and Logging
@@ -278,6 +296,10 @@ Every visualizer must implement `getViewState()` and `setViewState(partial)` and
 | Orbital | `orbitAngle`, `elevation`, `distance` | Spherical camera coordinates |
 | Waveform | `verticalShift` | Vertical offset of the waveform stack |
 | Voronoi | `centerX`, `centerY`, `zoom` | 2D pan + zoom |
+| Voronoi β | `orbitAngle`, `elevation`, `distance` | Spherical camera around the foam |
+| Voronoi γ | `orbitAngle`, `elevation`, `distance` | Spherical camera around the periodic crystal |
+| Voronoi δ | `orbitAngle`, `elevation`, `distance` | Spherical camera around the radical foam |
+| Voronoi ε | `orbitAngle`, `elevation`, `distance` | Spherical camera around the foam globe |
 | Lissajous | `centerX`, `centerY`, `zoom`, `phase` | 2D pan + zoom (phase is read-only) |
 | Kaleidoscope | `zoom`, `rotation` | Zoom + fold rotation |
 

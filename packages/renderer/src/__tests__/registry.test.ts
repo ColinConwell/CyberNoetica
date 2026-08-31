@@ -28,6 +28,10 @@ describe('Visualizer Registry', () => {
     expect(types).toContain('julia');
     expect(types).toContain('waveform');
     expect(types).toContain('voronoi');
+    expect(types).toContain('voronoi-beta');
+    expect(types).toContain('voronoi-gamma');
+    expect(types).toContain('voronoi-delta');
+    expect(types).toContain('voronoi-epsilon');
     expect(types).toContain('lissajous');
     expect(types).toContain('kaleidoscope');
   });
@@ -84,6 +88,17 @@ describe('Visualizer Registry', () => {
     expect(orbitalTypes).toContain('orbital');
     expect(orbitalTypes).toContain('orbital-beta');
     expect(orbitalTypes).toContain('orbital-gamma');
+  });
+
+  it('voronoi family has five versions', () => {
+    const types = getVisualizerTypes();
+    const voronoiTypes = types.filter(t => t.startsWith('voronoi'));
+    expect(voronoiTypes).toHaveLength(5);
+    expect(voronoiTypes).toContain('voronoi');
+    expect(voronoiTypes).toContain('voronoi-beta');
+    expect(voronoiTypes).toContain('voronoi-gamma');
+    expect(voronoiTypes).toContain('voronoi-delta');
+    expect(voronoiTypes).toContain('voronoi-epsilon');
   });
 
   it('all perspective visualizers use orbit viewport', () => {
