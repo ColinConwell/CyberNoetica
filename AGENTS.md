@@ -4,9 +4,13 @@
 
 **Cybernoetica** is a high-aesthetic, GPU-accelerated audio-reactive visualizer and knowledge portal. It delivers 71 registered visualizers across versioned families driven by real-time audio analysis, with a glass-morphism control interface, measured CPU/GPU performance monitoring, and formal playback state management.
 
+## Change documentation
+
+Record completed changes in new dated entries (`YYYY-MM-DD`) in `CHANGELOG.md`, newest first. Include the resulting behavior, validation performed and known limitations; preserve historical entries. For dense updates, add a dated Markdown report at `reports/YYYY-MM-DD-topic.md`, index it with a dated link and summary in `reports/README.md`, and link it from a concise changelog entry. Do not recreate `IMPLEMENTATION.md` or introduce a separate root-level implementation ledger. Keep secrets and raw generated evidence out of reports.
+
 ## Review implementation (September 2026)
 
-See `IMPLEMENTATION.md`, `docs/audio-features.md` and `docs/runtime-validation.md` for the current formulation and validation contracts. Nine faithful variants supplement the original catalog. Sampled curves, density textures, shared RK4 ribbons, an explicit terrain height mesh and GPU Hopf fibers replace repeated per-pixel geometry construction. Voronoi foam runs in a bounded worker queue with stable seed IDs. Metadata distinguishes mathematical constructions, numerical simulations and artistic patterns.
+See `CHANGELOG.md`, `docs/audio-features.md` and `docs/runtime-validation.md` for the current formulation and validation contracts. Nine faithful variants supplement the original catalog. Sampled curves, density textures, shared RK4 ribbons, an explicit terrain height mesh and GPU Hopf fibers replace repeated per-pixel geometry construction. Voronoi foam runs in a bounded worker queue with stable seed IDs. Metadata distinguishes mathematical constructions, numerical simulations and artistic patterns.
 
 Audio production uses a complete stereo TypeScript DSP in an AudioWorklet, with the same DSP in its compatibility path. Rust remains a reference implementation only. Source transactions own generation checks and fetch cancellation at commit time. Microphone/system monitoring is disabled to avoid feedback. The performance panel reports measured CPU/GPU work and percentiles; it does not estimate electrical power.
 
@@ -385,7 +389,7 @@ just reupload-tracks     # Re-upload all local audio (data/sample-music/)
 
 **Audio management** is handled by `scripts/upload-audio.sh` (subcommands: `upload`, `upload-dir`, `list`, `verify`). The JUSTFile commands are thin wrappers that pass `DEPLOY_HOST` and `GITHUB_TOKEN`.
 
-**Custom domain:** `app.imbasso.com` (CNAME to Railway -- ensure it points to the current Railway service URL).
+**Custom domains:** `cybernoetica.app` (Porkbun root ALIAS to `pst3byz3.up.railway.app`) and `app.imbasso.com` (CNAME to `wbbydzp1.up.railway.app`) are attached to the same Railway service. Use `scripts/manage-dns.sh railway-status <domain>` to retrieve each domain’s assigned routing target and certificate status. These targets are distinct from the public service hostname. Keep the ownership TXT record at `_railway-verify.cybernoetica.app`; Railway status exposes its name/value separately from the routing records.
 
 ## Known Issues
 
@@ -393,5 +397,5 @@ just reupload-tracks     # Re-upload all local audio (data/sample-music/)
 - **Waveform modes** — artistic layers, a triggered DC-removed oscilloscope, and calibrated log-frequency spectrum are separately selectable
 - **Knowledge portal** (GOAL.md Purpose 3) is entirely future work
 - **Cross-modal inputs** (webcam, wearables, gestures) not yet implemented
-- **Custom domain DNS** -- `app.imbasso.com` CNAME must point to the current Railway service URL (`cybernoetica-web-demo.up.railway.app`); if stale, it routes to an old deployment
+- **Custom domain DNS** -- preserve both custom domains and use each domain’s Railway-assigned routing target; re-check DNS and HTTPS after domain changes.
 - **Railway volume persistence** -- volume data survives redeploys but not volume re-creation; use `just verify-tracks` after deploys and `just reupload-tracks` if empty

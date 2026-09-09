@@ -1,8 +1,20 @@
-# Review implementation
+# Changelog
 
-Implemented locally September 8, 2026. This ledger records the selected implementation for each recommendation. All 62 original entries remain available; nine additional variants bring the catalog to 71. The pre-existing guidebook deletions are preserved. No changes have been committed or deployed.
+Changes are recorded in dated entries, newest first. Detailed reports are indexed in [reports/README.md](reports/README.md).
 
-## Shared systems
+## 2026-09-08 — Custom domain and repository housekeeping
+
+- Added `cybernoetica.app` to the existing Railway service alongside `app.imbasso.com`. Configured the Porkbun apex ALIAS to Railway’s assigned `pst3byz3.up.railway.app` target and added the ownership verification TXT record.
+- Fixed the DNS helper to accept empty subdomain arguments for apex records, display Railway’s separate ownership TXT requirements, and recognize propagated DNS status.
+- Added ignore rules for local environment files, the generated production server, tool caches, browser test artifacts and editor/OS temporary files. Preserved all existing exclusions and removed `apps/web/server.mjs` from the Git index while retaining the local bundle.
+- Migrated the complete implementation ledger into the dated entry below and removed the standalone ledger. Updated README links and agent instructions; added `reports/README.md` as the index for future dated Markdown reports.
+- Validation: all 72 original implementation checklist items preserved; existing ignore rules unchanged; no ignored files remain tracked; shell syntax and Git whitespace checks passed. DNS routing and ownership TXT were checked against Porkbun/Railway. Railway issued a valid certificate; both domains returned HTTPS 200 with identical app HTML, and the new domain’s referenced JS/CSS assets returned 200.
+
+## 2026-09-08 — Review implementation
+
+Implemented locally September 8, 2026. This ledger records the selected implementation for each recommendation. All 62 original entries remain available; nine additional variants bring the catalog to 71. The pre-existing guidebook deletions are preserved. At the time this implementation ledger was written, these changes had not been committed or deployed.
+
+### Shared systems
 
 - [x] Complete, consistent audio DSP with fixed-hop worklet analysis, absolute levels, timbre, adaptive onset events, pitch/stereo features, and fixtures.
 - [x] Elapsed-time visualizers, time-constant smoothing, continuous integrated phases, and event deduplication.
@@ -15,7 +27,7 @@ Implemented locally September 8, 2026. This ledger records the selected implemen
 - [x] Bounded offline storage and deployment-version recovery.
 - [x] Production browser matrix, responsive interaction, numerical regressions, and endurance checks.
 
-## Visualizers
+### Visualizers
 
 - [x] [Orbital](packages/renderer/src/visualizers/orbital/v01-alpha.ts): Fixed 120 Hz physics, fractional emission, GPU color/fade, reproducible seeds and bounded forces. The model is classified as a designed simulation.
 - [x] [Orbital (β)](packages/renderer/src/visualizers/orbital/v02-beta.ts): Emitter phases are integrated; Slow Orbital Drift is separate from rapid noise/turbulence.
@@ -80,7 +92,7 @@ Implemented locally September 8, 2026. This ledger records the selected implemen
 - [x] [Rössler](packages/renderer/src/visualizers/lorenz/v02-beta.ts): Curated single-scroll parameter envelope and driven c range; fixed-step integration and batched ribbons.
 - [x] [Chen](packages/renderer/src/visualizers/lorenz/v03-gamma.ts): Curated dual-wing coefficient box and bounded drive; corner/basin tests and the shared fixed-step trail renderer.
 
-## Scope choices and limits
+### Scope choices and limits
 
 The original review presented several alternatives and optional research directions. This implementation takes the zoom-cap alternative instead of arbitrary-precision fractals; explicit height geometry instead of terrain sphere tracing; hardware field derivatives instead of additional recursive-warp render targets; and fixed conservative point/seed caps where an adaptive count would alter topology. Shader iteration/octave budgets and terrain subdivision scale with quality. Foam retains each cell’s separate shared faces because explosion and independent cell appearance require them; repeated edges within a cell are removed. Its additive x-ray faces are not a physical glass model.
 
@@ -88,7 +100,7 @@ A numerically relaxed minimal gyroid, 3D metaballs, diffusion-limited crystal gr
 
 The shared feature contract and sensitivity control are documented in [docs/audio-features.md](docs/audio-features.md). Worklet and fallback use the same DSP and preserve stereo energy. The fallback can skip analysis windows when the main thread stalls. Source monitoring is disabled for microphone/system capture to avoid feedback and duplicated audio.
 
-## Verification
+### Verification
 
 See [docs/runtime-validation.md](docs/runtime-validation.md) for commands, QA entry points and interpretation of measurements. Numerical tests cover equations, geometry, closed curves, parameter basins, calibrated signal fixtures and source races. The QA page exercises the shipped worklet, native WASM, shader compilation, parameter extremes, visible output and GPU-resource disposal. It is excluded from normal production builds.
 

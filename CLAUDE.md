@@ -23,6 +23,10 @@ TypeScript + Vite 6 + Three.js + GLSL. pnpm workspaces. Vitest with jsdom. Optio
 - **Visualizer registry** (`packages/renderer/src/visualizers/registry.ts`): self-registering visualizers with categorized params
 - **View state** (`getViewState()` / `setViewState()`): per-visualizer coordinate system with domain-specific field names (e.g., `centerReal`/`centerImaginary` for Mandelbrot, `orbitAngle`/`elevation`/`distance` for Orbital)
 
+## Change Documentation
+
+Add new dated entries to `CHANGELOG.md` for completed changes. For dense updates, write `reports/YYYY-MM-DD-topic.md`, add a dated link and summary to `reports/README.md`, and link the report from the changelog. Follow the full change-documentation rules in `AGENTS.md`.
+
 ## Key Conventions
 
 - Visualizers live in versioned folders: `visualizers/{family}/v{NN}-{greek}.ts`

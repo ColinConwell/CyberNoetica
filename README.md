@@ -27,7 +27,7 @@ pnpm typecheck
 pnpm build
 ```
 
-[The implementation ledger](IMPLEMENTATION.md) records the formulation, mapping and optimization changes for every original visualizer. [Runtime validation](docs/runtime-validation.md) describes numerical tests, the in-app browser QA page and deployment checks.
+[The changelog](CHANGELOG.md) records the formulation, mapping and optimization changes for every original visualizer. [Runtime validation](docs/runtime-validation.md) describes numerical tests, the in-app browser QA page and deployment checks.
 
 Voro++ foam uses the committed WASM and a dedicated worker. Rebuild it with `just wasm-voro`. Rust is needed only for the optional reference analyzer in `crates/audio-analysis`; production audio does not depend on generated Rust WASM.
 

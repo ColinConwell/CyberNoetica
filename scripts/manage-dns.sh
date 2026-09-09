@@ -189,11 +189,11 @@ cmd_update() {
   require_porkbun
   local domain="${1:?Usage: manage-dns.sh update <domain> <type> <subdomain> <content> [ttl]}"
   local rtype="${2:?Missing record type}"
-  local subdomain="${3:?Missing subdomain}"
+  local subdomain="${3?Missing subdomain (use empty string for root)}"
   local content="${4:?Missing content value}"
   local ttl="${5:-600}"
 
-  bold "Updating $rtype record for ${subdomain}.$domain"; echo ""
+  bold "Updating $rtype record for ${subdomain:+$subdomain.}$domain"; echo ""
   echo "  -> $content (TTL $ttl)"
 
   local body
@@ -210,7 +210,7 @@ cmd_create() {
   require_porkbun
   local domain="${1:?Usage: manage-dns.sh create <domain> <type> <subdomain> <content> [ttl]}"
   local rtype="${2:?Missing record type}"
-  local subdomain="${3:?Missing subdomain (use '' for root)}"
+  local subdomain="${3?Missing subdomain (use empty string for root)}"
   local content="${4:?Missing content value}"
   local ttl="${5:-600}"
 
@@ -261,7 +261,7 @@ cmd_railway_add() {
 
   local query
   query=$(cat <<EOF
-{"query":"mutation { customDomainCreate(input: { projectId: \"$pid\", environmentId: \"$eid\", serviceId: \"$sid\", domain: \"$domain\" }) { id domain status { dnsRecords { hostlabel requiredValue status } certificateStatus } } }"}
+{"query":"mutation { customDomainCreate(input: { projectId: \"$pid\", environmentId: \"$eid\", serviceId: \"$sid\", domain: \"$domain\" }) { id domain status { verificationDnsHost verificationToken dnsRecords { hostlabel requiredValue status } certificateStatus } } }"}
 EOF
 )
   local resp
@@ -273,6 +273,9 @@ import sys, json
 d = json.load(sys.stdin)['data']['customDomainCreate']
 print(f\"  Domain: {d['domain']}  (id: {d['id']})\")
 st = d.get('status', {})
+token = st.get('verificationToken')
+if token:
+    print('  Verification TXT:', st.get('verificationDnsHost', ''), '->', token)
 for rec in st.get('dnsRecords', []):
     print(f\"  DNS: {rec['hostlabel']} -> {rec['requiredValue']} [{rec['status']}]\")
 cert = st.get('certificateStatus', '?')
@@ -292,7 +295,7 @@ cmd_railway_status() {
 
   local query
   query=$(cat <<EOF
-{"query":"query { domains(projectId: \"$pid\", serviceId: \"$sid\", environmentId: \"$eid\") { customDomains { id domain status { dnsRecords { hostlabel requiredValue status } certificateStatus } } } }"}
+{"query":"query { domains(projectId: \"$pid\", serviceId: \"$sid\", environmentId: \"$eid\") { customDomains { id domain status { verificationDnsHost verificationToken dnsRecords { hostlabel requiredValue status } certificateStatus } } } }"}
 EOF
 )
   local resp
@@ -310,6 +313,9 @@ if not found:
 for d in found:
     print(f\"  Domain: {d['domain']}  (id: {d['id']})\")
     st = d.get('status', {})
+    token = st.get('verificationToken')
+    if token:
+        print('  Verification TXT:', st.get('verificationDnsHost', ''), '->', token)
     for rec in st.get('dnsRecords', []):
         print(f\"  DNS: {rec['hostlabel']} -> {rec['requiredValue']} [{rec['status']}]\")
     cert = st.get('certificateStatus', '?')
@@ -327,7 +333,7 @@ cmd_railway_list() {
 
   local query
   query=$(cat <<EOF
-{"query":"query { domains(projectId: \"$pid\", serviceId: \"$sid\", environmentId: \"$eid\") { customDomains { id domain status { dnsRecords { hostlabel requiredValue status } certificateStatus } } serviceDomains { domain } } }"}
+{"query":"query { domains(projectId: \"$pid\", serviceId: \"$sid\", environmentId: \"$eid\") { customDomains { id domain status { verificationDnsHost verificationToken dnsRecords { hostlabel requiredValue status } certificateStatus } } serviceDomains { domain } } }"}
 EOF
 )
   local resp
@@ -347,7 +353,7 @@ else:
     for d in custom:
         st = d.get('status', {})
         cert = st.get('certificateStatus', '?')
-        dns_ok = all(r.get('status') == 'VALID' for r in st.get('dnsRecords', []))
+        dns_ok = all(r.get('status') in ('VALID', 'DNS_RECORD_STATUS_PROPAGATED') for r in st.get('dnsRecords', []))
         dns_str = 'valid' if dns_ok else 'pending'
         print(f\"  {d['domain']}  dns={dns_str}  cert={cert}  id={d['id']}\")
 " 2>/dev/null
