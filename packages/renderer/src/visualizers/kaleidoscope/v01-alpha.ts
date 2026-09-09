@@ -1,7 +1,12 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -31,16 +36,92 @@ const kaleidoscopeMetadata: VisualizerMetadata = {
   usesPerspective: false,
   params: [
     // Appearance
-    { key: 'foldCount', label: 'Symmetry Folds', min: 3, max: 16, step: 1, initial: 6, category: 'appearance' },
-    { key: 'patternScale', label: 'Pattern Scale', min: 0.5, max: 5.0, step: 0.25, initial: 2.0, category: 'appearance' },
-    { key: 'spiralStrength', label: 'Spiral Twist', min: 0.0, max: 3.0, step: 0.1, initial: 1.0, category: 'appearance' },
-    { key: 'colorCycleSpeed', label: 'Color Cycle', min: 0.0, max: 1.0, step: 0.05, initial: 0.3, category: 'appearance' },
-    { key: 'rotationSpeed', label: 'Rotation', min: 0.0, max: 0.5, step: 0.02, initial: 0.1, category: 'appearance' },
+    {
+      key: 'foldCount',
+      label: 'Symmetry Folds',
+      min: 3,
+      max: 16,
+      step: 1,
+      initial: 6,
+      category: 'appearance',
+    },
+    {
+      key: 'patternScale',
+      label: 'Pattern Scale',
+      min: 0.5,
+      max: 5.0,
+      step: 0.25,
+      initial: 2.0,
+      category: 'appearance',
+    },
+    {
+      key: 'spiralStrength',
+      label: 'Spiral Twist',
+      min: 0.0,
+      max: 3.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'appearance',
+    },
+    {
+      key: 'colorCycleSpeed',
+      label: 'Color Cycle',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.3,
+      category: 'appearance',
+    },
+    {
+      key: 'rotationSpeed',
+      label: 'Rotation',
+      min: 0.0,
+      max: 0.5,
+      step: 0.02,
+      initial: 0.1,
+      category: 'appearance',
+    },
     // Audio mapping
-    { key: 'bassToFolds', label: 'Bass → Folds', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly bass modulates symmetry count' },
-    { key: 'midToRotation', label: 'Mid → Rotation', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly mids drive rotation speed' },
-    { key: 'rmsToIntensity', label: 'RMS → Intensity', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly volume affects brightness' },
-    { key: 'spectralToPattern', label: 'Spectral → Pattern', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly spectral centroid morphs the pattern' },
+    {
+      key: 'bassToFolds',
+      label: 'Bass → Folds',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How strongly bass modulates symmetry count',
+    },
+    {
+      key: 'midToRotation',
+      label: 'Mid → Rotation',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How strongly mids drive rotation speed',
+    },
+    {
+      key: 'rmsToIntensity',
+      label: 'RMS → Intensity',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How strongly volume affects brightness',
+    },
+    {
+      key: 'spectralToPattern',
+      label: 'Spectral → Pattern',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How strongly spectral centroid morphs the pattern',
+    },
   ],
   viewport: { pan: false, zoom: true, orbit: false },
   viewStateFields: [
@@ -50,11 +131,15 @@ const kaleidoscopeMetadata: VisualizerMetadata = {
 };
 
 export class KaleidoscopeVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = kaleidoscopeMetadata;
 
   private unsub: Unsubscribe;
   private latestFeatures: AudioFeatures | null = null;
   private time = 0;
+  private effectiveFolds = 6;
+  private pendingFoldEvent = false;
   private autoRotation = 0;
 
   private userParams: Record<string, number> = {
@@ -79,7 +164,7 @@ export class KaleidoscopeVisualizer implements Visualizer {
     high: new EMASmoothing(0.25),
     rms: new EMASmoothing(0.2),
     spectralCentroid: new EMASmoothing(0.1),
-    beatPulse: new EMASmoothing(0.45),
+    beatPulse: new EventEnvelope(),
     foldSmooth: new EMASmoothing(0.05),
   };
 
@@ -87,9 +172,12 @@ export class KaleidoscopeVisualizer implements Visualizer {
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
 
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
@@ -105,6 +193,7 @@ export class KaleidoscopeVisualizer implements Visualizer {
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
+        u_colorCycleSpeedPhase: { value: 0 },
         u_time: { value: 0.0 },
         u_resolution: { value: new THREE.Vector2(1920, 1080) },
         u_zoom: { value: 1.0 },
@@ -130,31 +219,44 @@ export class KaleidoscopeVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.pendingFoldEvent = f.beatOnset;
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     // Auto-rotation driven by mids
-    const rotSpeed = this.userParams.rotationSpeed
-      + this.smoothers.mid.value * 0.15 * this.userParams.midToRotation;
-    this.autoRotation += rotSpeed / 60;
+    const rotSpeed =
+      this.userParams.rotationSpeed +
+      this.smoothers.mid.value * 0.15 * this.userParams.midToRotation;
+    this.autoRotation += rotSpeed * this.deltaSeconds;
 
     // Fold count: base + bass modulation (quantized for clean symmetry)
     const baseFolds = this.userParams.foldCount;
-    const bassOffset = Math.round(this.smoothers.bass.value * 4 * this.userParams.bassToFolds);
+    const bassOffset = Math.round(
+      this.smoothers.bass.value * 4 * this.userParams.bassToFolds,
+    );
     const targetFolds = Math.max(3, Math.min(16, baseFolds + bassOffset));
-    this.smoothers.foldSmooth.update(targetFolds);
+    if (this.pendingFoldEvent || !this.latestFeatures)
+      this.effectiveFolds = Math.round(targetFolds);
+    this.pendingFoldEvent = false;
 
     if (this.material) {
       const u = this.material.uniforms;
@@ -163,10 +265,15 @@ export class KaleidoscopeVisualizer implements Visualizer {
       u.u_rotation.value = this.viewOverrides.rotation
         ? this._rotation
         : this.autoRotation;
-      u.u_foldCount.value = this.smoothers.foldSmooth.value;
+      u.u_foldCount.value = this.effectiveFolds;
       u.u_patternScale.value = this.userParams.patternScale;
       u.u_spiralStrength.value = this.userParams.spiralStrength;
       u.u_colorCycleSpeed.value = this.userParams.colorCycleSpeed;
+      u.u_colorCycleSpeedPhase.value = this.phases.advance(
+        'u_colorCycleSpeed',
+        u.u_colorCycleSpeed.value,
+        this.deltaSeconds,
+      );
       u.u_bass.value = this.smoothers.bass.value;
       u.u_mid.value = this.smoothers.mid.value;
       u.u_high.value = this.smoothers.high.value;
@@ -179,19 +286,23 @@ export class KaleidoscopeVisualizer implements Visualizer {
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
     if (key in this.userParams) {
       this.userParams[key] = value;
+      if (key === 'foldCount') this.effectiveFolds = Math.round(value);
     }
   }
 
   getViewState(): Record<string, number> {
     return {
       zoom: this._zoom,
-      rotation: this.viewOverrides.rotation ? this._rotation : this.autoRotation % (Math.PI * 2),
+      rotation: this.viewOverrides.rotation
+        ? this._rotation
+        : this.autoRotation % (Math.PI * 2),
     };
   }
 
@@ -234,6 +345,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   #define PI 3.14159265359
   #define TAU 6.28318530718
 
+  uniform float u_colorCycleSpeedPhase;
   uniform float u_time;
   uniform vec2 u_resolution;
   uniform float u_zoom;
@@ -296,6 +408,8 @@ const FRAGMENT_SHADER = /* glsl */ `
   vec2 kaleidoscope(vec2 uv, float n) {
     float angle = atan(uv.y, uv.x);
     float radius = length(uv);
+    float bandEnergy = radius<.18 ? u_bass : (radius<.35 ? u_mid : u_high);
+
 
     // N-fold rotational symmetry
     float segmentAngle = TAU / n;
@@ -321,6 +435,8 @@ const FRAGMENT_SHADER = /* glsl */ `
     vec2 kUv = kaleidoscope(uv, folds);
 
     float radius = length(uv);
+    float bandEnergy = radius<.18 ? u_bass : (radius<.35 ? u_mid : u_high);
+
 
     // Spiral distortion
     float spiralAngle = radius * u_spiralStrength * (2.0 + u_bass * 3.0);
@@ -353,7 +469,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     pattern += sin(radius * 8.0 - u_time * 2.0) * u_bass * 0.3;
 
     // --- Coloring ---
-    float hue = fract(pattern * 0.5 + u_time * u_colorCycleSpeed * 0.1 + radius * 0.2);
+    float hue = fract(pattern * 0.5 + u_colorCycleSpeedPhase * 0.1 + radius * 0.2);
     float sat = 0.55 + 0.35 * abs(sin(pattern * PI));
     float val = 0.2 + 0.5 * (0.5 + 0.5 * pattern);
 
@@ -390,6 +506,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     // Tone mapping
     color = color / (1.0 + color);
 
+    color *= .45+.55*bandEnergy;
     gl_FragColor = vec4(color, 1.0);
   }
 `;

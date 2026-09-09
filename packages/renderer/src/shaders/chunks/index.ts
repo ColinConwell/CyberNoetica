@@ -9,5 +9,5 @@ vec3 hsv2rgb(vec3 c) {
 `;
 
 export function registerShaderChunks() {
-  THREE.ShaderChunk['cyber_hsv2rgb'] = hsv2rgb;
+  (THREE.ShaderChunk as Record<string, string>)['cyber_hsv2rgb'] = hsv2rgb;
 }

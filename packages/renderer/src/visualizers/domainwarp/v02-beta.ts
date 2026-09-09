@@ -1,7 +1,12 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -29,19 +34,127 @@ const domainWarpRecursiveMetadata: VisualizerMetadata = {
   usesPerspective: false,
   params: [
     // Appearance
-    { key: 'warpDepth', label: 'Warp Depth', min: 1, max: 3, step: 1, initial: 3, category: 'appearance', description: 'Nesting levels (1-3)' },
-    { key: 'warpStrength', label: 'Warp Strength', min: 0.5, max: 6.0, step: 0.25, initial: 3.0, category: 'appearance', description: 'Displacement magnitude' },
-    { key: 'lacunarity', label: 'Lacunarity', min: 1.5, max: 3.0, step: 0.1, initial: 2.0, category: 'appearance', description: 'Octave frequency scaling' },
-    { key: 'gain', label: 'Gain', min: 0.3, max: 0.7, step: 0.05, initial: 0.5, category: 'appearance', description: 'Octave amplitude decay' },
-    { key: 'octaves', label: 'Octaves', min: 2, max: 7, step: 1, initial: 5, category: 'appearance', description: 'FBM complexity layers' },
-    { key: 'timeScale', label: 'Flow Speed', min: 0.0, max: 1.0, step: 0.05, initial: 0.25, category: 'appearance', description: 'Evolution speed' },
-    { key: 'palette', label: 'Palette', min: 0.0, max: 1.0, step: 0.05, initial: 0.3, category: 'appearance', description: 'Color palette selection' },
+    {
+      key: 'warpDepth',
+      label: 'Warp Depth',
+      min: 1,
+      max: 3,
+      step: 1,
+      initial: 3,
+      category: 'appearance',
+      description: 'Nesting levels (1-3)',
+    },
+    {
+      key: 'warpStrength',
+      label: 'Warp Strength',
+      min: 0.5,
+      max: 6.0,
+      step: 0.25,
+      initial: 3.0,
+      category: 'appearance',
+      description: 'Displacement magnitude',
+    },
+    {
+      key: 'lacunarity',
+      label: 'Lacunarity',
+      min: 1.5,
+      max: 3.0,
+      step: 0.1,
+      initial: 2.0,
+      category: 'appearance',
+      description: 'Octave frequency scaling',
+    },
+    {
+      key: 'gain',
+      label: 'Gain',
+      min: 0.3,
+      max: 0.7,
+      step: 0.05,
+      initial: 0.5,
+      category: 'appearance',
+      description: 'Octave amplitude decay',
+    },
+    {
+      key: 'octaves',
+      label: 'Octaves',
+      min: 2,
+      max: 7,
+      step: 1,
+      initial: 5,
+      category: 'appearance',
+      description: 'FBM complexity layers',
+    },
+    {
+      key: 'timeScale',
+      label: 'Flow Speed',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.25,
+      category: 'appearance',
+      description: 'Evolution speed',
+    },
+    {
+      key: 'palette',
+      label: 'Palette',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.3,
+      category: 'appearance',
+      description: 'Color palette selection',
+    },
     // Audio mapping
-    { key: 'bassToWarp', label: 'Bass → Warp', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Bass modulates warp strength' },
-    { key: 'midToLacunarity', label: 'Mid → Lacunarity', min: 0.0, max: 2.0, step: 0.1, initial: 0.8, category: 'audio-mapping', description: 'Mids shift feature scaling' },
-    { key: 'highToOctaves', label: 'High → Octaves', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Highs add fine detail' },
-    { key: 'rmsToVibrancy', label: 'RMS → Vibrancy', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Volume drives color vibrancy' },
-    { key: 'beatToBreak', label: 'Beat → Break', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Beats create phase breaks' },
+    {
+      key: 'bassToWarp',
+      label: 'Bass → Warp',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Bass modulates warp strength',
+    },
+    {
+      key: 'midToLacunarity',
+      label: 'Mid → Lacunarity',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 0.8,
+      category: 'audio-mapping',
+      description: 'Mids shift feature scaling',
+    },
+    {
+      key: 'highToOctaves',
+      label: 'High → Octaves',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Highs add fine detail',
+    },
+    {
+      key: 'rmsToVibrancy',
+      label: 'RMS → Vibrancy',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Volume drives color vibrancy',
+    },
+    {
+      key: 'beatToBreak',
+      label: 'Beat → Break',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Beats create phase breaks',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
@@ -52,6 +165,8 @@ const domainWarpRecursiveMetadata: VisualizerMetadata = {
 };
 
 export class DomainWarpRecursiveVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = domainWarpRecursiveMetadata;
 
   private unsub: Unsubscribe;
@@ -85,16 +200,19 @@ export class DomainWarpRecursiveVisualizer implements Visualizer {
     high: new EMASmoothing(0.2),
     rms: new EMASmoothing(0.12),
     spectralCentroid: new EMASmoothing(0.1),
-    beatPulse: new EMASmoothing(0.45),
+    beatPulse: new EventEnvelope(),
   };
 
   private material: THREE.ShaderMaterial | null = null;
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
     this.smoothers.high.reset(0);
@@ -104,10 +222,11 @@ export class DomainWarpRecursiveVisualizer implements Visualizer {
   }
 
   attach(scene: THREE.Scene): void {
-    this.material = new THREE.RawShaderMaterial({
+    this.material = new THREE.ShaderMaterial({
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
+        u_workBudget: { value: 1 },
         u_time: { value: 0.0 },
         u_resolution: { value: new THREE.Vector2(1920, 1080) },
         u_pan: { value: new THREE.Vector2(0, 0) },
@@ -138,38 +257,52 @@ export class DomainWarpRecursiveVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
 
       if (f.beatOnset && this.userParams.beatToBreak > 0) {
         this.breakAccum += 0.8 * this.userParams.beatToBreak;
       }
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     if (this.material) {
       const u = this.material.uniforms;
-      u.u_time.value = this.time * this.userParams.timeScale;
+      u.u_time.value = this.phases.advance(
+        'animation',
+        this.userParams.timeScale,
+        this.deltaSeconds,
+      );
       u.u_pan.value.set(this._panX, this._panY);
       u.u_zoom.value = this._zoom;
       u.u_warpDepth.value = this.userParams.warpDepth;
-      u.u_warpStrength.value = this.userParams.warpStrength
-        + (this.smoothers.bass.value - 0.2) * 1.5 * this.userParams.bassToWarp;
-      u.u_lacunarity.value = this.userParams.lacunarity
-        + this.smoothers.mid.value * 0.4 * this.userParams.midToLacunarity;
+      u.u_warpStrength.value =
+        this.userParams.warpStrength +
+        (this.smoothers.bass.value - 0.2) * 1.5 * this.userParams.bassToWarp;
+      u.u_lacunarity.value =
+        this.userParams.lacunarity +
+        this.smoothers.mid.value * 0.4 * this.userParams.midToLacunarity;
       u.u_gain.value = this.userParams.gain;
-      u.u_octaves.value = this.userParams.octaves
-        + this.smoothers.high.value * 2.0 * this.userParams.highToOctaves;
+      u.u_octaves.value =
+        this.userParams.octaves +
+        this.smoothers.high.value * 2.0 * this.userParams.highToOctaves;
       u.u_palette.value = this.userParams.palette;
       u.u_bass.value = this.smoothers.bass.value;
       u.u_mid.value = this.smoothers.mid.value;
@@ -186,7 +319,8 @@ export class DomainWarpRecursiveVisualizer implements Visualizer {
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -227,8 +361,6 @@ registerVisualizer({
 // ── Shaders ────────────────────────────────────────────
 
 const VERTEX_SHADER = /* glsl */ `
-  attribute vec3 position;
-  attribute vec2 uv;
   varying vec2 vUv;
   void main() {
     vUv = uv;
@@ -243,6 +375,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   #define TAU 6.28318530718
   #define MAX_OCTAVES 7
 
+  uniform float u_workBudget;
   uniform float u_time;
   uniform vec2 u_resolution;
   uniform vec2 u_pan;
@@ -294,6 +427,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     float frequency = 1.0;
 
     for (int i = 0; i < MAX_OCTAVES; i++) {
+      if (float(i) >= max(3.0, floor(float(MAX_OCTAVES) * u_workBudget))) break;
       if (i >= oct) break;
       value += amplitude * gnoise(p * frequency);
       frequency *= lac;
@@ -347,17 +481,14 @@ const FRAGMENT_SHADER = /* glsl */ `
     uv = uv / u_zoom + u_pan;
 
     float t = u_time + u_breakOffset;
-    int depth = int(u_warpDepth);
+    int depth = int(min(u_warpDepth,max(1.0,ceil(3.0*u_workBudget))));
     int oct = int(clamp(u_octaves, 2.0, 7.0));
 
     // Core recursive domain warp
     float f = recursiveWarp(uv, t, u_warpStrength, u_lacunarity, u_gain, oct, depth);
 
     // Gradient for edge/flow coloring
-    float eps = 0.005;
-    float fx = recursiveWarp(uv + vec2(eps, 0.0), t, u_warpStrength, u_lacunarity, u_gain, oct, depth);
-    float fy = recursiveWarp(uv + vec2(0.0, eps), t, u_warpStrength, u_lacunarity, u_gain, oct, depth);
-    vec2 grad = vec2(fx - f, fy - f) / eps;
+    vec2 grad = vec2(dFdx(f),dFdy(f))*min(u_resolution.x,u_resolution.y)*u_zoom;
     float gradMag = length(grad);
     float gradAngle = atan(grad.y, grad.x);
 

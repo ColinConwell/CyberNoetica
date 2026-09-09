@@ -1,7 +1,12 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -34,18 +39,126 @@ const dendriteMetadata: VisualizerMetadata = {
   description: 'Crystal frost growth patterns',
   usesPerspective: false,
   params: [
-    { key: 'branchThickness', label: 'Branch Thickness', min: 0.01, max: 0.15, step: 0.005, initial: 0.06, category: 'appearance', description: 'Width of crystal branches' },
-    { key: 'growthSpeed', label: 'Growth Speed', min: 0.05, max: 1.0, step: 0.05, initial: 0.3, category: 'appearance', description: 'Crystal growth animation rate' },
-    { key: 'symmetry', label: 'Symmetry', min: 3.0, max: 8.0, step: 1.0, initial: 6.0, category: 'appearance', description: 'Rotational symmetry order' },
-    { key: 'branches', label: 'Branch Depth', min: 2.0, max: 6.0, step: 1.0, initial: 4.0, category: 'appearance', description: 'Branching recursion depth' },
-    { key: 'brightness', label: 'Brightness', min: 0.3, max: 3.0, step: 0.1, initial: 1.5, category: 'appearance', description: 'Crystal glow intensity' },
-    { key: 'branchAngle', label: 'Branch Angle', min: 15.0, max: 75.0, step: 5.0, initial: 40.0, category: 'appearance', description: 'Angle between branches (degrees)' },
-    { key: 'bassToThickness', label: 'Bass → Thickness', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Bass drives branch width' },
-    { key: 'midToGrowth', label: 'Mid → Growth', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Mids drive growth speed' },
-    { key: 'highToDetail', label: 'High → Detail', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Highs increase branching detail' },
-    { key: 'rmsToGlow', label: 'RMS → Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Volume drives glow' },
-    { key: 'beatToBurst', label: 'Beat → Burst', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Beats extend crystal tips' },
-    { key: 'centroidToColor', label: 'Centroid → Color', min: 0.0, max: 2.0, step: 0.1, initial: 0.8, category: 'audio-mapping', description: 'Spectral centroid shifts palette' },
+    {
+      key: 'branchThickness',
+      label: 'Branch Thickness',
+      min: 0.01,
+      max: 0.15,
+      step: 0.005,
+      initial: 0.06,
+      category: 'appearance',
+      description: 'Width of crystal branches',
+    },
+    {
+      key: 'growthSpeed',
+      label: 'Growth Speed',
+      min: 0.05,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.3,
+      category: 'appearance',
+      description: 'Crystal growth animation rate',
+    },
+    {
+      key: 'symmetry',
+      label: 'Symmetry',
+      min: 3.0,
+      max: 8.0,
+      step: 1.0,
+      initial: 6.0,
+      category: 'appearance',
+      description: 'Rotational symmetry order',
+    },
+    {
+      key: 'branches',
+      label: 'Branch Depth',
+      min: 2.0,
+      max: 6.0,
+      step: 1.0,
+      initial: 4.0,
+      category: 'appearance',
+      description: 'Branching recursion depth',
+    },
+    {
+      key: 'brightness',
+      label: 'Brightness',
+      min: 0.3,
+      max: 3.0,
+      step: 0.1,
+      initial: 1.5,
+      category: 'appearance',
+      description: 'Crystal glow intensity',
+    },
+    {
+      key: 'branchAngle',
+      label: 'Branch Angle',
+      min: 15.0,
+      max: 75.0,
+      step: 5.0,
+      initial: 40.0,
+      category: 'appearance',
+      description: 'Angle between branches (degrees)',
+    },
+    {
+      key: 'bassToThickness',
+      label: 'Bass → Thickness',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Bass drives branch width',
+    },
+    {
+      key: 'midToGrowth',
+      label: 'Mid → Growth',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Mids drive growth speed',
+    },
+    {
+      key: 'highToDetail',
+      label: 'High → Detail',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Highs increase branching detail',
+    },
+    {
+      key: 'rmsToGlow',
+      label: 'RMS → Glow',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Volume drives glow',
+    },
+    {
+      key: 'beatToBurst',
+      label: 'Beat → Burst',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Beats extend crystal tips',
+    },
+    {
+      key: 'centroidToColor',
+      label: 'Centroid → Color',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 0.8,
+      category: 'audio-mapping',
+      description: 'Spectral centroid shifts palette',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
@@ -56,6 +169,8 @@ const dendriteMetadata: VisualizerMetadata = {
 };
 
 export class DendriteVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = dendriteMetadata;
 
   private unsub: Unsubscribe;
@@ -87,16 +202,19 @@ export class DendriteVisualizer implements Visualizer {
     high: new EMASmoothing(0.22),
     rms: new EMASmoothing(0.15),
     spectralCentroid: new EMASmoothing(0.08),
-    beatPulse: new EMASmoothing(0.35),
+    beatPulse: new EventEnvelope(),
   };
 
   private material: THREE.ShaderMaterial | null = null;
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
     this.smoothers.high.reset(0);
@@ -110,6 +228,7 @@ export class DendriteVisualizer implements Visualizer {
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
+        u_growthSpeedPhase: { value: 0 },
         u_time: { value: 0.0 },
         u_resolution: { value: new THREE.Vector2(1920, 1080) },
         u_center: { value: new THREE.Vector2(0, 0) },
@@ -135,19 +254,26 @@ export class DendriteVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     if (this.material) {
@@ -159,25 +285,39 @@ export class DendriteVisualizer implements Visualizer {
       u.u_time.value = this.time;
       u.u_center.value.set(this._centerX, this._centerY);
       u.u_zoom.value = this._zoom;
-      u.u_branchThickness.value = this.userParams.branchThickness
-        + bass * 0.03 * this.userParams.bassToThickness;
-      u.u_growthSpeed.value = this.userParams.growthSpeed
-        + mid * 0.2 * this.userParams.midToGrowth;
+      u.u_branchThickness.value =
+        this.userParams.branchThickness +
+        bass * 0.03 * this.userParams.bassToThickness;
+      u.u_growthSpeed.value =
+        this.userParams.growthSpeed + mid * 0.2 * this.userParams.midToGrowth;
       u.u_symmetry.value = this.userParams.symmetry;
-      u.u_branches.value = this.userParams.branches;
+      u.u_branches.value = Math.min(
+        6,
+        this.userParams.branches +
+          Math.round(high * 2 * this.userParams.highToDetail),
+      );
       u.u_brightness.value = this.userParams.brightness;
       u.u_branchAngle.value = this.userParams.branchAngle;
       u.u_bass.value = bass;
       u.u_mid.value = mid;
       u.u_high.value = high;
       u.u_rms.value = this.smoothers.rms.value * this.userParams.rmsToGlow;
-      u.u_spectralCentroid.value = this.smoothers.spectralCentroid.value;
-      u.u_beatPulse.value = this.smoothers.beatPulse.value * this.userParams.beatToBurst;
+      u.u_spectralCentroid.value =
+        this.smoothers.spectralCentroid.value * this.userParams.centroidToColor;
+      u.u_beatPulse.value =
+        this.smoothers.beatPulse.value * this.userParams.beatToBurst;
     }
+    if (this.material)
+      this.material.uniforms.u_growthSpeedPhase.value = this.phases.advance(
+        'u_growthSpeedPhase',
+        this.material.uniforms.u_growthSpeed.value,
+        this.deltaSeconds,
+      );
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -189,9 +329,12 @@ export class DendriteVisualizer implements Visualizer {
   }
 
   setViewState(partial: Record<string, number>): void {
-    if ('centerX' in partial) this._centerX = Math.max(-3, Math.min(3, partial.centerX));
-    if ('centerY' in partial) this._centerY = Math.max(-3, Math.min(3, partial.centerY));
-    if ('zoom' in partial) this._zoom = Math.max(0.2, Math.min(6.0, partial.zoom));
+    if ('centerX' in partial)
+      this._centerX = Math.max(-3, Math.min(3, partial.centerX));
+    if ('centerY' in partial)
+      this._centerY = Math.max(-3, Math.min(3, partial.centerY));
+    if ('zoom' in partial)
+      this._zoom = Math.max(0.2, Math.min(6.0, partial.zoom));
   }
 
   dispose(): void {
@@ -228,6 +371,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   uniform float u_zoom;
   uniform float u_branchThickness;
   uniform float u_growthSpeed;
+  uniform float u_growthSpeedPhase;
   uniform float u_symmetry;
   uniform float u_branches;
   uniform float u_brightness;
@@ -260,7 +404,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     float angleRad = u_branchAngle * PI / 180.0;
     float thickness = u_branchThickness;
 
-    float d = abs(p.y) - thickness;  // central line along x-axis
+    float d = 1e5; // Accumulate only after folding into the symmetry sector.  // central line along x-axis
     float scale = 1.0;
 
     for (int i = 0; i < 6; i++) {
@@ -288,8 +432,9 @@ const FRAGMENT_SHADER = /* glsl */ `
 
   // Growth animation: reveals crystal from center outward
   float growthMask(float r, float t) {
-    float front = t * u_growthSpeed * 2.0 + 0.5 + u_beatPulse * 0.3;
-    return smoothstep(front, max(front - 0.3, 0.0), r);
+    float age=mod(u_growthSpeedPhase,4.0);
+    float front = age * 2.0 + 0.05 + u_beatPulse * 0.15;
+    return (1.0 - smoothstep(max(front - 0.3, 0.0), max(front, 1e-6), r));
   }
 
   vec3 crystalPalette(float t, float cent) {
@@ -307,7 +452,7 @@ const FRAGMENT_SHADER = /* glsl */ `
 
     float dist = crystalField(pos);
     float r = length(pos);
-    float growth = growthMask(r, u_time);
+    float growth = growthMask(r, u_time) * (1.0-smoothstep(3.3,4.0,mod(u_growthSpeedPhase,4.0)));
 
     // Background
     vec3 bgInner = vec3(0.01, 0.015, 0.04);

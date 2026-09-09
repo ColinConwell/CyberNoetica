@@ -1,7 +1,12 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -25,18 +30,127 @@ const interferenceMetadata: VisualizerMetadata = {
   description: 'Cymatics-inspired wave interference patterns',
   usesPerspective: false,
   params: [
+    {
+      key: 'physicalMode',
+      label: 'Stationary wave model',
+      min: 0,
+      max: 1,
+      step: 1,
+      initial: 1,
+      category: 'appearance',
+      description: 'Fixed wavenumber, ω=c·k, cylindrical far-field spreading',
+    },
+    {
+      key: 'stereoToPhase',
+      label: 'Stereo → Source phase',
+      min: 0,
+      max: 1,
+      step: 0.1,
+      initial: 1,
+      category: 'audio-mapping',
+    },
     // Appearance
-    { key: 'sources', label: 'Sources', min: 2, max: 8, step: 1, initial: 4, category: 'appearance', description: 'Number of wave emission sources' },
-    { key: 'frequency', label: 'Frequency', min: 1.0, max: 10.0, step: 0.25, initial: 4.0, category: 'appearance', description: 'Wave spatial frequency' },
-    { key: 'damping', label: 'Damping', min: 0.0, max: 1.0, step: 0.05, initial: 0.3, category: 'appearance', description: 'How quickly waves attenuate with distance' },
-    { key: 'speed', label: 'Speed', min: 0.1, max: 2.0, step: 0.05, initial: 0.8, category: 'appearance', description: 'Wave propagation speed' },
-    { key: 'palette', label: 'Palette', min: 0.0, max: 1.0, step: 0.01, initial: 0.5, category: 'appearance', description: 'Color palette blend (cool to warm)' },
+    {
+      key: 'sources',
+      label: 'Sources',
+      min: 2,
+      max: 8,
+      step: 1,
+      initial: 4,
+      category: 'appearance',
+      description: 'Number of wave emission sources',
+    },
+    {
+      key: 'frequency',
+      label: 'Frequency',
+      min: 1.0,
+      max: 10.0,
+      step: 0.25,
+      initial: 4.0,
+      category: 'appearance',
+      description: 'Wave spatial frequency',
+    },
+    {
+      key: 'damping',
+      label: 'Damping',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.3,
+      category: 'appearance',
+      description: 'How quickly waves attenuate with distance',
+    },
+    {
+      key: 'speed',
+      label: 'Speed',
+      min: 0.1,
+      max: 2.0,
+      step: 0.05,
+      initial: 0.8,
+      category: 'appearance',
+      description: 'Wave propagation speed',
+    },
+    {
+      key: 'palette',
+      label: 'Palette',
+      min: 0.0,
+      max: 1.0,
+      step: 0.01,
+      initial: 0.5,
+      category: 'appearance',
+      description: 'Color palette blend (cool to warm)',
+    },
     // Audio mapping
-    { key: 'bassToAmplitude', label: 'Bass -> Amplitude', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Bass drives wave amplitude' },
-    { key: 'midToFrequency', label: 'Mid -> Frequency', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Mids shift wave frequency' },
-    { key: 'highToSharpness', label: 'High -> Sharpness', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Highs sharpen interference fringes' },
-    { key: 'rmsToGlow', label: 'RMS -> Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'RMS drives bright node glow' },
-    { key: 'beatToRipple', label: 'Beat -> Ripple', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Beats spawn new ripple waves' },
+    {
+      key: 'bassToAmplitude',
+      label: 'Bass -> Amplitude',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Bass drives wave amplitude',
+    },
+    {
+      key: 'midToFrequency',
+      label: 'Mid -> Frequency',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Mids shift wave frequency',
+    },
+    {
+      key: 'highToSharpness',
+      label: 'High -> Sharpness',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Highs sharpen interference fringes',
+    },
+    {
+      key: 'rmsToGlow',
+      label: 'RMS -> Glow',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'RMS drives bright node glow',
+    },
+    {
+      key: 'beatToRipple',
+      label: 'Beat -> Ripple',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Beats spawn new ripple waves',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
@@ -47,6 +161,8 @@ const interferenceMetadata: VisualizerMetadata = {
 };
 
 export class InterferenceVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = interferenceMetadata;
 
   private unsub: Unsubscribe;
@@ -54,6 +170,8 @@ export class InterferenceVisualizer implements Visualizer {
   private time = 0;
 
   private userParams: Record<string, number> = {
+    physicalMode: 1,
+    stereoToPhase: 1,
     sources: 4,
     frequency: 4.0,
     damping: 0.3,
@@ -77,16 +195,19 @@ export class InterferenceVisualizer implements Visualizer {
     high: new EMASmoothing(0.25),
     rms: new EMASmoothing(0.15),
     spectralCentroid: new EMASmoothing(0.08),
-    beatPulse: new EMASmoothing(0.4),
+    beatPulse: new EventEnvelope(),
   };
 
   private material: THREE.ShaderMaterial | null = null;
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
 
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
@@ -101,6 +222,9 @@ export class InterferenceVisualizer implements Visualizer {
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
+        u_physicalMode: { value: 1 },
+        u_stereoPhase: { value: 0 },
+        u_speedPhase: { value: 0 },
         u_time: { value: 0.0 },
         u_resolution: { value: new THREE.Vector2(1920, 1080) },
         u_zoom: { value: 1.0 },
@@ -130,23 +254,33 @@ export class InterferenceVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     if (this.material) {
       const u = this.material.uniforms;
+      u.u_physicalMode.value = this.userParams.physicalMode;
+      u.u_stereoPhase.value =
+        (this.latestFeatures?.stereoPhase ?? 0) * this.userParams.stereoToPhase;
       u.u_time.value = this.time;
       u.u_zoom.value = this._zoom;
       u.u_center.value.set(this._centerX, this._centerY);
@@ -155,6 +289,12 @@ export class InterferenceVisualizer implements Visualizer {
       u.u_frequency.value = this.userParams.frequency;
       u.u_damping.value = this.userParams.damping;
       u.u_speed.value = this.userParams.speed;
+      u.u_speedPhase.value = this.phases.advance(
+        'u_speed',
+        u.u_speed.value *
+          (this.userParams.physicalMode > 0.5 ? this.userParams.frequency : 1),
+        this.deltaSeconds,
+      );
       u.u_palette.value = this.userParams.palette;
 
       u.u_bass.value = this.smoothers.bass.value;
@@ -173,7 +313,8 @@ export class InterferenceVisualizer implements Visualizer {
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -236,6 +377,8 @@ const FRAGMENT_SHADER = /* glsl */ `
   #define TAU 6.28318530718
   #define MAX_SOURCES 8
 
+  uniform float u_speedPhase;
+  uniform float u_physicalMode;uniform float u_stereoPhase;
   uniform float u_time;
   uniform vec2 u_resolution;
   uniform float u_zoom;
@@ -297,7 +440,7 @@ const FRAGMENT_SHADER = /* glsl */ `
 
     // Audio-reactive parameters
     float effAmplitude = 1.0 + u_bass * 1.5 * u_bassToAmplitude;
-    float effFrequency = u_frequency + u_mid * 3.0 * u_midToFrequency;
+    float effFrequency = u_frequency + (1.0-u_physicalMode)*u_mid * 3.0 * u_midToFrequency;
     float sharpness = 1.0 + u_high * 2.0 * u_highToSharpness;
     float glowStrength = u_rms * u_rmsToGlow;
     float rippleStrength = u_beatPulse * u_beatToRipple;
@@ -308,21 +451,21 @@ const FRAGMENT_SHADER = /* glsl */ `
     for (int i = 0; i < MAX_SOURCES; i++) {
       if (i >= numSources) break;
 
-      vec2 src = sourcePos(i, u_time);
+      vec2 src = sourcePos(i, u_physicalMode>.5?0.0:u_time);
       float dist = length(uv - src);
 
       // Wave: sin(dist * frequency - time * speed) / (1 + dist * damping)
-      float wave = sin(dist * effFrequency * TAU - u_time * u_speed * TAU)
-                   / (1.0 + dist * u_damping * 5.0);
+      float wave = sin(dist * effFrequency * TAU - u_speedPhase * TAU + mod(float(i),2.0)*u_stereoPhase);
+      wave *= u_physicalMode>.5 ? exp(-dist*u_damping)/sqrt(max(dist,.05)) : 1.0/(1.0+dist*u_damping*5.0);
 
       waveSum += wave;
     }
 
     // Beat ripple: expanding ring from center
     float rippleDist = length(uv);
-    float rippleWave = sin(rippleDist * effFrequency * TAU * 1.5 - u_time * u_speed * TAU * 2.0)
+    float rippleWave = sin(rippleDist * effFrequency * TAU * 1.5 - u_speedPhase * TAU * 2.0)
                        / (1.0 + rippleDist * 2.0);
-    waveSum += rippleWave * rippleStrength * 2.0;
+    waveSum += rippleWave * rippleStrength * 2.0*(1.0-u_physicalMode);
 
     // Normalize by source count and apply amplitude
     waveSum = waveSum / max(float(numSources), 1.0) * effAmplitude;

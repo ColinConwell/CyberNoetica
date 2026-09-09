@@ -14,15 +14,34 @@ export type Channel = string;
 /** Unsubscribe function returned by subscribe() */
 export type Unsubscribe = () => void;
 
-/** Audio feature payload */
+/** Audio feature payload. See docs/audio-features.md for units and calibration. */
 export interface AudioFeatures {
   /** FFT frequency bins, normalized [0, 1] */
   fftBins: Float32Array;
-  /** Bass energy (20-250Hz), normalized [0, 1] */
+  /** One-sided linear FFT amplitudes with Hann coherent-gain correction. */
+  spectrum?: Float32Array;
+  /** Left-channel time samples, full scale [-1, 1]. */
+  waveform?: Float32Array;
+  /** Uncompressed RMS band levels and relative timbral proportions. */
+  bandLevels?: { bass: number; mid: number; high: number };
+  bandBalance?: { bass: number; mid: number; high: number };
+  /** End of the analysis window in AudioContext seconds, not wall time. */
+  timestamp?: number;
+  sequence?: number;
+  /** Monotonically increasing onset event ID; consumers must not replay it. */
+  onsetId?: number;
+  sampleRate?: number;
+  fftSize?: number;
+  hopSize?: number;
+  pitchHz?: number;
+  pitchConfidence?: number;
+  stereoCorrelation?: number;
+  stereoPhase?: number;
+  /** Bass level (20–250 Hz), -60 to -6 dBFS mapped to [0, 1]. */
   bass: number;
-  /** Mid energy (250-4000Hz), normalized [0, 1] */
+  /** Mid level (250–4000 Hz), same absolute level mapping. */
   mid: number;
-  /** High energy (4000-20000Hz), normalized [0, 1] */
+  /** High level (4000–20000 Hz), same absolute level mapping. */
   high: number;
   /** Spectral centroid as fraction of Nyquist [0, 1] */
   spectralCentroid: number;
@@ -34,7 +53,7 @@ export interface AudioFeatures {
   beatOnset: boolean;
   /** Beat onset confidence [0, 1] */
   beatConfidence: number;
-  /** Whether this is a degraded feature set (WASM fallback) */
+  /** Whether features use an incomplete compatibility path */
   degraded: boolean;
 }
 

@@ -18,7 +18,10 @@ export {
   listManifestTypes,
   listVisualizerDocumentation,
 } from './visualizers/index.js';
-export type { VisualizerEntry, VisualizerManifestEntry } from './visualizers/index.js';
+export type {
+  VisualizerEntry,
+  VisualizerManifestEntry,
+} from './visualizers/index.js';
 export type {
   Visualizer,
   VisualizerAudioInput,
@@ -32,3 +35,6 @@ export type {
   ViewStateField,
   ViewportCapabilities,
 } from './visualizers/index.js';
+
+export { loadVoroBackend } from './voro/backend.js';
+export type { VoroMesh } from './voro/backend.js';

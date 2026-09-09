@@ -1,7 +1,12 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -25,16 +30,97 @@ const domainwarpMetadata: VisualizerMetadata = {
   usesPerspective: false,
   params: [
     // Appearance
-    { key: 'warpStrength', label: 'Warp Strength', min: 1.0, max: 8.0, step: 0.25, initial: 4.0, category: 'appearance', description: 'Intensity of coordinate distortion' },
-    { key: 'octaves', label: 'Detail Level', min: 2, max: 8, step: 1, initial: 5, category: 'appearance', description: 'fBM octave count (more = finer detail)' },
-    { key: 'flowSpeed', label: 'Flow Speed', min: 0.0, max: 1.0, step: 0.05, initial: 0.3, category: 'appearance', description: 'Animation speed of the flowing pattern' },
-    { key: 'colorMode', label: 'Color Warmth', min: 0.0, max: 1.0, step: 0.05, initial: 0.5, category: 'appearance', description: 'Cool (blue-purple) to warm (amber-orange)' },
-    { key: 'patternScale', label: 'Pattern Scale', min: 0.5, max: 4.0, step: 0.25, initial: 1.5, category: 'appearance', description: 'Overall scale of noise pattern' },
+    {
+      key: 'warpStrength',
+      label: 'Warp Strength',
+      min: 1.0,
+      max: 8.0,
+      step: 0.25,
+      initial: 4.0,
+      category: 'appearance',
+      description: 'Intensity of coordinate distortion',
+    },
+    {
+      key: 'octaves',
+      label: 'Detail Level',
+      min: 2,
+      max: 8,
+      step: 1,
+      initial: 5,
+      category: 'appearance',
+      description: 'fBM octave count (more = finer detail)',
+    },
+    {
+      key: 'flowSpeed',
+      label: 'Flow Speed',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.3,
+      category: 'appearance',
+      description: 'Animation speed of the flowing pattern',
+    },
+    {
+      key: 'colorMode',
+      label: 'Color Warmth',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.5,
+      category: 'appearance',
+      description: 'Cool (blue-purple) to warm (amber-orange)',
+    },
+    {
+      key: 'patternScale',
+      label: 'Pattern Scale',
+      min: 0.5,
+      max: 4.0,
+      step: 0.25,
+      initial: 1.5,
+      category: 'appearance',
+      description: 'Overall scale of noise pattern',
+    },
     // Audio mapping
-    { key: 'bassToWarp', label: 'Bass → Warp', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly bass intensifies distortion' },
-    { key: 'midToFlow', label: 'Mid → Flow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How mids modulate layer flow rates' },
-    { key: 'highToDetail', label: 'High → Detail', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How treble controls fine detail' },
-    { key: 'rmsToBrightness', label: 'RMS → Brightness', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How volume drives brightness' },
+    {
+      key: 'bassToWarp',
+      label: 'Bass → Warp',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How strongly bass intensifies distortion',
+    },
+    {
+      key: 'midToFlow',
+      label: 'Mid → Flow',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How mids modulate layer flow rates',
+    },
+    {
+      key: 'highToDetail',
+      label: 'High → Detail',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How treble controls fine detail',
+    },
+    {
+      key: 'rmsToBrightness',
+      label: 'RMS → Brightness',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How volume drives brightness',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
@@ -45,6 +131,8 @@ const domainwarpMetadata: VisualizerMetadata = {
 };
 
 export class DomainWarpVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = domainwarpMetadata;
 
   private unsub: Unsubscribe;
@@ -73,16 +161,19 @@ export class DomainWarpVisualizer implements Visualizer {
     high: new EMASmoothing(0.22),
     rms: new EMASmoothing(0.2),
     spectralCentroid: new EMASmoothing(0.1),
-    beatPulse: new EMASmoothing(0.4),
+    beatPulse: new EventEnvelope(),
   };
 
   private material: THREE.ShaderMaterial | null = null;
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
 
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
@@ -97,7 +188,9 @@ export class DomainWarpVisualizer implements Visualizer {
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
+        u_workBudget: { value: 1 },
         u_time: { value: 0.0 },
+        u_layerTimes: { value: new THREE.Vector3() },
         u_resolution: { value: new THREE.Vector2(1920, 1080) },
         u_zoom: { value: 1.0 },
         u_pan: { value: new THREE.Vector2(0, 0) },
@@ -124,24 +217,45 @@ export class DomainWarpVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += (1 / 60) * this.userParams.flowSpeed;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds * this.userParams.flowSpeed;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     if (this.material) {
       const u = this.material.uniforms;
       u.u_time.value = this.time;
+      const mid = this.smoothers.mid.value * this.userParams.midToFlow;
+      u.u_layerTimes.value.set(
+        this.time * 0.8,
+        this.phases.advance(
+          'layer2',
+          this.userParams.flowSpeed * (0.6 + mid * 0.4),
+          this.deltaSeconds,
+        ),
+        this.phases.advance(
+          'layer3',
+          this.userParams.flowSpeed * (0.5 + mid * 0.6),
+          this.deltaSeconds,
+        ),
+      );
       u.u_zoom.value = this._zoom;
       u.u_pan.value.set(this._panX, this._panY);
       u.u_warpStrength.value = this.userParams.warpStrength;
@@ -162,7 +276,8 @@ export class DomainWarpVisualizer implements Visualizer {
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -174,9 +289,12 @@ export class DomainWarpVisualizer implements Visualizer {
   }
 
   setViewState(partial: Record<string, number>): void {
-    if ('zoom' in partial) this._zoom = Math.max(0.3, Math.min(4.0, partial.zoom));
-    if ('panX' in partial) this._panX = Math.max(-5.0, Math.min(5.0, partial.panX));
-    if ('panY' in partial) this._panY = Math.max(-5.0, Math.min(5.0, partial.panY));
+    if ('zoom' in partial)
+      this._zoom = Math.max(0.3, Math.min(4.0, partial.zoom));
+    if ('panX' in partial)
+      this._panX = Math.max(-5.0, Math.min(5.0, partial.panX));
+    if ('panY' in partial)
+      this._panY = Math.max(-5.0, Math.min(5.0, partial.panY));
   }
 
   dispose(): void {
@@ -207,7 +325,9 @@ const FRAGMENT_SHADER = /* glsl */ `
   #define PI 3.14159265359
   #define MAX_OCTAVES 8
 
+  uniform float u_workBudget;
   uniform float u_time;
+  uniform vec3 u_layerTimes;
   uniform vec2 u_resolution;
   uniform float u_zoom;
   uniform vec2 u_pan;
@@ -253,6 +373,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     float amp = 0.5;
     float freq = 1.0;
     for (int i = 0; i < MAX_OCTAVES; i++) {
+      if (float(i) >= max(3.0, floor(float(MAX_OCTAVES) * u_workBudget))) break;
       if (i >= octaves) break;
       sum += amp * noise(p * freq);
       freq *= 2.0;
@@ -275,9 +396,9 @@ const FRAGMENT_SHADER = /* glsl */ `
     float warp = u_warpStrength * (0.6 + u_bass * 0.8 * u_bassToWarp);
 
     // Time offsets: mids create differential flow between layers
-    float t1 = u_time * 0.8;
-    float t2 = u_time * (0.6 + u_mid * 0.4 * u_midToFlow);
-    float t3 = u_time * (0.5 + u_mid * 0.6 * u_midToFlow);
+    float t1 = u_layerTimes.x;
+    float t2 = u_layerTimes.y;
+    float t3 = u_layerTimes.z;
 
     // First warp layer
     vec2 q = vec2(

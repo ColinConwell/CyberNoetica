@@ -1,7 +1,12 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -22,21 +27,111 @@ import { registerVisualizer } from '../registry.js';
 const geodesicMetadata: VisualizerMetadata = {
   type: 'geodesic',
   label: 'Geodesic',
-  description: 'Audio-reactive geodesic sphere with SDF raymarching',
+  description: 'Audio-reactive faceted sphere approximation',
   usesPerspective: false,
   params: [
     // Appearance
-    { key: 'facetCount', label: 'Facet Count', min: 3, max: 12, step: 1, initial: 6, category: 'appearance', description: 'Icosahedral subdivision approximation' },
-    { key: 'deformation', label: 'Deformation', min: 0.0, max: 1.5, step: 0.05, initial: 0.5, category: 'appearance', description: 'Noise-based surface deformation amount' },
-    { key: 'rotationSpeed', label: 'Rotation Speed', min: 0.0, max: 1.0, step: 0.05, initial: 0.3, category: 'appearance', description: 'Sphere auto-rotation speed' },
-    { key: 'wireframe', label: 'Wireframe', min: 0.0, max: 1.0, step: 0.05, initial: 0.4, category: 'appearance', description: 'Edge/wireframe visibility blend' },
-    { key: 'iridescence', label: 'Iridescence', min: 0.0, max: 1.0, step: 0.05, initial: 0.6, category: 'appearance', description: 'Iridescent color effect strength' },
+    {
+      key: 'facetCount',
+      label: 'Facet Count',
+      min: 3,
+      max: 12,
+      step: 1,
+      initial: 6,
+      category: 'appearance',
+      description: 'Latitude/longitude facet resolution',
+    },
+    {
+      key: 'deformation',
+      label: 'Deformation',
+      min: 0.0,
+      max: 1.5,
+      step: 0.05,
+      initial: 0.5,
+      category: 'appearance',
+      description: 'Noise-based surface deformation amount',
+    },
+    {
+      key: 'rotationSpeed',
+      label: 'Rotation Speed',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.3,
+      category: 'appearance',
+      description: 'Sphere auto-rotation speed',
+    },
+    {
+      key: 'wireframe',
+      label: 'Wireframe',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.4,
+      category: 'appearance',
+      description: 'Edge/wireframe visibility blend',
+    },
+    {
+      key: 'iridescence',
+      label: 'Iridescence',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.6,
+      category: 'appearance',
+      description: 'Iridescent color effect strength',
+    },
     // Audio mapping
-    { key: 'bassToDeform', label: 'Bass -> Deform', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Bass drives sphere deformation' },
-    { key: 'midToRotation', label: 'Mid -> Rotation', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Mids modulate rotation' },
-    { key: 'highToWireframe', label: 'High -> Wireframe', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Highs brighten wireframe edges' },
-    { key: 'rmsToScale', label: 'RMS -> Scale', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'RMS scales the sphere' },
-    { key: 'beatToPulse', label: 'Beat -> Pulse', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Beats trigger expansion pulses' },
+    {
+      key: 'bassToDeform',
+      label: 'Bass -> Deform',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Bass drives sphere deformation',
+    },
+    {
+      key: 'midToRotation',
+      label: 'Mid -> Rotation',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Mids modulate rotation',
+    },
+    {
+      key: 'highToWireframe',
+      label: 'High -> Wireframe',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Highs brighten wireframe edges',
+    },
+    {
+      key: 'rmsToScale',
+      label: 'RMS -> Scale',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'RMS scales the sphere',
+    },
+    {
+      key: 'beatToPulse',
+      label: 'Beat -> Pulse',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Beats trigger expansion pulses',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
@@ -47,6 +142,8 @@ const geodesicMetadata: VisualizerMetadata = {
 };
 
 export class GeodesicVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = geodesicMetadata;
 
   private unsub: Unsubscribe;
@@ -77,16 +174,19 @@ export class GeodesicVisualizer implements Visualizer {
     high: new EMASmoothing(0.25),
     rms: new EMASmoothing(0.15),
     spectralCentroid: new EMASmoothing(0.08),
-    beatPulse: new EMASmoothing(0.35),
+    beatPulse: new EventEnvelope(),
   };
 
   private material: THREE.ShaderMaterial | null = null;
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
 
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
@@ -101,6 +201,8 @@ export class GeodesicVisualizer implements Visualizer {
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
+        u_rotationSpeedPhase: { value: 0 },
+        u_workBudget: { value: 1 },
         u_time: { value: 0.0 },
         u_resolution: { value: new THREE.Vector2(1920, 1080) },
         u_zoom: { value: 1.0 },
@@ -129,27 +231,38 @@ export class GeodesicVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     // Audio-modulated values
     const bassDeform = this.smoothers.bass.value * this.userParams.bassToDeform;
-    const midRotation = this.smoothers.mid.value * this.userParams.midToRotation;
-    const highWireframe = this.smoothers.high.value * this.userParams.highToWireframe;
-    const rmsScale = 0.8 + this.smoothers.rms.value * 0.5 * this.userParams.rmsToScale;
-    const beatPulse = this.smoothers.beatPulse.value * this.userParams.beatToPulse;
+    const midRotation =
+      this.smoothers.mid.value * this.userParams.midToRotation;
+    const highWireframe =
+      this.smoothers.high.value * this.userParams.highToWireframe;
+    const rmsScale =
+      0.8 + this.smoothers.rms.value * 0.5 * this.userParams.rmsToScale;
+    const beatPulse =
+      this.smoothers.beatPulse.value * this.userParams.beatToPulse;
 
     if (this.material) {
       const u = this.material.uniforms;
@@ -158,7 +271,13 @@ export class GeodesicVisualizer implements Visualizer {
       u.u_center.value.set(this._centerX, this._centerY);
       u.u_facetCount.value = this.userParams.facetCount;
       u.u_deformation.value = this.userParams.deformation;
-      u.u_rotationSpeed.value = this.userParams.rotationSpeed + midRotation * 0.5;
+      u.u_rotationSpeed.value =
+        this.userParams.rotationSpeed + midRotation * 0.5;
+      u.u_rotationSpeedPhase.value = this.phases.advance(
+        'u_rotationSpeed',
+        u.u_rotationSpeed.value,
+        this.deltaSeconds,
+      );
       u.u_wireframe.value = this.userParams.wireframe;
       u.u_iridescence.value = this.userParams.iridescence;
       u.u_bass.value = this.smoothers.bass.value;
@@ -175,7 +294,8 @@ export class GeodesicVisualizer implements Visualizer {
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -240,6 +360,8 @@ const FRAGMENT_SHADER = /* glsl */ `
   #define MAX_DIST 20.0
   #define SURF_DIST 0.001
 
+  uniform float u_rotationSpeedPhase;
+  uniform float u_workBudget;
   uniform float u_time;
   uniform vec2 u_resolution;
   uniform float u_zoom;
@@ -377,6 +499,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   // ── Raymarching ────────────────────────────────────
 
   struct MarchResult {
+    bool hit;
     float dist;
     int steps;
     vec3 pos;
@@ -384,14 +507,17 @@ const FRAGMENT_SHADER = /* glsl */ `
 
   MarchResult raymarch(vec3 ro, vec3 rd, float radius, float time, float facets, float deform, float bassDeform) {
     MarchResult res;
+    res.hit = false;
+    res.pos = ro;
     res.dist = 0.0;
     res.steps = 0;
 
     for (int i = 0; i < MAX_STEPS; i++) {
+      if (float(i) >= max(32.0, float(MAX_STEPS) * u_workBudget)) break;
       res.steps = i;
       res.pos = ro + rd * res.dist;
       float d = sdGeodesicSphere(res.pos, radius, time, facets, deform, bassDeform);
-      if (d < SURF_DIST) break;
+      if (abs(d) < SURF_DIST) { res.hit = true; break; }
       res.dist += d;
       if (res.dist > MAX_DIST) break;
     }
@@ -450,9 +576,9 @@ const FRAGMENT_SHADER = /* glsl */ `
     vec3 rd = normalize(vec3(uv, -1.5));
 
     // Rotation
-    float rotTime = u_time * u_rotationSpeed;
+    float rotTime = u_rotationSpeedPhase;
     mat3 rotY = rotateY(rotTime);
-    mat3 rotX = rotateX(sin(u_time * u_rotationSpeed * 0.37) * 0.3);
+    mat3 rotX = rotateX(sin(u_rotationSpeedPhase * 0.37) * 0.3);
     mat3 rot = rotY * rotX;
 
     // Sphere parameters
@@ -473,7 +599,7 @@ const FRAGMENT_SHADER = /* glsl */ `
 
     vec3 color = vec3(0.0);
 
-    if (hit.dist < MAX_DIST) {
+    if (hit.hit) {
       vec3 p = hit.pos;
       vec3 n = getNormal(p, radius, u_time, facets, deform, bassDeform);
       vec3 dir = normalize(p);

@@ -1,7 +1,12 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -26,17 +31,106 @@ const plasmaMetadata: VisualizerMetadata = {
   usesPerspective: false,
   params: [
     // Appearance
-    { key: 'complexity', label: 'Complexity', min: 2, max: 8, step: 1, initial: 5, category: 'appearance', description: 'Number of sine wave layers' },
-    { key: 'speed', label: 'Speed', min: 0.1, max: 2.0, step: 0.05, initial: 0.6, category: 'appearance', description: 'Animation speed' },
-    { key: 'scale', label: 'Scale', min: 1.0, max: 8.0, step: 0.25, initial: 3.0, category: 'appearance', description: 'Spatial frequency of patterns' },
-    { key: 'saturation', label: 'Saturation', min: 0.2, max: 1.0, step: 0.05, initial: 0.75, category: 'appearance' },
-    { key: 'paletteSpeed', label: 'Palette Speed', min: 0.0, max: 0.5, step: 0.01, initial: 0.1, category: 'appearance', description: 'Color palette rotation speed' },
+    {
+      key: 'complexity',
+      label: 'Complexity',
+      min: 2,
+      max: 8,
+      step: 1,
+      initial: 5,
+      category: 'appearance',
+      description: 'Number of sine wave layers',
+    },
+    {
+      key: 'speed',
+      label: 'Speed',
+      min: 0.1,
+      max: 2.0,
+      step: 0.05,
+      initial: 0.6,
+      category: 'appearance',
+      description: 'Animation speed',
+    },
+    {
+      key: 'scale',
+      label: 'Scale',
+      min: 1.0,
+      max: 8.0,
+      step: 0.25,
+      initial: 3.0,
+      category: 'appearance',
+      description: 'Spatial frequency of patterns',
+    },
+    {
+      key: 'saturation',
+      label: 'Saturation',
+      min: 0.2,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.75,
+      category: 'appearance',
+    },
+    {
+      key: 'paletteSpeed',
+      label: 'Palette Speed',
+      min: 0.0,
+      max: 0.5,
+      step: 0.01,
+      initial: 0.1,
+      category: 'appearance',
+      description: 'Color palette rotation speed',
+    },
     // Audio mapping
-    { key: 'bassToWarp', label: 'Bass -> Warp', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Bass warps spatial coordinates' },
-    { key: 'midToSpeed', label: 'Mid -> Speed', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Mids modulate animation speed' },
-    { key: 'spectralToHue', label: 'Spectral -> Hue', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Spectral centroid shifts color temperature' },
-    { key: 'rmsToIntensity', label: 'RMS -> Intensity', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Volume drives overall brightness' },
-    { key: 'beatToPulse', label: 'Beat -> Pulse', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Beats trigger contrast pulses' },
+    {
+      key: 'bassToWarp',
+      label: 'Bass -> Warp',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Bass warps spatial coordinates',
+    },
+    {
+      key: 'midToSpeed',
+      label: 'Mid -> Speed',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Mids modulate animation speed',
+    },
+    {
+      key: 'spectralToHue',
+      label: 'Spectral -> Hue',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Spectral centroid shifts color temperature',
+    },
+    {
+      key: 'rmsToIntensity',
+      label: 'RMS -> Intensity',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Volume drives overall brightness',
+    },
+    {
+      key: 'beatToPulse',
+      label: 'Beat -> Pulse',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Beats trigger contrast pulses',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
@@ -47,6 +141,8 @@ const plasmaMetadata: VisualizerMetadata = {
 };
 
 export class PlasmaVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = plasmaMetadata;
 
   private unsub: Unsubscribe;
@@ -77,16 +173,19 @@ export class PlasmaVisualizer implements Visualizer {
     high: new EMASmoothing(0.25),
     rms: new EMASmoothing(0.15),
     spectralCentroid: new EMASmoothing(0.08),
-    beatPulse: new EMASmoothing(0.4),
+    beatPulse: new EventEnvelope(),
   };
 
   private material: THREE.ShaderMaterial | null = null;
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
 
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
@@ -101,6 +200,7 @@ export class PlasmaVisualizer implements Visualizer {
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
+        u_paletteSpeedPhase: { value: 0 },
         u_time: { value: 0.0 },
         u_resolution: { value: new THREE.Vector2(1920, 1080) },
         u_zoom: { value: 1.0 },
@@ -128,37 +228,54 @@ export class PlasmaVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     // Effective speed modulated by mids
-    const effSpeed = this.userParams.speed
-      * (0.7 + this.smoothers.mid.value * 0.6 * this.userParams.midToSpeed);
+    const effSpeed =
+      this.userParams.speed *
+      (0.7 + this.smoothers.mid.value * 0.6 * this.userParams.midToSpeed);
 
     // Warp strength from bass
-    const warpStrength = this.smoothers.bass.value * 0.3 * this.userParams.bassToWarp;
+    const warpStrength =
+      this.smoothers.bass.value * 0.3 * this.userParams.bassToWarp;
 
     // Hue shift from spectral centroid
-    const hueShift = this.smoothers.spectralCentroid.value * 0.3 * this.userParams.spectralToHue;
+    const hueShift =
+      this.smoothers.spectralCentroid.value *
+      0.3 *
+      this.userParams.spectralToHue;
 
     // Intensity from RMS
-    const intensity = 0.6 + this.smoothers.rms.value * 0.8 * this.userParams.rmsToIntensity;
+    const intensity =
+      0.6 + this.smoothers.rms.value * 0.8 * this.userParams.rmsToIntensity;
 
     if (this.material) {
       const u = this.material.uniforms;
-      u.u_time.value = this.time * effSpeed;
+      u.u_time.value = this.phases.advance(
+        'animation',
+        effSpeed,
+        this.deltaSeconds,
+      );
       u.u_zoom.value = this._zoom;
       u.u_center.value.set(this._centerX, this._centerY);
       u.u_complexity.value = this.userParams.complexity;
@@ -166,12 +283,18 @@ export class PlasmaVisualizer implements Visualizer {
       u.u_scale.value = this.userParams.scale;
       u.u_saturation.value = this.userParams.saturation;
       u.u_paletteSpeed.value = this.userParams.paletteSpeed;
+      u.u_paletteSpeedPhase.value = this.phases.advance(
+        'u_paletteSpeed',
+        u.u_paletteSpeed.value,
+        this.deltaSeconds,
+      );
       u.u_bass.value = this.smoothers.bass.value;
       u.u_mid.value = this.smoothers.mid.value;
       u.u_high.value = this.smoothers.high.value;
       u.u_rms.value = this.smoothers.rms.value;
       u.u_spectralCentroid.value = this.smoothers.spectralCentroid.value;
-      u.u_beatPulse.value = this.smoothers.beatPulse.value * this.userParams.beatToPulse;
+      u.u_beatPulse.value =
+        this.smoothers.beatPulse.value * this.userParams.beatToPulse;
       u.u_warpStrength.value = warpStrength;
       u.u_hueShift.value = hueShift;
       u.u_intensity.value = intensity;
@@ -179,7 +302,8 @@ export class PlasmaVisualizer implements Visualizer {
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -241,6 +365,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   #define PI 3.14159265359
   #define TAU 6.28318530718
 
+  uniform float u_paletteSpeedPhase;
   uniform float u_time;
   uniform vec2 u_resolution;
   uniform float u_zoom;
@@ -291,16 +416,16 @@ const FRAGMENT_SHADER = /* glsl */ `
     int layers = int(u_complexity);
 
     // Layer 1: horizontal sine
-    value += sin(p.x + u_time);
+    value += (.25+.75*u_bass)*sin(p.x + u_time);
 
     // Layer 2: vertical sine
     if (layers >= 2) {
-      value += sin(p.y + u_time * 1.1);
+      value += (.25+.75*u_mid)*sin(p.y + u_time * 1.1);
     }
 
     // Layer 3: diagonal sine
     if (layers >= 3) {
-      value += sin((p.x + p.y) * 0.707 + u_time * 0.8);
+      value += (.25+.75*u_high)*sin((p.x + p.y) * 0.707 + u_time * 0.8);
     }
 
     // Layer 4: circular pattern
@@ -337,7 +462,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     value /= float(layers) * 0.5;
 
     // Map to color using palette
-    float paletteT = value * 0.5 + 0.5 + u_time * u_paletteSpeed;
+    float paletteT = value * 0.5 + 0.5 + u_paletteSpeedPhase;
     vec3 color = palette(paletteT, u_hueShift);
 
     // Desaturate control

@@ -6,9 +6,15 @@ import type { AudioFeatures } from '@cybernoetica/core';
 describe('LyapunovVisualizer', () => {
   const features: AudioFeatures = {
     fftBins: new Float32Array(1024).fill(0.3),
-    bass: 0.6, mid: 0.4, high: 0.5,
-    spectralCentroid: 0.5, spectralFlux: 0.25, rms: 0.5,
-    beatOnset: true, beatConfidence: 0.75, degraded: false,
+    bass: 0.6,
+    mid: 0.4,
+    high: 0.5,
+    spectralCentroid: 0.5,
+    spectralFlux: 0.25,
+    rms: 0.5,
+    beatOnset: true,
+    beatConfidence: 0.75,
+    degraded: false,
   };
 
   it('can be constructed', () => {
@@ -21,7 +27,7 @@ describe('LyapunovVisualizer', () => {
     const bus = new MessageBus();
     const viz = new LyapunovVisualizer(bus);
     expect(viz.metadata.type).toBe('lyapunov');
-    expect(viz.metadata.label).toBe('Lyapunov Fractal');
+    expect(viz.metadata.label).toBe('Lyapunov');
     expect(viz.metadata.usesPerspective).toBe(false);
     expect(viz.metadata.viewport.pan).toBe(true);
     expect(viz.metadata.viewport.zoom).toBe(true);
@@ -30,7 +36,9 @@ describe('LyapunovVisualizer', () => {
   it('has audio-mapping params', () => {
     const bus = new MessageBus();
     const viz = new LyapunovVisualizer(bus);
-    const audioParams = viz.metadata.params.filter(p => p.category === 'audio-mapping');
+    const audioParams = viz.metadata.params.filter(
+      (p) => p.category === 'audio-mapping',
+    );
     expect(audioParams.length).toBeGreaterThanOrEqual(4);
   });
 

@@ -5,18 +5,41 @@ import type { VisualizerType } from './ui/index.js';
 import type { LogDisplayMode } from './ui/log-display.js';
 import { paramSlider } from './ui/components.js';
 import { AudioPipeline } from './managers/audio-pipeline.js';
+import { SourceController } from './managers/source-controller.js';
 import { TrackManager } from './managers/track-manager.js';
 import { VisualizerManager } from './managers/visualizer-manager.js';
 import { PlaybackStateMachine } from './managers/playback-state.js';
 import { QualityManager } from './managers/quality-manager.js';
 import { createAppStore } from './store.js';
 import type { QualityMode } from './store.js';
-import { resolveLaunchConfig, resolveAudioTarget } from './utils/launch-params.js';
+import {
+  resolveLaunchConfig,
+  resolveAudioTarget,
+} from './utils/launch-params.js';
 import type { CyberNoeticaGlobals } from './globals.js';
 import type { SoundscapeParams } from '@cybernoetica/audio';
 import './globals.js';
 
 export async function createApp(container: HTMLElement): Promise<void> {
+  let disposed = false;
+  let launchGeneration = 0;
+  let transportGeneration = 0;
+  const listeners = new AbortController();
+  const cleanups: Array<() => void> = [];
+  window.addEventListener(
+    'pagehide',
+    (event) => {
+      if (event.persisted) return;
+      disposed = true;
+      launchGeneration++;
+      transportGeneration++;
+      listeners.abort();
+      for (const cleanup of cleanups.reverse()) cleanup();
+      delete window.__cybernoetica;
+      delete window.__cybernoetica_debug;
+    },
+    { signal: listeners.signal },
+  );
   const bus = new MessageBus();
   const store = createAppStore();
 
@@ -25,16 +48,32 @@ export async function createApp(container: HTMLElement): Promise<void> {
     container.clientHeight || window.innerHeight,
   );
   scene.attach(container);
+  cleanups.push(() => scene.dispose());
 
-  window.__cybernoetica = { store, bus, scene, powerSaver: false, setPowerSaver: () => {} } as CyberNoeticaGlobals;
+  window.__cybernoetica = {
+    store,
+    bus,
+    scene,
+    powerSaver: false,
+    setPowerSaver: () => {},
+  } as CyberNoeticaGlobals;
 
   const audio = new AudioPipeline(bus);
+  cleanups.push(() => audio.destroy());
+  bus.subscribe<{ backend: 'worklet' | 'main-thread' }>(
+    'audio:backend',
+    (message) =>
+      store.setState({ audio: { backend: message.payload.backend } }),
+  );
   await audio.init();
-  store.setState({ audio: { wasm: audio.isWasm() } });
+  if (disposed) return;
+  store.setState({ audio: { wasm: false, backend: audio.getBackend() } });
 
   const vizManager = new VisualizerManager(bus, scene);
+  cleanups.push(() => vizManager.dispose());
   const trackManager = new TrackManager(audio.source);
   const sampleTracks = await trackManager.fetchSampleTracks();
+  if (disposed) return;
   const playback = new PlaybackStateMachine(bus);
 
   // Quality tier + adaptive governor. Owns pixel-ratio and frame cadence.
@@ -51,7 +90,14 @@ export async function createApp(container: HTMLElement): Promise<void> {
   const savedQuality = store.getState().ui.quality ?? 'auto';
   quality.setMode(savedQuality);
 
-  const QUALITY_CYCLE: QualityMode[] = ['auto', 'sub-performance', 'performance', 'balanced', 'high', 'ultra'];
+  const QUALITY_CYCLE: QualityMode[] = [
+    'auto',
+    'sub-performance',
+    'performance',
+    'balanced',
+    'high',
+    'ultra',
+  ];
   window.__cybernoetica!.playback = playback;
   window.__cybernoetica!.vizManager = vizManager;
   window.__cybernoetica!.quality = {
@@ -70,15 +116,24 @@ export async function createApp(container: HTMLElement): Promise<void> {
     },
   };
 
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'q' || e.key === 'Q') {
-      if (e.target instanceof HTMLElement) {
-        const tag = e.target.tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target.isContentEditable) return;
+  window.addEventListener(
+    'keydown',
+    (e) => {
+      if (e.key === 'q' || e.key === 'Q') {
+        if (e.target instanceof HTMLElement) {
+          const tag = e.target.tagName;
+          if (
+            tag === 'INPUT' ||
+            tag === 'TEXTAREA' ||
+            e.target.isContentEditable
+          )
+            return;
+        }
+        window.__cybernoetica!.quality!.cycle();
       }
-      window.__cybernoetica!.quality!.cycle();
-    }
-  });
+    },
+    { signal: listeners.signal },
+  );
 
   const saved = store.getState();
   if (saved.ui.autoPlay !== undefined || saved.ui.shuffle !== undefined) {
@@ -104,39 +159,30 @@ export async function createApp(container: HTMLElement): Promise<void> {
 
   // Centralized track loading with state machine integration
   async function loadAndPlayTrack(url: string, name: string): Promise<void> {
-    if (!playback.canDispatch('SELECT_TRACK') && !playback.canDispatch('NEXT_TRACK')) {
-      if (playback.canDispatch('START')) {
-        playback.dispatch({ type: 'START' });
-      } else {
-        return;
-      }
-    } else {
-      playback.dispatch({ type: 'SELECT_TRACK' });
-    }
-
-    try {
-      const loaded = await trackManager.loadTrack(url);
-      if (!loaded) return; // superseded by a newer request
-      playback.dispatch({ type: 'LOADED' });
-      ui.setActiveTrack(name);
-      ui.setPlaying(true);
-      ui.setActiveAudioSource('file');
-      store.setState({ audio: { trackName: name, source: 'file' } });
-    } catch (err) {
-      playback.dispatch({ type: 'ERROR', error: (err as Error).message });
-      ui.showError(`Failed to load track: ${(err as Error).message}`);
-    }
+    await sourceController.select(name, 'file', () =>
+      trackManager.loadTrack(url),
+    );
   }
 
   function renderParamSliderRow(
     ctr: HTMLElement,
-    param: { key: string; label: string; description?: string; min: number; max: number; step: number; initial: number },
+    param: {
+      key: string;
+      label: string;
+      description?: string;
+      min: number;
+      max: number;
+      step: number;
+      initial: number;
+    },
     viz: { setUserParam(key: string, value: number): void },
   ) {
-    ctr.appendChild(paramSlider({
-      ...param,
-      onChange: (key, val) => viz.setUserParam(key, val),
-    }));
+    ctr.appendChild(
+      paramSlider({
+        ...param,
+        onChange: (key, val) => viz.setUserParam(key, val),
+      }),
+    );
   }
 
   function updateAppearanceControls() {
@@ -165,8 +211,10 @@ export async function createApp(container: HTMLElement): Promise<void> {
       return;
     }
     const params = viz.metadata.params;
-    const appearanceParams = params.filter(p => (p.category ?? 'appearance') === 'appearance');
-    const audioParams = params.filter(p => p.category === 'audio-mapping');
+    const appearanceParams = params.filter(
+      (p) => (p.category ?? 'appearance') === 'appearance',
+    );
+    const audioParams = params.filter((p) => p.category === 'audio-mapping');
 
     ui.setAppearanceRenderer((ctr: HTMLElement) => {
       for (const param of appearanceParams) {
@@ -180,8 +228,11 @@ export async function createApp(container: HTMLElement): Promise<void> {
 
         const sectionEl = document.createElement('div');
         Object.assign(sectionEl.style, {
-          fontSize: '10px', fontWeight: '500', letterSpacing: '0.2em',
-          textTransform: 'uppercase', color: 'rgba(255,255,255,0.3)',
+          fontSize: '10px',
+          fontWeight: '500',
+          letterSpacing: '0.2em',
+          textTransform: 'uppercase',
+          color: 'rgba(255,255,255,0.3)',
           fontFamily: 'system-ui, -apple-system, sans-serif',
           marginBottom: '10px',
         });
@@ -197,8 +248,37 @@ export async function createApp(container: HTMLElement): Promise<void> {
 
   // UI
   const ui = createUI();
+  cleanups.push(() => ui.destroy());
+  vizManager.onSwitch((type, state, error) => {
+    if (state !== 'error') return;
+    ui.showControls();
+    ui.showError(
+      `Visualizer ${type} could not load: ${error?.message ?? 'unknown error'}. Choose another visualizer or reload.`,
+    );
+  });
   ui.setSampleTracks(sampleTracks);
+  ui.onAnalysisGainChange((gain) => audio.source.setAnalysisGain(gain));
+  const sourceController = new SourceController(
+    audio.source,
+    playback,
+    (name, type) => {
+      ui.setActiveTrack(name);
+      ui.setPlaying(true);
+      ui.setActiveAudioSource(type);
+      store.setState({ audio: { trackName: name, source: type } });
+      if (type === 'soundscape')
+        ui.setSoundscapeParams(audio.source.getSoundscapeParams());
+    },
+    (message) => {
+      ui.showControls();
+      ui.setPlaying(false);
+      ui.showError(
+        `Audio could not start: ${message}. Choose a source in Sound or retry.`,
+      );
+    },
+  );
 
+  cleanups.push(() => sourceController.cancel());
   const launchConfig = resolveLaunchConfig();
 
   if (launchConfig.mute) {
@@ -219,6 +299,8 @@ export async function createApp(container: HTMLElement): Promise<void> {
   }
 
   async function startApp(vizType?: string, audioId?: string) {
+    const generation = ++launchGeneration;
+    const sourceRevision = sourceController.revision;
     // Start rAF early so the loading indicator (if any) renders. switchTo
     // is async now because the selected visualizer may not yet be loaded.
     scene.start();
@@ -228,11 +310,14 @@ export async function createApp(container: HTMLElement): Promise<void> {
     } else {
       await vizManager.switchRandom();
     }
+    if (disposed || generation !== launchGeneration) return;
     updateAppearanceControls();
+    ui.showControls();
     const activeType = vizManager.getActiveType();
     ui.setActiveVisualizer(activeType as VisualizerType);
     store.setState({ visualizer: { type: activeType, userParams: {} } });
 
+    if (sourceController.revision !== sourceRevision) return;
     const audioTarget = audioId
       ? resolveAudioTarget(audioId, sampleTracks)
       : null;
@@ -248,107 +333,86 @@ export async function createApp(container: HTMLElement): Promise<void> {
     } else {
       const track = trackManager.getRandomTrack();
       if (track) startWithTrack(track.url, track.name);
+      else
+        void sourceController.select('No audio', 'none', () =>
+          audio.source.useSilence(),
+        );
     }
   }
 
   function startWithTrack(url: string, name: string) {
-    playback.dispatch({ type: 'START' });
-    trackManager.loadTrack(url)
-      .then((loaded) => {
-        if (!loaded) return;
-        playback.dispatch({ type: 'LOADED' });
-        ui.setActiveTrack(name);
-        ui.setPlaying(true);
-        ui.setActiveAudioSource('file');
-        store.setState({ audio: { trackName: name, source: 'file' } });
-      })
-      .catch(err => {
-        playback.dispatch({ type: 'ERROR', error: (err as Error).message });
-        ui.showError(`Failed to load track: ${(err as Error).message}`);
-      });
+    void loadAndPlayTrack(url, name);
   }
 
-  async function startSystemAudio() {
-    try {
-      playback.dispatch({ type: 'START' });
-      await audio.source.resume();
-      await audio.source.useSystemAudio();
-      playback.dispatch({ type: 'LOADED' });
-      ui.setActiveTrack('System Audio');
-      ui.setPlaying(true);
-      ui.setActiveAudioSource('system');
-      store.setState({ audio: { trackName: 'System Audio', source: 'system' } });
-    } catch (err) {
-      playback.dispatch({ type: 'ERROR', error: (err as Error).message });
-      ui.showError(`System audio capture failed: ${(err as Error).message}`);
-    }
+  function startSystemAudio() {
+    return sourceController.select('System Audio', 'system', () =>
+      audio.source.useSystemAudio(),
+    );
   }
 
-  async function startMicrophone() {
-    try {
-      playback.dispatch({ type: 'START' });
-      await audio.source.resume();
-      await audio.source.useMicrophone();
-      playback.dispatch({ type: 'LOADED' });
-      ui.setActiveTrack('Microphone');
-      ui.setPlaying(true);
-      ui.setActiveAudioSource('mic');
-      store.setState({ audio: { trackName: 'Microphone', source: 'mic' } });
-    } catch (err) {
-      playback.dispatch({ type: 'ERROR', error: (err as Error).message });
-      ui.showError(`Microphone access denied: ${(err as Error).message}`);
-    }
+  function startMicrophone() {
+    return sourceController.select('Microphone', 'mic', () =>
+      audio.source.useMicrophone(),
+    );
   }
 
-  async function startSoundscape(params?: Partial<SoundscapeParams>) {
-    try {
-      const canSwitch = playback.canDispatch('SWITCH_SOURCE');
-      if (canSwitch) {
-        playback.dispatch({ type: 'SWITCH_SOURCE', source: 'soundscape' });
-      } else if (playback.canDispatch('START')) {
-        playback.dispatch({ type: 'START' });
-      }
-      await audio.source.resume();
-      audio.source.startSoundscape(params ?? audio.source.getSoundscapeParams());
-      if (canSwitch) {
-        playback.dispatch({ type: 'SOURCE_READY' });
-      } else {
-        playback.dispatch({ type: 'LOADED' });
-      }
-      const current = audio.source.getSoundscapeParams();
-      ui.setSoundscapeParams(current);
-      ui.setActiveTrack('Soundscape Loop');
-      ui.setPlaying(true);
-      ui.setActiveAudioSource('soundscape');
-      store.setState({ audio: { trackName: 'Soundscape Loop', source: 'soundscape' } });
-    } catch (err) {
-      playback.dispatch({ type: 'ERROR', error: (err as Error).message });
-      ui.showError(`Soundscape loop failed: ${(err as Error).message}`);
-    }
+  function startSoundscape(params?: Partial<SoundscapeParams>) {
+    return sourceController.select('Soundscape Loop', 'soundscape', () => {
+      audio.source.startSoundscape(
+        params ?? audio.source.getSoundscapeParams(),
+      );
+      return true;
+    });
   }
 
-  if (launchConfig.autoStart) {
+  ui.onStart(() => {
     void startApp(launchConfig.visualizer, launchConfig.audioSource);
-  } else {
-    ui.onStart(() => { void startApp(); });
-  }
+  });
+  if (launchConfig.autoStart)
+    void startApp(launchConfig.visualizer, launchConfig.audioSource);
 
   ui.onPause(() => {
     if (!playback.canDispatch('PAUSE')) return;
     playback.dispatch({ type: 'PAUSE' });
-    audio.source.suspend();
+    const generation = ++transportGeneration;
+    void audio.source.suspend().catch((error) => {
+      if (disposed || generation !== transportGeneration) return;
+      ui.showError(`Audio could not pause: ${String(error)}`);
+    });
     ui.setPlaying(false);
   });
 
   ui.onResume(() => {
+    if (playback.isIdle) {
+      void startApp(vizManager.getActiveType());
+      return;
+    }
     if (!playback.canDispatch('RESUME')) return;
-    playback.dispatch({ type: 'RESUME' });
-    audio.source.resume();
-    ui.setPlaying(true);
+    const generation = ++transportGeneration,
+      sourceRevision = sourceController.revision;
+    void audio.source
+      .resume()
+      .then(() => {
+        if (
+          disposed ||
+          generation !== transportGeneration ||
+          sourceRevision !== sourceController.revision
+        )
+          return;
+        if (playback.canDispatch('RESUME')) {
+          playback.dispatch({ type: 'RESUME' });
+          ui.setPlaying(true);
+        }
+      })
+      .catch((error) => {
+        if (!disposed && generation === transportGeneration)
+          ui.showError(`Audio could not resume: ${String(error)}`);
+      });
   });
 
   ui.onVisualizerChange((type) => {
-    void vizManager.switchTo(type).then(() => {
+    void vizManager.switchTo(type).then((viz) => {
+      if (!viz || disposed) return;
       updateAppearanceControls();
       ui.setActiveVisualizer(type);
       ui.updateKeyboardShortcuts();
@@ -357,7 +421,8 @@ export async function createApp(container: HTMLElement): Promise<void> {
   });
 
   ui.onRandomVisualizer(() => {
-    void vizManager.switchRandom(vizManager.getActiveType()).then(() => {
+    void vizManager.switchRandom(vizManager.getActiveType()).then((viz) => {
+      if (!viz || disposed) return;
       updateAppearanceControls();
       const type = vizManager.getActiveType();
       ui.setActiveVisualizer(type as VisualizerType);
@@ -382,55 +447,16 @@ export async function createApp(container: HTMLElement): Promise<void> {
     if (track) loadAndPlayTrack(track.url, track.name);
   });
 
-  ui.onFileSelect(async (file) => {
-    try {
-      const wasPlaying = playback.isPlaying || playback.isPaused;
-      if (wasPlaying) {
-        playback.dispatch({ type: 'SWITCH_SOURCE', source: 'file' });
-      } else if (playback.canDispatch('START')) {
-        playback.dispatch({ type: 'START' });
-      }
-      await audio.source.resume();
-      await audio.source.loadFile(file);
-      if (wasPlaying) {
-        playback.dispatch({ type: 'SOURCE_READY' });
-      } else {
-        playback.dispatch({ type: 'LOADED' });
-      }
-      const name = file.name.replace(/\.[^.]+$/, '');
-      ui.setActiveTrack(name);
-      ui.setPlaying(true);
-      ui.setActiveAudioSource('file');
-      store.setState({ audio: { trackName: name, source: 'file' } });
-    } catch (err) {
-      playback.dispatch({ type: 'ERROR', error: (err as Error).message });
-      ui.showError(`Failed to load audio: ${(err as Error).message}`);
-    }
+  ui.onFileSelect((file) => {
+    void sourceController.select(
+      file.name.replace(/\.[^.]+$/, ''),
+      'file',
+      () => audio.source.loadFile(file),
+    );
   });
 
-  ui.onMicClick(async () => {
-    try {
-      const canSwitch = playback.canDispatch('SWITCH_SOURCE');
-      if (canSwitch) {
-        playback.dispatch({ type: 'SWITCH_SOURCE', source: 'mic' });
-      } else if (playback.canDispatch('START')) {
-        playback.dispatch({ type: 'START' });
-      }
-      await audio.source.resume();
-      await audio.source.useMicrophone();
-      if (canSwitch) {
-        playback.dispatch({ type: 'SOURCE_READY' });
-      } else {
-        playback.dispatch({ type: 'LOADED' });
-      }
-      ui.setActiveTrack('Microphone');
-      ui.setPlaying(true);
-      ui.setActiveAudioSource('mic');
-      store.setState({ audio: { trackName: 'Microphone', source: 'mic' } });
-    } catch (err) {
-      playback.dispatch({ type: 'ERROR', error: (err as Error).message });
-      ui.showError(`Microphone access denied: ${(err as Error).message}`);
-    }
+  ui.onMicClick(() => {
+    void startMicrophone();
   });
 
   ui.onAutoPlayChange((enabled, shuffle) => {
@@ -438,29 +464,13 @@ export async function createApp(container: HTMLElement): Promise<void> {
     store.setState({ ui: { autoPlay: enabled, shuffle } });
   });
 
-  ui.onSystemAudio(async () => {
-    try {
-      const canSwitch = playback.canDispatch('SWITCH_SOURCE');
-      if (canSwitch) {
-        playback.dispatch({ type: 'SWITCH_SOURCE', source: 'system' });
-      } else if (playback.canDispatch('START')) {
-        playback.dispatch({ type: 'START' });
-      }
-      await audio.source.resume();
-      await audio.source.useSystemAudio();
-      if (canSwitch) {
-        playback.dispatch({ type: 'SOURCE_READY' });
-      } else {
-        playback.dispatch({ type: 'LOADED' });
-      }
-      ui.setActiveTrack('System Audio');
-      ui.setPlaying(true);
-      ui.setActiveAudioSource('system');
-      store.setState({ audio: { trackName: 'System Audio', source: 'system' } });
-    } catch (err) {
-      playback.dispatch({ type: 'ERROR', error: (err as Error).message });
-      ui.showError(`System audio capture failed: ${(err as Error).message}`);
-    }
+  ui.onNoAudio(() => {
+    void sourceController.select('No audio', 'none', () =>
+      audio.source.useSilence(),
+    );
+  });
+  ui.onSystemAudio(() => {
+    void startSystemAudio();
   });
 
   ui.onSoundscapeLoop(() => {
@@ -472,12 +482,16 @@ export async function createApp(container: HTMLElement): Promise<void> {
     ui.setSoundscapeParams(audio.source.getSoundscapeParams());
   });
 
-  window.addEventListener('resize', () => {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    scene.resize(w, h);
-    vizManager.resize(w, h);
-  });
+  window.addEventListener(
+    'resize',
+    () => {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      scene.resize(w, h);
+      vizManager.resize(w, h);
+    },
+    { signal: listeners.signal },
+  );
 
   // Render loop. Frame cadence is owned by QualityManager — it decides when to
   // skip frames (60 Hz cap, auto governor stepping). The gate below short-circuits
@@ -488,21 +502,23 @@ export async function createApp(container: HTMLElement): Promise<void> {
   let frameCount = 0;
   let fps = 0;
   let fpsTimer = performance.now();
-  let shouldRenderThisFrame = false;
 
-  // Legacy compat — powerSaver now just toggles between auto and performance tier.
+  // Power saver caps both simulation updates and draw submission to 30 Hz.
   window.__cybernoetica!.powerSaver = false;
   window.__cybernoetica!.setPowerSaver = (enabled: boolean) => {
     window.__cybernoetica!.powerSaver = enabled;
-    quality.setMode(enabled ? 'performance' : 'auto');
+    quality.setPowerSaver(enabled);
   };
 
-  scene.setFrameGate(() => shouldRenderThisFrame);
+  scene.setFrameGate(() => {
+    const timing = scene.getWorkTiming();
+    quality.sampleWork(timing.cpuMs, timing.gpuMs);
+    return quality.tick(performance.now());
+  });
 
   scene.onRender(() => {
     const now = performance.now();
-    shouldRenderThisFrame = quality.tick(now);
-    if (!shouldRenderThisFrame) return;
+    const timing = scene.getWorkTiming();
 
     frameCount++;
     if (now - fpsTimer >= 1000) {
@@ -513,19 +529,27 @@ export async function createApp(container: HTMLElement): Promise<void> {
     const frameTime = now - lastRenderMs;
     lastRenderMs = now;
 
+    const preferences = store.getState().ui;
     if (playback.isPlaying) {
-      audio.pushFrame();
-      pauseFade = Math.min(1.0, pauseFade + 0.02);
+      audio.pushFrame(preferences.reduceFlashes);
+      pauseFade = Math.min(1.0, pauseFade + frameTime * 0.0012);
     } else {
-      pauseFade = Math.max(0.0, pauseFade - 0.008);
+      pauseFade = Math.max(0.0, pauseFade - frameTime * 0.00048);
       audio.pushSilent(pauseFade * 0.05);
     }
-    vizManager.tick();
+    scene.setFlashReduction(preferences.reduceFlashes);
+    vizManager.tick(
+      Math.min(0.1, frameTime / 1000) * (preferences.reducedMotion ? 0.25 : 1),
+    );
 
     if (frameCount % 6 === 0) {
       const snap = quality.getDebugSnapshot();
       window.__cybernoetica_debug = {
-        fps, frameTime: Math.round(frameTime * 10) / 10,
+        fps,
+        frameTime: Math.round(frameTime * 10) / 10,
+        cpuMs: timing.cpuMs,
+        gpuMs: timing.gpuMs,
+        targetFps: quality.getTargetFps(),
         vizType: vizManager.getActiveType(),
         playbackState: playback.state,
         qualityTier: snap.tier,

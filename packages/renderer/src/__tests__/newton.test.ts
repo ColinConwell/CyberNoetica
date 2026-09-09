@@ -15,9 +15,15 @@ describe('NewtonVisualizer', () => {
     const viz = new NewtonVisualizer(bus);
     const features: AudioFeatures = {
       fftBins: new Float32Array(1024).fill(0.3),
-      bass: 0.5, mid: 0.6, high: 0.4,
-      spectralCentroid: 0.5, spectralFlux: 0.2, rms: 0.6,
-      beatOnset: true, beatConfidence: 0.8, degraded: false,
+      bass: 0.5,
+      mid: 0.6,
+      high: 0.4,
+      spectralCentroid: 0.5,
+      spectralFlux: 0.2,
+      rms: 0.6,
+      beatOnset: true,
+      beatConfidence: 0.8,
+      degraded: false,
     };
     bus.publish('audio:features', features);
     viz.tick();
@@ -27,7 +33,7 @@ describe('NewtonVisualizer', () => {
   it('has correct metadata', () => {
     const bus = new MessageBus();
     const viz = new NewtonVisualizer(bus);
-    expect(viz.metadata.label).toBe('Newton Fractal');
+    expect(viz.metadata.label).toBe('Newton');
     expect(viz.metadata.usesPerspective).toBe(false);
     expect(viz.metadata.viewport.pan).toBe(true);
     expect(viz.metadata.viewport.zoom).toBe(true);
@@ -36,7 +42,9 @@ describe('NewtonVisualizer', () => {
   it('has audio-mapping params', () => {
     const bus = new MessageBus();
     const viz = new NewtonVisualizer(bus);
-    const audioParams = viz.metadata.params.filter(p => p.category === 'audio-mapping');
+    const audioParams = viz.metadata.params.filter(
+      (p) => p.category === 'audio-mapping',
+    );
     expect(audioParams.length).toBeGreaterThanOrEqual(4);
   });
 

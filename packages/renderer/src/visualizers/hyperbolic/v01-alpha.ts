@@ -1,7 +1,12 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -25,27 +30,141 @@ const hyperbolicMetadata: VisualizerMetadata = {
   usesPerspective: false,
   params: [
     // Appearance
-    { key: 'pGon', label: 'P-gon Sides', min: 3, max: 10, step: 1, initial: 5, category: 'appearance', description: 'Number of sides per polygon' },
-    { key: 'qMeet', label: 'Q Meeting', min: 3, max: 8, step: 1, initial: 4, category: 'appearance', description: 'Polygons meeting at each vertex' },
-    { key: 'lineThickness', label: 'Line Width', min: 0.005, max: 0.06, step: 0.005, initial: 0.02, category: 'appearance' },
-    { key: 'flowSpeed', label: 'Flow Speed', min: 0.0, max: 0.5, step: 0.02, initial: 0.08, category: 'appearance' },
-    { key: 'rotationSpeed', label: 'Rotation', min: 0.0, max: 0.3, step: 0.01, initial: 0.05, category: 'appearance' },
-    { key: 'colorCycle', label: 'Color Cycle', min: 0.0, max: 1.0, step: 0.05, initial: 0.15, category: 'appearance' },
+    {
+      key: 'pGon',
+      label: 'P-gon Sides',
+      min: 3,
+      max: 10,
+      step: 1,
+      initial: 5,
+      category: 'appearance',
+      description: 'Number of sides per polygon',
+    },
+    {
+      key: 'qMeet',
+      label: 'Q Meeting',
+      min: 3,
+      max: 8,
+      step: 1,
+      initial: 4,
+      category: 'appearance',
+      description:
+        'Polygons per vertex; increased when needed for a hyperbolic pair',
+    },
+    {
+      key: 'lineThickness',
+      label: 'Line Width',
+      min: 0.005,
+      max: 0.06,
+      step: 0.005,
+      initial: 0.02,
+      category: 'appearance',
+    },
+    {
+      key: 'flowSpeed',
+      label: 'Flow Speed',
+      min: 0.0,
+      max: 0.5,
+      step: 0.02,
+      initial: 0.08,
+      category: 'appearance',
+    },
+    {
+      key: 'rotationSpeed',
+      label: 'Rotation',
+      min: 0.0,
+      max: 0.3,
+      step: 0.01,
+      initial: 0.05,
+      category: 'appearance',
+    },
+    {
+      key: 'colorCycle',
+      label: 'Color Cycle',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.15,
+      category: 'appearance',
+    },
     // Audio mapping
-    { key: 'bassToFlow', label: 'Bass \u2192 Flow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Bass drives hyperbolic translation' },
-    { key: 'midToRotation', label: 'Mid \u2192 Rotation', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Mids drive Mobius rotation' },
-    { key: 'rmsToFill', label: 'RMS \u2192 Fill', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Volume controls tile fill opacity' },
-    { key: 'highToEdge', label: 'High \u2192 Edge', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'High frequencies light up geodesic edges' },
-    { key: 'beatFlash', label: 'Beat \u2192 Flash', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Beats flash the boundary circle' },
+    {
+      key: 'bassToFlow',
+      label: 'Bass \u2192 Flow',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Bass drives hyperbolic translation',
+    },
+    {
+      key: 'midToRotation',
+      label: 'Mid \u2192 Rotation',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Mids drive Mobius rotation',
+    },
+    {
+      key: 'rmsToFill',
+      label: 'RMS \u2192 Fill',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Volume controls tile fill opacity',
+    },
+    {
+      key: 'highToEdge',
+      label: 'High \u2192 Edge',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'High frequencies light up geodesic edges',
+    },
+    {
+      key: 'beatFlash',
+      label: 'Beat \u2192 Flash',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Beats flash the boundary circle',
+    },
   ],
   viewport: { pan: false, zoom: true, orbit: false },
   viewStateFields: [
+    {
+      key: 'effectiveP',
+      label: 'Effective p',
+      min: 3,
+      max: 12,
+      step: 1,
+      readOnly: true,
+    },
+    {
+      key: 'effectiveQ',
+      label: 'Effective q',
+      min: 3,
+      max: 12,
+      step: 1,
+      readOnly: true,
+    },
     { key: 'zoom', label: 'Zoom', min: 0.5, max: 3.0, step: 0.05 },
     { key: 'rotation', label: 'Rotation', min: 0, max: 6.283, step: 0.01 },
   ],
 };
 
 export class HyperbolicVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = hyperbolicMetadata;
 
   private unsub: Unsubscribe;
@@ -78,16 +197,19 @@ export class HyperbolicVisualizer implements Visualizer {
     high: new EMASmoothing(0.22),
     rms: new EMASmoothing(0.15),
     spectralCentroid: new EMASmoothing(0.1),
-    beatPulse: new EMASmoothing(0.5),
+    beatPulse: new EventEnvelope(),
   };
 
   private material: THREE.ShaderMaterial | null = null;
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
 
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
@@ -98,10 +220,11 @@ export class HyperbolicVisualizer implements Visualizer {
   }
 
   attach(scene: THREE.Scene): void {
-    this.material = new THREE.RawShaderMaterial({
+    this.material = new THREE.ShaderMaterial({
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
+        u_colorCyclePhase: { value: 0 },
         u_time: { value: 0.0 },
         u_resolution: { value: new THREE.Vector2(1920, 1080) },
         u_zoom: { value: 1.0 },
@@ -128,39 +251,54 @@ export class HyperbolicVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     const bass = this.smoothers.bass.value;
     const mid = this.smoothers.mid.value;
 
     // Flow: hyperbolic translation driven by bass
-    const flowSpeed = this.userParams.flowSpeed + bass * 0.15 * this.userParams.bassToFlow;
-    this.flowPhase += flowSpeed / 60;
+    const flowSpeed =
+      this.userParams.flowSpeed + bass * 0.15 * this.userParams.bassToFlow;
+    this.flowPhase += flowSpeed * this.deltaSeconds;
 
     // Auto rotation driven by mids
-    const rotSpeed = this.userParams.rotationSpeed + mid * 0.1 * this.userParams.midToRotation;
-    this.autoRotation += rotSpeed / 60;
+    const rotSpeed =
+      this.userParams.rotationSpeed + mid * 0.1 * this.userParams.midToRotation;
+    this.autoRotation += rotSpeed * this.deltaSeconds;
 
     if (this.material) {
       const u = this.material.uniforms;
       u.u_time.value = this.time;
       u.u_zoom.value = this._zoom;
-      u.u_rotation.value = this.viewOverrides.rotation ? this._rotation : this.autoRotation;
+      u.u_rotation.value = this.viewOverrides.rotation
+        ? this._rotation
+        : this.autoRotation;
       u.u_p.value = Math.floor(this.userParams.pGon);
-      u.u_q.value = Math.floor(this.userParams.qMeet);
+      // Hyperbolic triangles require 1/p + 1/q < 1/2.
+      u.u_q.value = Math.max(
+        Math.floor(this.userParams.qMeet),
+        Math.floor((2 * u.u_p.value) / (u.u_p.value - 2)) + 1,
+      );
       u.u_lineWidth.value = this.userParams.lineThickness;
       u.u_flowPhase.value = this.flowPhase;
       u.u_colorCycle.value = this.userParams.colorCycle;
@@ -169,14 +307,22 @@ export class HyperbolicVisualizer implements Visualizer {
       u.u_high.value = this.smoothers.high.value;
       u.u_rms.value = this.smoothers.rms.value;
       u.u_spectralCentroid.value = this.smoothers.spectralCentroid.value;
-      u.u_beatPulse.value = this.smoothers.beatPulse.value;
+      u.u_beatPulse.value =
+        this.smoothers.beatPulse.value * this.userParams.beatFlash;
       u.u_rmsToFill.value = this.userParams.rmsToFill;
       u.u_highToEdge.value = this.userParams.highToEdge;
     }
+    if (this.material)
+      this.material.uniforms.u_colorCyclePhase.value = this.phases.advance(
+        'u_colorCyclePhase',
+        this.material.uniforms.u_colorCycle.value,
+        this.deltaSeconds,
+      );
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -187,8 +333,18 @@ export class HyperbolicVisualizer implements Visualizer {
 
   getViewState(): Record<string, number> {
     return {
+      effectiveP: Math.floor(this.userParams.pGon),
+      effectiveQ: Math.max(
+        Math.floor(this.userParams.qMeet),
+        Math.floor(
+          (2 * Math.floor(this.userParams.pGon)) /
+            (Math.floor(this.userParams.pGon) - 2),
+        ) + 1,
+      ),
       zoom: this._zoom,
-      rotation: this.viewOverrides.rotation ? this._rotation : this.autoRotation % (Math.PI * 2),
+      rotation: this.viewOverrides.rotation
+        ? this._rotation
+        : this.autoRotation % (Math.PI * 2),
     };
   }
 
@@ -218,8 +374,6 @@ registerVisualizer({
 // ── Shaders ────────────────────────────────────────────
 
 const VERTEX_SHADER = /* glsl */ `
-  attribute vec3 position;
-  attribute vec2 uv;
   varying vec2 vUv;
   void main() {
     vUv = uv;
@@ -243,6 +397,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   uniform float u_lineWidth;
   uniform float u_flowPhase;
   uniform float u_colorCycle;
+  uniform float u_colorCyclePhase;
   uniform float u_bass;
   uniform float u_mid;
   uniform float u_high;
@@ -316,7 +471,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     }
 
     // Apply animated hyperbolic translation (flow)
-    vec2 z = hypTranslate(uv, u_flowPhase * 0.5, u_time * 0.2);
+    vec2 z = hypTranslate(uv, 2.0 * sin(u_flowPhase * 0.25), u_time * 0.2);
 
     // ── Tessellation via reflection folding ──
     // For a {p, q} tessellation, the fundamental domain is a triangle
@@ -336,12 +491,12 @@ const FRAGMENT_SHADER = /* glsl */ `
 
       // Fold 1: Reflect into first sector (angle = [0, 2*PI/p])
       float sectorAngle = TAU / p;
-      angle = mod(angle + PI, sectorAngle);
+      angle = mod(angle, sectorAngle);
 
       // Track edge distance before reflection
       float edgeDist1 = abs(angle);
       float edgeDist2 = abs(angle - sectorAngle);
-      minEdgeDist = min(minEdgeDist, min(edgeDist1, edgeDist2) * radius);
+      minEdgeDist = min(minEdgeDist, min(edgeDist1, edgeDist2) * radius * 2.0/max(1e-6,1.0-dot(z,z)));
 
       // Mirror within the sector
       if (angle > sectorAngle * 0.5) {
@@ -352,11 +507,13 @@ const FRAGMENT_SHADER = /* glsl */ `
       z = vec2(cos(angle), sin(angle)) * radius;
 
       // Fold 2: Reflect across the geodesic arc
-      // The geodesic for a {p,q} tessellation has its center at
-      // distance d = 1/cos(PI/p) from origin, radius r = tan(PI/p)
-      // (for the ideal case -- we use a simplified version)
-      float geodesicCenter = cos(PI / q) / sin(PI / p);
-      float geodesicRadius = sqrt(geodesicCenter * geodesicCenter - 1.0);
+      // Orthogonality to the unit disk plus triangle angles π/p, π/q.
+      float cosB = cos(PI / q);
+      float sinA = sin(PI / p);
+      float discriminant = cosB * cosB - sinA * sinA;
+      if (discriminant <= 0.0) break;
+      float geodesicCenter = cosB / sqrt(discriminant);
+      float geodesicRadius = sinA / sqrt(discriminant);
 
       // Only valid tessellations: (p-2)*(q-2) > 4
       if (geodesicRadius <= 0.01) break;
@@ -367,7 +524,7 @@ const FRAGMENT_SHADER = /* glsl */ `
 
       // Track geodesic edge distance
       float geodesicEdgeDist = abs(distToCenter - geodesicRadius);
-      minEdgeDist = min(minEdgeDist, geodesicEdgeDist);
+      minEdgeDist = min(minEdgeDist, geodesicEdgeDist * 2.0/max(1e-6,1.0-dot(z,z)));
 
       // If inside the geodesic circle, reflect (inversion in circle)
       if (distToCenter < geodesicRadius) {
@@ -394,7 +551,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     float hDist = hypDist(uv);
 
     // Base colors for the two tile types
-    float hue1 = fract(0.6 + u_time * u_colorCycle * 0.05 + u_spectralCentroid * 0.15);
+    float hue1 = fract(0.6 + u_colorCyclePhase * 0.05 + u_spectralCentroid * 0.15);
     float hue2 = fract(hue1 + 0.45); // Complementary
 
     float hue = mix(hue1, hue2, parity);
@@ -413,7 +570,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     val += boundaryGlow;
 
     // Geodesic edge lines
-    float edgeLine = 1.0 - smoothstep(0.0, u_lineWidth, minEdgeDist);
+    float edgeLine=1.0-smoothstep(max(0.0,u_lineWidth-fwidth(minEdgeDist)),u_lineWidth+fwidth(minEdgeDist),minEdgeDist);
     float edgeIntensity = edgeLine * (0.5 + u_high * 1.0 * u_highToEdge);
 
     // Combine
@@ -428,7 +585,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     color += vec3(0.2, 0.3, 0.6) * border;
 
     // Background outside disk (already handled above, but smooth transition)
-    color *= smoothstep(1.0, 0.995, r);
+    color *= (1.0 - smoothstep(0.995, 1.0, r));
 
     // Vignette
     float aspect = u_resolution.x / u_resolution.y;

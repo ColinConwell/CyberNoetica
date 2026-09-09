@@ -1,14 +1,30 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
-import type { ViewStateField, Visualizer, VisualizerMetadata } from '../types.js';
-import type { VoroBackend, VoroMesh, VoroMode } from '../../voro/backend.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
+import type {
+  ViewStateField,
+  Visualizer,
+  VisualizerMetadata,
+} from '../types.js';
+import { VoroWorkerClient } from '../../voro/worker-client.js';
+import type { VoroMesh, VoroMode } from '../../voro/backend.js';
 
 export type SeedLayout = 'lissajous' | 'lattice' | 'shell' | 'scatter';
 
 export const FOAM_VIEW_FIELDS: ViewStateField[] = [
-  { key: 'orbitAngle', label: 'Orbit', min: -Math.PI, max: Math.PI, step: 0.02 },
+  {
+    key: 'orbitAngle',
+    label: 'Orbit',
+    min: -Math.PI,
+    max: Math.PI,
+    step: 0.02,
+  },
   { key: 'elevation', label: 'Elevation', min: -1.2, max: 1.2, step: 0.02 },
   { key: 'distance', label: 'Distance', min: 4, max: 20, step: 0.1 },
 ];
@@ -34,7 +50,6 @@ export interface FoamConfig {
   distance?: number;
 }
 
-const COMPUTE_BUDGET_MS = 10;
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 
 const DEFAULT_LOOK: FoamLook = {
@@ -64,12 +79,18 @@ function hsv2rgb(h: number, s: number, v: number): [number, number, number] {
   const q = v * (1 - f * s);
   const t = v * (1 - (1 - f) * s);
   switch (i % 6) {
-    case 0: return [v, t, p];
-    case 1: return [q, v, p];
-    case 2: return [p, v, t];
-    case 3: return [p, q, v];
-    case 4: return [t, p, v];
-    default: return [v, p, q];
+    case 0:
+      return [v, t, p];
+    case 1:
+      return [q, v, p];
+    case 2:
+      return [p, v, t];
+    case 3:
+      return [p, q, v];
+    case 4:
+      return [t, p, v];
+    default:
+      return [v, p, q];
   }
 }
 
@@ -80,7 +101,7 @@ function hash01(n: number): number {
 
 function wrapCoord(v: number, h: number): number {
   const w = h * 2;
-  return ((v + h) % w + w) % w - h;
+  return ((((v + h) % w) + w) % w) - h;
 }
 
 /** True when a resolved Voro++ backend still belongs to this foam instance. */
@@ -93,6 +114,8 @@ export function foamLoadStillCurrent(
 }
 
 export class VoronoiFoamVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata: VisualizerMetadata;
 
   private unsub: Unsubscribe;
@@ -114,17 +137,18 @@ export class VoronoiFoamVisualizer implements Visualizer {
     high: new EMASmoothing(0.25),
     rms: new EMASmoothing(0.2),
     spectralCentroid: new EMASmoothing(0.1),
-    beatPulse: new EMASmoothing(0.4),
+    beatPulse: new EventEnvelope(),
   };
 
   private seeds: Seed[] = [];
   private xyz = new Float32Array(0);
   private radii = new Float32Array(0);
 
-  private backend: VoroBackend | null = null;
+  private backend: VoroWorkerClient | null = null;
   private loadGen = 0;
   private skipUntil = 0;
-  private lastSphereR = -1;
+  private meshAge = 1;
+  private uploadedMesh: VoroMesh | null = null;
   private baseMesh: VoroMesh | null = null;
 
   private faceMesh: THREE.Mesh | null = null;
@@ -133,10 +157,9 @@ export class VoronoiFoamVisualizer implements Visualizer {
   private faceMaterial: THREE.ShaderMaterial | null = null;
   private edgeMaterial: THREE.ShaderMaterial | null = null;
   private pointMaterial: THREE.PointsMaterial | null = null;
-  private faceScratch = new Float32Array(0);
-  private faceColorScratch = new Float32Array(0);
-  private edgeScratch = new Float32Array(0);
-  private edgeColorScratch = new Float32Array(0);
+  private boundary: THREE.Mesh | null = null;
+  private periodicImages: THREE.Object3D[] = [];
+  private domainBox: THREE.LineSegments | null = null;
   private sceneRef: THREE.Scene | null = null;
 
   constructor(
@@ -151,9 +174,12 @@ export class VoronoiFoamVisualizer implements Visualizer {
     this._elevation = config.elevation ?? 0.35;
     this._distance = config.distance ?? 8;
 
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
     this.smoothers.high.reset(0);
@@ -172,10 +198,15 @@ export class VoronoiFoamVisualizer implements Visualizer {
         u_opacity: { value: this.userParams.faceOpacity ?? 0.28 },
         u_glow: { value: 1.0 },
         u_beatPulse: { value: 0.0 },
+        u_explode: { value: 0 },
+        u_hueShift: { value: 0 },
+        u_clipRadius: { value: 0 },
+        u_meshMix: { value: 1 },
       },
       transparent: true,
       depthWrite: false,
       side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
       vertexColors: true,
     });
 
@@ -185,6 +216,10 @@ export class VoronoiFoamVisualizer implements Visualizer {
       uniforms: {
         u_glow: { value: 1.0 },
         u_beatPulse: { value: 0.0 },
+        u_explode: { value: 0 },
+        u_hueShift: { value: 0 },
+        u_clipRadius: { value: 0 },
+        u_meshMix: { value: 1 },
       },
       transparent: true,
       depthWrite: false,
@@ -202,55 +237,155 @@ export class VoronoiFoamVisualizer implements Visualizer {
     });
 
     const emptyFace = new THREE.BufferGeometry();
-    emptyFace.setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3));
-    emptyFace.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(9), 3));
-    emptyFace.setAttribute('color', new THREE.BufferAttribute(new Float32Array(9), 3));
+    emptyFace.setAttribute(
+      'position',
+      new THREE.BufferAttribute(new Float32Array(9), 3),
+    );
+    emptyFace.setAttribute(
+      'normal',
+      new THREE.BufferAttribute(new Float32Array(9), 3),
+    );
+    emptyFace.setAttribute(
+      'color',
+      new THREE.BufferAttribute(new Float32Array(9), 3),
+    );
+    emptyFace.setAttribute(
+      'a_previous',
+      new THREE.BufferAttribute(new Float32Array(9), 3),
+    );
+    emptyFace.setAttribute(
+      'a_center',
+      new THREE.BufferAttribute(new Float32Array(9), 3),
+    );
+    emptyFace.setDrawRange(0, 0);
     this.faceMesh = new THREE.Mesh(emptyFace, this.faceMaterial);
     this.faceMesh.frustumCulled = false;
     scene.add(this.faceMesh);
 
     const emptyEdge = new THREE.BufferGeometry();
-    emptyEdge.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
-    emptyEdge.setAttribute('color', new THREE.BufferAttribute(new Float32Array(6), 3));
+    emptyEdge.setAttribute(
+      'position',
+      new THREE.BufferAttribute(new Float32Array(6), 3),
+    );
+    emptyEdge.setAttribute(
+      'color',
+      new THREE.BufferAttribute(new Float32Array(6), 3),
+    );
+    emptyEdge.setAttribute(
+      'a_previous',
+      new THREE.BufferAttribute(new Float32Array(6), 3),
+    );
+    emptyEdge.setAttribute(
+      'a_center',
+      new THREE.BufferAttribute(new Float32Array(6), 3),
+    );
+    emptyEdge.setDrawRange(0, 0);
     this.edgeLines = new THREE.LineSegments(emptyEdge, this.edgeMaterial);
     this.edgeLines.frustumCulled = false;
     scene.add(this.edgeLines);
 
     const seedGeom = new THREE.BufferGeometry();
-    seedGeom.setAttribute('position', new THREE.BufferAttribute(this.xyz.slice(), 3));
-    seedGeom.setAttribute('color', new THREE.BufferAttribute(new Float32Array(this.xyz.length), 3));
+    seedGeom.setAttribute(
+      'position',
+      new THREE.BufferAttribute(this.xyz.slice(), 3),
+    );
+    seedGeom.setAttribute(
+      'color',
+      new THREE.BufferAttribute(new Float32Array(this.xyz.length), 3),
+    );
     this.seedPoints = new THREE.Points(seedGeom, this.pointMaterial);
     this.seedPoints.frustumCulled = false;
     scene.add(this.seedPoints);
 
+    if (this.config.mode === 'periodic') {
+      this.domainBox = new THREE.LineSegments(
+        new THREE.EdgesGeometry(
+          new THREE.BoxGeometry(
+            this.halfExtent * 2,
+            this.halfExtent * 2,
+            this.halfExtent * 2,
+          ),
+        ),
+        new THREE.LineBasicMaterial({
+          color: 0x7d9bcd,
+          transparent: true,
+          opacity: 0.25,
+        }),
+      );
+      scene.add(this.domainBox);
+      for (const offset of [
+        [1, 0, 0],
+        [-1, 0, 0],
+        [0, 1, 0],
+        [0, -1, 0],
+        [0, 0, 1],
+        [0, 0, -1],
+      ])
+        for (const original of [this.faceMesh, this.edgeLines]) {
+          const image = original.clone();
+          image.position.set(
+            offset[0] * 2 * this.halfExtent,
+            offset[1] * 2 * this.halfExtent,
+            offset[2] * 2 * this.halfExtent,
+          );
+          image.visible = false;
+          image.frustumCulled = false;
+          scene.add(image);
+          this.periodicImages.push(image);
+        }
+    }
+    if (this.config.mode === 'sphere') {
+      const material = new THREE.ShaderMaterial({
+        vertexShader: `varying vec3 vPosition;void main(){vPosition=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
+        fragmentShader: `uniform vec3 seeds[128];uniform int count;uniform float radius;uniform float hue;uniform float opacity;varying vec3 vPosition;
+        void main(){vec3 p=normalize(vPosition)*radius;float d1=1e20,d2=1e20,id=0.;vec3 s1=vec3(0.),s2=vec3(0.);
+          for(int i=0;i<128;i++){if(i>=count)break;float d=dot(p-seeds[i],p-seeds[i]);if(d<d1){d2=d1;s2=s1;d1=d;s1=seeds[i];id=float(i);}else if(d<d2){d2=d;s2=seeds[i];}}
+          float distance=(d2-d1)/(2.*max(.001,length(s2-s1)));float edge=1.-smoothstep(0.,max(fwidth(distance),.006),distance);
+          vec3 color=.55+.45*cos(6.28318*(hue+fract(sin(id*127.1+311.7)*43758.5453)+vec3(0.,.33,.67)));gl_FragColor=vec4(color*(.3+edge),opacity*(.3+.7*edge));}`,
+        uniforms: {
+          seeds: {
+            value: Array.from({ length: 128 }, () => new THREE.Vector3()),
+          },
+          count: { value: 0 },
+          radius: { value: 1 },
+          hue: { value: 0 },
+          opacity: { value: 0.2 },
+        },
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+      });
+      this.boundary = new THREE.Mesh(
+        new THREE.SphereGeometry(1, 64, 32),
+        material,
+      );
+      scene.add(this.boundary);
+    }
     void this.startBackend();
   }
 
   private async startBackend(): Promise<void> {
-    const gen = ++this.loadGen;
-    try {
-      const { loadVoroBackend } = await import('../../voro/backend.js');
-      if (!foamLoadStillCurrent(this.disposed, gen, this.loadGen)) return;
-      const backend = await loadVoroBackend({
+    if (this.disposed || typeof Worker === 'undefined') return;
+    this.backend = new VoroWorkerClient(
+      {
         halfExtent: this.halfExtent,
         grid: 3,
-        mode: this.config.mode,
+        mode:
+          this.config.mode === 'sphere' && this.userParams.boundaryMode === 1
+            ? 'box'
+            : this.config.mode,
         sphereRadius: this.userParams.sphereRadius,
-      });
-      if (!foamLoadStillCurrent(this.disposed, gen, this.loadGen)) {
-        backend?.dispose();
-        return;
-      }
-      this.backend = backend;
-      this.lastSphereR = this.userParams.sphereRadius ?? -1;
-    } catch (err) {
-      if (!foamLoadStillCurrent(this.disposed, gen, this.loadGen)) return;
-      console.warn('Voro++ backend failed to load', err);
-    }
+      },
+      (mesh) => {
+        if (!this.disposed) this.baseMesh = mesh;
+      },
+    );
   }
 
   private rebuildSeeds(count: number): void {
     const requested = Math.max(16, Math.min(128, Math.round(count)));
+    this.backend?.invalidate();
     this.seeds = [];
     const h = this.halfExtent;
 
@@ -264,7 +399,9 @@ export class VoronoiFoamVisualizer implements Visualizer {
             this.seeds.push({
               phase: hash01(i + 1) * Math.PI * 2,
               freq: 0.08 + (i % 5) * 0.02,
-              ampX: 0, ampY: 0, ampZ: 0,
+              ampX: 0,
+              ampY: 0,
+              ampZ: 0,
               phaseY: hash01(i + 9) * 6.2,
               phaseZ: hash01(i + 13) * 5.1,
               baseX: -h + (x + 0.5) * spacing,
@@ -285,7 +422,9 @@ export class VoronoiFoamVisualizer implements Visualizer {
         this.seeds.push({
           phase: theta,
           freq: 0.1 + (i % 6) * 0.02,
-          ampX: 0, ampY: 0, ampZ: 0,
+          ampX: 0,
+          ampY: 0,
+          ampZ: 0,
           phaseY: hash01(i + 3) * 4,
           phaseZ: hash01(i + 7) * 5,
           baseX: Math.cos(theta) * r,
@@ -298,10 +437,14 @@ export class VoronoiFoamVisualizer implements Visualizer {
         this.seeds.push({
           phase: t * Math.PI * 2,
           freq: 0.12 + i * 0.015,
-          ampX: 0.35, ampY: 0.32, ampZ: 0.3,
+          ampX: 0.35,
+          ampY: 0.32,
+          ampZ: 0.3,
           phaseY: t * 3.7,
           phaseZ: t * 5.1,
-          baseX: 0, baseY: 0, baseZ: 0,
+          baseX: 0,
+          baseY: 0,
+          baseZ: 0,
         });
       }
     } else if (this.config.seedLayout === 'scatter') {
@@ -309,7 +452,9 @@ export class VoronoiFoamVisualizer implements Visualizer {
         this.seeds.push({
           phase: hash01(i + 1) * Math.PI * 2,
           freq: 0.1 + (i % 6) * 0.02,
-          ampX: 0, ampY: 0, ampZ: 0,
+          ampX: 0,
+          ampY: 0,
+          ampZ: 0,
           phaseY: hash01(i + 9) * 6.2,
           phaseZ: hash01(i + 13) * 5.1,
           baseX: (hash01(i + 21) * 2 - 1) * h * 0.82,
@@ -328,7 +473,9 @@ export class VoronoiFoamVisualizer implements Visualizer {
           ampZ: 0.78 + (i % 6) * 0.11,
           phaseY: t * 4.13,
           phaseZ: t * 5.71,
-          baseX: 0, baseY: 0, baseZ: 0,
+          baseX: 0,
+          baseY: 0,
+          baseZ: 0,
         });
       }
     }
@@ -336,13 +483,23 @@ export class VoronoiFoamVisualizer implements Visualizer {
     this.xyz = new Float32Array(this.seeds.length * 3);
     this.radii = new Float32Array(this.seeds.length);
     this.baseMesh = null;
+    this.uploadedMesh = null;
   }
 
-  private updateSeeds(jitter: number, drift: number, bass: number, mid: number): void {
-    const t = this.time * (0.35 + drift * 1.4);
+  private updateSeeds(
+    jitter: number,
+    drift: number,
+    bass: number,
+    mid: number,
+  ): void {
+    const t = this.phases.advance(
+      'seed-drift',
+      0.35 + drift * 1.4,
+      this.deltaSeconds,
+    );
     const h = this.halfExtent;
     const layout = this.config.seedLayout;
-    const sphereR = this.userParams.sphereRadius ?? (h * 0.9);
+    const sphereR = this.userParams.sphereRadius ?? h * 0.9;
     const contrast = this.userParams.radiusContrast ?? 1.0;
 
     for (let i = 0; i < this.seeds.length; i++) {
@@ -403,105 +560,123 @@ export class VoronoiFoamVisualizer implements Visualizer {
 
       const w = 0.5 + 0.5 * Math.sin(s.phase + t * 0.4 + bass * 1.2);
       const mix = w * bass + (1 - w) * mid;
-      this.radii[i] = 0.08 + 0.22 * (0.35 + contrast * mix);
+      this.radii[i] = Math.min(
+        this.halfExtent * 0.4,
+        0.08 + 0.22 * (0.35 + contrast * mix),
+      );
     }
   }
 
   private tessellate(): void {
-    if (!this.backend) return;
-    if (this.config.mode === 'sphere') {
-      const rmsMul = this.userParams.rmsToRadius ?? 0;
-      const r = (this.userParams.sphereRadius ?? 1.8)
-        * (1 + this.smoothers.rms.value * 0.18 * rmsMul);
-      if (Math.abs(r - this.lastSphereR) > 0.02) {
-        this.backend.setSphereRadius(r);
-        this.lastSphereR = r;
-      }
-    }
-    const mesh = this.config.mode === 'radical'
-      ? this.backend.compute(this.xyz, this.radii)
-      : this.backend.compute(this.xyz);
-    if (!mesh || mesh.cellCount === 0 || mesh.vertices.length === 0) return;
-    this.baseMesh = mesh;
+    const radius =
+      (this.userParams.sphereRadius ?? 1.8) *
+      (1 +
+        this.smoothers.rms.value * 0.18 * (this.userParams.rmsToRadius ?? 0));
+    this.backend?.compute(
+      this.xyz,
+      this.config.mode === 'radical' ? this.radii : undefined,
+      radius,
+    );
   }
 
   private applyMesh(hueShift: number, explode: number, edgeGlow: number): void {
     const mesh = this.baseMesh;
     if (!mesh || !this.faceMesh || !this.edgeLines) return;
 
-    const nVerts = mesh.vertices.length / 3;
-    if (this.faceScratch.length !== mesh.vertices.length) {
-      this.faceScratch = new Float32Array(mesh.vertices.length);
-    }
-    const pos = this.faceScratch;
-    pos.set(mesh.vertices);
-    if (explode > 1e-4) {
-      for (let i = 0; i < nVerts; i++) {
-        const cid = mesh.cellIds[i];
-        const o = i * 3;
-        pos[o] += (pos[o] - mesh.centroids[cid * 3]) * explode;
-        pos[o + 1] += (pos[o + 1] - mesh.centroids[cid * 3 + 1]) * explode;
-        pos[o + 2] += (pos[o + 2] - mesh.centroids[cid * 3 + 2]) * explode;
+    for (const material of [this.faceMaterial, this.edgeMaterial]) {
+      if (material) {
+        material.uniforms.u_explode.value = explode;
+        material.uniforms.u_hueShift.value = hueShift;
       }
     }
-
-    if (this.faceColorScratch.length !== mesh.vertices.length) {
-      this.faceColorScratch = new Float32Array(mesh.vertices.length);
-    }
-    const colors = this.faceColorScratch;
+    if (mesh === this.uploadedMesh) return;
+    const previous = this.uploadedMesh;
+    // Interpolate only unchanged connectivity and small, corresponding vertex motion.
+    // Topology changes commit atomically, avoiding interpolated inverted cells.
+    const compatible =
+      previous &&
+      previous.vertices.length === mesh.vertices.length &&
+      previous.edges.length === mesh.edges.length &&
+      previous.indices.length === mesh.indices.length &&
+      previous.indices.every((value, i) => value === mesh.indices[i]) &&
+      previous.cellIds.every((value, i) => value === mesh.cellIds[i]) &&
+      previous.edgeCellIds.length === mesh.edgeCellIds.length &&
+      previous.edgeCellIds.every((value, i) => value === mesh.edgeCellIds[i]) &&
+      previous.edges.every(
+        (value, i) => Math.abs(value - mesh.edges[i]) < 0.08,
+      ) &&
+      previous.seedIds.length === mesh.seedIds.length &&
+      previous.seedIds.every((value, i) => value === mesh.seedIds[i]) &&
+      previous.vertices.every(
+        (value, i) => Math.abs(value - mesh.vertices[i]) < 0.08,
+      );
+    this.replaceAttribute(
+      this.faceMesh.geometry,
+      'a_previous',
+      compatible ? previous.vertices : mesh.vertices,
+      3,
+    );
+    this.replaceAttribute(
+      this.edgeLines.geometry,
+      'a_previous',
+      compatible ? previous.edges : mesh.edges,
+      3,
+    );
+    this.meshAge = compatible ? 0 : 1;
+    this.uploadedMesh = mesh;
+    const nVerts = mesh.vertices.length / 3;
+    const pos = mesh.vertices;
+    const colors = new Float32Array(pos.length);
+    const centers = new Float32Array(pos.length);
     for (let i = 0; i < nVerts; i++) {
       const cid = mesh.cellIds[i];
-      let h = (hash01(cid + 1) + hueShift + this.look.hueOffset) % 1;
-      if (h < 0) h += 1;
-      const sat = this.look.faceSat + 0.25 * hash01(cid + 17);
-      const [r, g, b] = hsv2rgb(h, Math.min(1, sat), this.look.faceVal);
-      colors[i * 3] = r;
-      colors[i * 3 + 1] = g;
-      colors[i * 3 + 2] = b;
+      const id = mesh.seedIds[cid] ?? cid;
+      const h = (hash01(id + 1) + this.look.hueOffset) % 1;
+      const [r, g, b] = hsv2rgb(
+        h,
+        Math.min(1, this.look.faceSat + 0.25 * hash01(id + 17)),
+        this.look.faceVal,
+      );
+      colors.set([r, g, b], i * 3);
+      centers.set(mesh.centroids.subarray(cid * 3, cid * 3 + 3), i * 3);
     }
-
+    this.replaceAttribute(this.faceMesh.geometry, 'a_center', centers, 3);
     this.replaceAttribute(this.faceMesh.geometry, 'position', pos, 3);
     this.replaceAttribute(this.faceMesh.geometry, 'normal', mesh.normals, 3);
     this.replaceAttribute(this.faceMesh.geometry, 'color', colors, 3);
     const idx = this.faceMesh.geometry.getIndex();
-    if (idx && idx.array.length === mesh.indices.length) {
+    if (idx && idx.array.length >= mesh.indices.length) {
       (idx.array as Uint32Array).set(mesh.indices);
       idx.needsUpdate = true;
     } else {
-      this.faceMesh.geometry.setIndex(new THREE.BufferAttribute(mesh.indices.slice(), 1));
+      const indices = new Uint32Array(
+        Math.max(
+          mesh.indices.length,
+          Math.ceil((idx?.array.length ?? 0) * 1.5),
+        ),
+      );
+      indices.set(mesh.indices);
+      this.faceMesh.geometry.setIndex(
+        new THREE.BufferAttribute(indices, 1).setUsage(THREE.DynamicDrawUsage),
+      );
     }
-    this.faceMesh.geometry.computeBoundingSphere();
+    this.faceMesh.geometry.setDrawRange(0, mesh.indices.length);
+    // Faces are not frustum-culled; no per-update bounding sphere is needed.
 
     const nEdgeVerts = mesh.edges.length / 3;
-    if (this.edgeScratch.length !== mesh.edges.length) {
-      this.edgeScratch = new Float32Array(mesh.edges.length);
-    }
-    const epos = this.edgeScratch;
-    epos.set(mesh.edges);
-    if (explode > 1e-4) {
-      for (let i = 0; i < nEdgeVerts; i++) {
-        const cid = mesh.edgeCellIds[i];
-        const o = i * 3;
-        epos[o] += (epos[o] - mesh.centroids[cid * 3]) * explode;
-        epos[o + 1] += (epos[o + 1] - mesh.centroids[cid * 3 + 1]) * explode;
-        epos[o + 2] += (epos[o + 2] - mesh.centroids[cid * 3 + 2]) * explode;
-      }
-    }
-
-    if (this.edgeColorScratch.length !== mesh.edges.length) {
-      this.edgeColorScratch = new Float32Array(mesh.edges.length);
-    }
-    const edgeColors = this.edgeColorScratch;
-    const glow = 0.55 + 0.45 * edgeGlow;
-    const [er, eg, eb] = this.look.edgeTint;
+    const epos = mesh.edges;
+    const edgeColors = new Float32Array(epos.length);
+    const edgeCenters = new Float32Array(epos.length);
     for (let i = 0; i < nEdgeVerts; i++) {
-      edgeColors[i * 3] = er * glow;
-      edgeColors[i * 3 + 1] = eg * glow;
-      edgeColors[i * 3 + 2] = eb * glow;
+      edgeColors.set(this.look.edgeTint, i * 3);
+      const cid = mesh.edgeCellIds[i];
+      edgeCenters.set(mesh.centroids.subarray(cid * 3, cid * 3 + 3), i * 3);
     }
+    this.replaceAttribute(this.edgeLines.geometry, 'a_center', edgeCenters, 3);
     this.replaceAttribute(this.edgeLines.geometry, 'position', epos, 3);
     this.replaceAttribute(this.edgeLines.geometry, 'color', edgeColors, 3);
-    this.edgeLines.geometry.computeBoundingSphere();
+    this.edgeLines.geometry.setDrawRange(0, nEdgeVerts);
+    // Edges are not frustum-culled either.
   }
 
   private replaceAttribute(
@@ -511,29 +686,48 @@ export class VoronoiFoamVisualizer implements Visualizer {
     itemSize: number,
   ): void {
     const attr = geom.getAttribute(name) as THREE.BufferAttribute | undefined;
-    if (attr && attr.array.length === data.length) {
+    if (attr && attr.array.length >= data.length) {
       (attr.array as Float32Array).set(data);
       attr.needsUpdate = true;
     } else {
       geom.deleteAttribute(name);
-      geom.setAttribute(name, new THREE.BufferAttribute(data.slice(), itemSize));
+      const capacity =
+        Math.ceil(
+          Math.max(data.length, (attr?.array.length ?? 0) * 1.5) / itemSize,
+        ) * itemSize;
+      const buffer = new Float32Array(capacity);
+      buffer.set(data);
+      geom.setAttribute(
+        name,
+        new THREE.BufferAttribute(buffer, itemSize).setUsage(
+          THREE.DynamicDrawUsage,
+        ),
+      );
     }
   }
 
-  tick(): void {
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
     if (this.disposed) return;
-    this.time += 1 / 60;
+    this.time += this.deltaSeconds;
+    this.meshAge += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     const bass = this.smoothers.bass.value;
@@ -546,18 +740,29 @@ export class VoronoiFoamVisualizer implements Visualizer {
     this.updateSeeds(jitter, this.userParams.driftSpeed ?? 0.25, bass, mid);
 
     if (this.seedPoints) {
-      const posAttr = this.seedPoints.geometry.getAttribute('position') as THREE.BufferAttribute;
+      const posAttr = this.seedPoints.geometry.getAttribute(
+        'position',
+      ) as THREE.BufferAttribute;
       if (posAttr.array.length !== this.xyz.length) {
-        this.seedPoints.geometry.setAttribute('position', new THREE.BufferAttribute(this.xyz.slice(), 3));
-        this.seedPoints.geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(this.xyz.length), 3));
+        this.seedPoints.geometry.setAttribute(
+          'position',
+          new THREE.BufferAttribute(this.xyz.slice(), 3),
+        );
+        this.seedPoints.geometry.setAttribute(
+          'color',
+          new THREE.BufferAttribute(new Float32Array(this.xyz.length), 3),
+        );
       } else {
         (posAttr.array as Float32Array).set(this.xyz);
         posAttr.needsUpdate = true;
       }
-      const colAttr = this.seedPoints.geometry.getAttribute('color') as THREE.BufferAttribute;
-      const hueShift = this.time * 0.03
-        + mid * 0.25 * (this.userParams.midToHue ?? 1)
-        + centroid * 0.2 * (this.userParams.centroidToPalette ?? 1);
+      const colAttr = this.seedPoints.geometry.getAttribute(
+        'color',
+      ) as THREE.BufferAttribute;
+      const hueShift =
+        this.time * 0.03 +
+        mid * 0.25 * (this.userParams.midToHue ?? 1) +
+        centroid * 0.2 * (this.userParams.centroidToPalette ?? 1);
       const nSeeds = this.xyz.length / 3;
       for (let i = 0; i < nSeeds; i++) {
         let h = (hash01(i + 3) + hueShift + this.look.hueOffset) % 1;
@@ -569,23 +774,57 @@ export class VoronoiFoamVisualizer implements Visualizer {
     }
 
     if (this.backend && this.time >= this.skipUntil) {
-      const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
       this.tessellate();
-      const dt = typeof performance !== 'undefined' ? performance.now() - t0 : 0;
-      if (dt > COMPUTE_BUDGET_MS) this.skipUntil = this.time + 1 / 30;
+      this.skipUntil = this.time + 1 / 20;
     }
 
-    const hueShift = this.time * 0.03
-      + mid * 0.25 * (this.userParams.midToHue ?? 1)
-      + centroid * 0.2 * (this.userParams.centroidToPalette ?? 1);
-    const explode = (this.userParams.explodeAmount ?? 0.35)
-      * (0.15 + beat * 1.4 * (this.userParams.beatToExplode ?? 1));
-    const edgeGlow = (this.userParams.edgeGlow ?? 1) * (0.7 + rms * 0.8 * (this.userParams.rmsToGlow ?? 1));
+    const hueShift =
+      this.time * 0.03 +
+      mid * 0.25 * (this.userParams.midToHue ?? 1) +
+      centroid * 0.2 * (this.userParams.centroidToPalette ?? 1);
+    const explode =
+      (this.userParams.explodeAmount ?? 0.35) *
+      (0.15 + beat * 1.4 * (this.userParams.beatToExplode ?? 1));
+    const edgeGlow =
+      (this.userParams.edgeGlow ?? 1) *
+      (0.7 + rms * 0.8 * (this.userParams.rmsToGlow ?? 1));
 
-    this.applyMesh(hueShift, explode, edgeGlow);
+    this.applyMesh(
+      hueShift,
+      this.userParams.boundaryMode === 1 ? 0 : explode,
+      edgeGlow,
+    );
+    for (const image of this.periodicImages)
+      image.visible = this.userParams.neighborImages === 1;
+    const radius =
+      (this.userParams.sphereRadius ?? 1.8) *
+      (1 + rms * 0.18 * (this.userParams.rmsToRadius ?? 0));
+    const curved =
+      this.config.mode === 'sphere' && this.userParams.boundaryMode === 1;
+    for (const material of [this.faceMaterial, this.edgeMaterial])
+      if (material) {
+        material.uniforms.u_clipRadius.value = curved ? radius : 0;
+        material.uniforms.u_meshMix.value = Math.min(1, this.meshAge / 0.05);
+      }
+    if (this.boundary) {
+      this.boundary.visible = curved;
+      this.boundary.scale.setScalar(radius);
+      const uniforms = (this.boundary.material as THREE.ShaderMaterial)
+        .uniforms;
+      uniforms.radius.value = radius;
+      uniforms.count.value = this.seeds.length;
+      uniforms.hue.value = hueShift;
+      uniforms.opacity.value = this.userParams.faceOpacity;
+      for (let i = 0; i < this.seeds.length; i++)
+        uniforms.seeds.value[i].fromArray(
+          this.baseMesh?.inputSeeds ?? this.xyz,
+          i * 3,
+        );
+    }
 
     if (this.faceMaterial) {
-      this.faceMaterial.uniforms.u_opacity.value = this.userParams.faceOpacity ?? 0.28;
+      this.faceMaterial.uniforms.u_opacity.value =
+        this.userParams.faceOpacity ?? 0.28;
       this.faceMaterial.uniforms.u_glow.value = 0.75 + rms * 0.5;
       this.faceMaterial.uniforms.u_beatPulse.value = beat;
     }
@@ -601,6 +840,12 @@ export class VoronoiFoamVisualizer implements Visualizer {
     if (!(key in this.userParams)) return;
     this.userParams[key] = value;
     if (key === 'seedCount') this.rebuildSeeds(value);
+    if (key === 'boundaryMode') {
+      this.backend?.dispose();
+      this.baseMesh = null;
+      this.uploadedMesh = null;
+      void this.startBackend();
+    }
   }
 
   getViewState(): Record<string, number> {
@@ -613,8 +858,10 @@ export class VoronoiFoamVisualizer implements Visualizer {
 
   setViewState(partial: Record<string, number>): void {
     if ('orbitAngle' in partial) this._orbitAngle = partial.orbitAngle;
-    if ('elevation' in partial) this._elevation = Math.max(-1.2, Math.min(1.2, partial.elevation));
-    if ('distance' in partial) this._distance = Math.max(4, Math.min(20, partial.distance));
+    if ('elevation' in partial)
+      this._elevation = Math.max(-1.2, Math.min(1.2, partial.elevation));
+    if ('distance' in partial)
+      this._distance = Math.max(4, Math.min(20, partial.distance));
   }
 
   dispose(): void {
@@ -623,6 +870,14 @@ export class VoronoiFoamVisualizer implements Visualizer {
     this.unsub();
     this.backend?.dispose();
     this.backend = null;
+    for (const image of this.periodicImages) image.removeFromParent();
+    this.periodicImages = [];
+    this.domainBox?.removeFromParent();
+    this.domainBox?.geometry.dispose();
+    (this.domainBox?.material as THREE.Material | undefined)?.dispose();
+    this.boundary?.removeFromParent();
+    this.boundary?.geometry.dispose();
+    (this.boundary?.material as THREE.Material | undefined)?.dispose();
     this.faceMaterial?.dispose();
     this.edgeMaterial?.dispose();
     this.pointMaterial?.dispose();
@@ -642,29 +897,44 @@ export class VoronoiFoamVisualizer implements Visualizer {
 }
 
 const FACE_VERT = /* glsl */ `
+  attribute vec3 a_center;
+  attribute vec3 a_previous;
+  uniform float u_meshMix;
+  uniform float u_explode;
+  uniform float u_hueShift;
+  vec3 hueRotate(vec3 c, float hue) {
+    vec3 axis = normalize(vec3(1.0)); float angle = hue * 6.28318530718;
+    return max(vec3(0.0), c * cos(angle) + cross(axis, c) * sin(angle) + axis * dot(axis, c) * (1.0 - cos(angle)));
+  }
+
   varying vec3 vColor;
+  varying vec3 vPosition;
   varying vec3 vNormal;
   varying vec3 vViewDir;
 
   void main() {
-    vColor = color;
+    vPosition=mix(a_previous,position,u_meshMix);
+    vColor = hueRotate(color, u_hueShift);
     vNormal = normalize(normalMatrix * normal);
-    vec4 mv = modelViewMatrix * vec4(position, 1.0);
+    vec4 mv = modelViewMatrix * vec4(vPosition + a_center * u_explode, 1.0);
     vViewDir = normalize(-mv.xyz);
     gl_Position = projectionMatrix * mv;
   }
 `;
 
 const FACE_FRAG = /* glsl */ `
+  uniform float u_clipRadius;
   uniform float u_opacity;
   uniform float u_glow;
   uniform float u_beatPulse;
 
   varying vec3 vColor;
+  varying vec3 vPosition;
   varying vec3 vNormal;
   varying vec3 vViewDir;
 
   void main() {
+    if(u_clipRadius>0.0 && length(vPosition)>u_clipRadius)discard;
     vec3 n = normalize(vNormal);
     float ndv = abs(dot(n, normalize(vViewDir)));
     float fresnel = pow(1.0 - ndv, 2.2);
@@ -678,25 +948,40 @@ const FACE_FRAG = /* glsl */ `
 `;
 
 const EDGE_VERT = /* glsl */ `
+  attribute vec3 a_center;
+  attribute vec3 a_previous;
+  uniform float u_meshMix;
+  uniform float u_explode;
+  uniform float u_hueShift;
+  vec3 hueRotate(vec3 c, float hue) {
+    vec3 axis = normalize(vec3(1.0)); float angle = hue * 6.28318530718;
+    return max(vec3(0.0), c * cos(angle) + cross(axis, c) * sin(angle) + axis * dot(axis, c) * (1.0 - cos(angle)));
+  }
+
   varying vec3 vColor;
+  varying vec3 vPosition;
   varying float vDepth;
 
   void main() {
-    vColor = color;
-    vec4 mv = modelViewMatrix * vec4(position, 1.0);
+    vPosition=mix(a_previous,position,u_meshMix);
+    vColor = hueRotate(color, u_hueShift);
+    vec4 mv = modelViewMatrix * vec4(vPosition + a_center * u_explode, 1.0);
     vDepth = -mv.z;
     gl_Position = projectionMatrix * mv;
   }
 `;
 
 const EDGE_FRAG = /* glsl */ `
+  uniform float u_clipRadius;
   uniform float u_glow;
   uniform float u_beatPulse;
 
   varying vec3 vColor;
+  varying vec3 vPosition;
   varying float vDepth;
 
   void main() {
+    if(u_clipRadius>0.0 && length(vPosition)>u_clipRadius)discard;
     float fade = exp(-vDepth * 0.04);
     vec3 col = vColor * u_glow * fade;
     col += vec3(0.45, 0.55, 0.85) * u_beatPulse * 0.35;

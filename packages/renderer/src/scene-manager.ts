@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { FrameStatistics } from './frame-statistics.js';
+import { GpuTimer } from './gpu-timer.js';
 import type { ViewportCapabilities } from './visualizers/types.js';
 import { registerShaderChunks } from './shaders/chunks/index.js';
 
@@ -6,7 +8,12 @@ registerShaderChunks();
 
 export type CursorMode = 'pan' | 'orbit' | 'sculpt' | 'default';
 
-export type QualityTier = 'sub-performance' | 'performance' | 'balanced' | 'high' | 'ultra';
+export type QualityTier =
+  | 'sub-performance'
+  | 'performance'
+  | 'balanced'
+  | 'high'
+  | 'ultra';
 
 const QUALITY_PIXEL_RATIO_CAP: Record<QualityTier, number> = {
   'sub-performance': 0.5,
@@ -16,14 +23,22 @@ const QUALITY_PIXEL_RATIO_CAP: Record<QualityTier, number> = {
   ultra: Infinity,
 };
 
-export function pixelRatioForTier(tier: QualityTier, deviceRatio: number): number {
+export function pixelRatioForTier(
+  tier: QualityTier,
+  deviceRatio: number,
+): number {
   const cap = QUALITY_PIXEL_RATIO_CAP[tier];
   return Math.min(deviceRatio, cap);
 }
 
 export type FrameGate = () => boolean;
 
-function buildCursorSvg(opts: { strokeAlpha: number; fillAlpha: number; circleRadius: number; ringAlpha: number }): string {
+function buildCursorSvg(opts: {
+  strokeAlpha: number;
+  fillAlpha: number;
+  circleRadius: number;
+  ringAlpha: number;
+}): string {
   const s = opts.strokeAlpha;
   const f = opts.fillAlpha;
   const r = opts.ringAlpha;
@@ -40,27 +55,37 @@ function buildCursorSvg(opts: { strokeAlpha: number; fillAlpha: number; circleRa
 }
 
 const CURSOR_SVG_IDLE = `url("data:image/svg+xml,${encodeURIComponent(
-  buildCursorSvg({ strokeAlpha: 0.45, fillAlpha: 0.5, circleRadius: 1, ringAlpha: 0.2 }),
+  buildCursorSvg({
+    strokeAlpha: 0.45,
+    fillAlpha: 0.5,
+    circleRadius: 1,
+    ringAlpha: 0.2,
+  }),
 )}") 12 12, crosshair`;
 
 const CURSOR_SVG_ACTIVE = `url("data:image/svg+xml,${encodeURIComponent(
-  buildCursorSvg({ strokeAlpha: 0.7, fillAlpha: 0.8, circleRadius: 1.5, ringAlpha: 0.4 }),
+  buildCursorSvg({
+    strokeAlpha: 0.7,
+    fillAlpha: 0.8,
+    circleRadius: 1.5,
+    ringAlpha: 0.4,
+  }),
 )}") 12 12, move`;
 
 const CURSOR_SCULPT_IDLE = `url("data:image/svg+xml,${encodeURIComponent(
   `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'>` +
-  `<circle cx='12' cy='12' r='8' stroke='rgba(140,160,255,0.4)' stroke-width='1' fill='none'/>` +
-  `<line x1='12' y1='6' x2='12' y2='18' stroke='rgba(140,160,255,0.6)' stroke-width='1.5'/>` +
-  `<line x1='6' y1='12' x2='18' y2='12' stroke='rgba(140,160,255,0.6)' stroke-width='1.5'/>` +
-  `</svg>`,
+    `<circle cx='12' cy='12' r='8' stroke='rgba(140,160,255,0.4)' stroke-width='1' fill='none'/>` +
+    `<line x1='12' y1='6' x2='12' y2='18' stroke='rgba(140,160,255,0.6)' stroke-width='1.5'/>` +
+    `<line x1='6' y1='12' x2='18' y2='12' stroke='rgba(140,160,255,0.6)' stroke-width='1.5'/>` +
+    `</svg>`,
 )}") 12 12, crosshair`;
 
 const CURSOR_SCULPT_ACTIVE = `url("data:image/svg+xml,${encodeURIComponent(
   `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'>` +
-  `<circle cx='12' cy='12' r='8' stroke='rgba(140,160,255,0.7)' stroke-width='1.5' fill='rgba(140,160,255,0.08)'/>` +
-  `<line x1='12' y1='6' x2='12' y2='18' stroke='rgba(140,160,255,0.8)' stroke-width='2'/>` +
-  `<line x1='6' y1='12' x2='18' y2='12' stroke='rgba(140,160,255,0.8)' stroke-width='2'/>` +
-  `</svg>`,
+    `<circle cx='12' cy='12' r='8' stroke='rgba(140,160,255,0.7)' stroke-width='1.5' fill='rgba(140,160,255,0.08)'/>` +
+    `<line x1='12' y1='6' x2='12' y2='18' stroke='rgba(140,160,255,0.8)' stroke-width='2'/>` +
+    `<line x1='6' y1='12' x2='18' y2='12' stroke='rgba(140,160,255,0.8)' stroke-width='2'/>` +
+    `</svg>`,
 )}") 12 12, crosshair`;
 
 export type ViewportDragHandler = (dx: number, dy: number) => void;
@@ -69,9 +94,19 @@ export type ViewportResetHandler = () => void;
 export type ContextRestoredHandler = () => void;
 
 const TEXTURE_KEYS = [
-  'map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap',
-  'aoMap', 'bumpMap', 'displacementMap', 'alphaMap', 'envMap',
-  'lightMap', 'specularMap', 'gradientMap',
+  'map',
+  'normalMap',
+  'roughnessMap',
+  'metalnessMap',
+  'emissiveMap',
+  'aoMap',
+  'bumpMap',
+  'displacementMap',
+  'alphaMap',
+  'envMap',
+  'lightMap',
+  'specularMap',
+  'gradientMap',
 ] as const;
 
 function disposeTexture(value: unknown): void {
@@ -83,8 +118,14 @@ function disposeTexture(value: unknown): void {
 function disposeMaterial(material: THREE.Material): void {
   const rec = material as THREE.Material & Record<string, unknown>;
   for (const key of TEXTURE_KEYS) disposeTexture(rec[key]);
-  if ('uniforms' in material && material.uniforms && typeof material.uniforms === 'object') {
-    for (const uniform of Object.values(material.uniforms as Record<string, { value?: unknown }>)) {
+  if (
+    'uniforms' in material &&
+    material.uniforms &&
+    typeof material.uniforms === 'object'
+  ) {
+    for (const uniform of Object.values(
+      material.uniforms as Record<string, { value?: unknown }>,
+    )) {
       disposeTexture(uniform?.value);
     }
   }
@@ -128,13 +169,33 @@ export class SceneManager {
   private frameGate: FrameGate | null = null;
   private qualityTier: QualityTier = 'high';
   private paused = false;
+  private gpuTimer: GpuTimer | null = null;
+  private cpuMs = 0;
+  private cpuStatistics = new FrameStatistics();
+  getTimingPercentiles() {
+    return {
+      cpu: this.cpuStatistics.percentiles(),
+      gpu: this.gpuTimer?.statistics.percentiles() ?? null,
+    };
+  }
+  private reduceFlashes = false;
+  setFlashReduction(value: boolean): void {
+    this.reduceFlashes = value;
+  }
+  getWorkTiming(): { cpuMs: number; gpuMs: number | null } {
+    return { cpuMs: this.cpuMs, gpuMs: this.gpuTimer?.milliseconds ?? null };
+  }
   private visibilityListener: (() => void) | null = null;
 
   private dragging = false;
   private lastPointerX = 0;
   private lastPointerY = 0;
 
-  private viewportCaps: ViewportCapabilities = { pan: true, zoom: true, orbit: false };
+  private viewportCaps: ViewportCapabilities = {
+    pan: true,
+    zoom: true,
+    orbit: false,
+  };
   private cursorMode: CursorMode = 'default';
 
   private _onDrag: ViewportDragHandler | null = null;
@@ -147,16 +208,30 @@ export class SceneManager {
     this.height = height;
     this.scene = new THREE.Scene();
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-    this.perspCamera = new THREE.PerspectiveCamera(60, width / height, 0.1, 100);
+    this.perspCamera = new THREE.PerspectiveCamera(
+      60,
+      width / height,
+      0.1,
+      100,
+    );
     this.perspCamera.position.set(0, 0, 12);
     this.perspCamera.lookAt(0, 0, 0);
     this.activeCamera = this.camera;
   }
 
   attach(container: HTMLElement): void {
-    this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: false,
+      powerPreference: 'high-performance',
+    });
+    this.renderer.info.autoReset = false;
+    this.gpuTimer = new GpuTimer(
+      this.renderer.getContext() as WebGL2RenderingContext,
+    );
     this.renderer.setSize(this.width, this.height);
-    this.renderer.setPixelRatio(pixelRatioForTier(this.qualityTier, window.devicePixelRatio));
+    this.renderer.setPixelRatio(
+      pixelRatioForTier(this.qualityTier, window.devicePixelRatio),
+    );
     this.renderer.domElement.style.position = 'fixed';
     this.renderer.domElement.style.inset = '0';
     this.renderer.domElement.style.zIndex = '0';
@@ -183,7 +258,12 @@ export class SceneManager {
     // ── Pointer events (unified mouse + touch) ────────────────────
     const onPointerDown = (e: PointerEvent) => {
       if (e.button !== 0 && e.pointerType === 'mouse') return;
-      if (!this.viewportCaps.pan && !this.viewportCaps.orbit && !this.viewportCaps.zoom) return;
+      if (
+        !this.viewportCaps.pan &&
+        !this.viewportCaps.orbit &&
+        !this.viewportCaps.zoom
+      )
+        return;
       this.dragging = true;
       this.lastPointerX = e.clientX;
       this.lastPointerY = e.clientY;
@@ -223,48 +303,79 @@ export class SceneManager {
     });
 
     // ── Scroll to zoom ────────────────────────────────────────────
-    canvas.addEventListener('wheel', (e) => {
-      if (!this.viewportCaps.zoom) return;
-      e.preventDefault();
-      const delta = e.deltaY > 0 ? -0.1 : 0.1;
-      if (this._onZoom) this._onZoom(delta);
-    }, { passive: false });
+    canvas.addEventListener(
+      'wheel',
+      (e) => {
+        if (!this.viewportCaps.zoom) return;
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? -0.1 : 0.1;
+        if (this._onZoom) this._onZoom(delta);
+      },
+      { passive: false },
+    );
 
     // ── Touch pinch-to-zoom ───────────────────────────────────────
     let lastPinchDist = 0;
-    canvas.addEventListener('touchstart', (e) => {
-      if (e.touches.length === 2) {
-        const t = e.touches;
-        lastPinchDist = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-      }
-    }, { passive: true });
-
-    canvas.addEventListener('touchmove', (e) => {
-      if (e.touches.length === 2 && this.viewportCaps.zoom) {
-        const t = e.touches;
-        const dist = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-        if (lastPinchDist > 0 && this._onZoom) {
-          const scale = dist / lastPinchDist;
-          this._onZoom(scale - 1.0);
+    canvas.addEventListener(
+      'touchstart',
+      (e) => {
+        if (e.touches.length === 2) {
+          const t = e.touches;
+          lastPinchDist = Math.hypot(
+            t[0].clientX - t[1].clientX,
+            t[0].clientY - t[1].clientY,
+          );
         }
-        lastPinchDist = dist;
-      }
-    }, { passive: true });
-    canvas.addEventListener('touchend', () => { lastPinchDist = 0; }, { passive: true });
+      },
+      { passive: true },
+    );
+
+    canvas.addEventListener(
+      'touchmove',
+      (e) => {
+        if (e.touches.length === 2 && this.viewportCaps.zoom) {
+          const t = e.touches;
+          const dist = Math.hypot(
+            t[0].clientX - t[1].clientX,
+            t[0].clientY - t[1].clientY,
+          );
+          if (lastPinchDist > 0 && this._onZoom) {
+            const scale = dist / lastPinchDist;
+            this._onZoom(scale - 1.0);
+          }
+          lastPinchDist = dist;
+        }
+      },
+      { passive: true },
+    );
+    canvas.addEventListener(
+      'touchend',
+      () => {
+        lastPinchDist = 0;
+      },
+      { passive: true },
+    );
 
     // ── WebGL Context Loss Handling ───────────────────────────────
     canvas.addEventListener('webglcontextlost', (e) => {
       e.preventDefault();
+      this.gpuTimer?.dispose();
       console.warn('CyberNoetica: WebGL context lost. Pausing render loop.');
       this.stop();
     });
 
     canvas.addEventListener('webglcontextrestored', () => {
-      console.info('CyberNoetica: WebGL context restored. Re-initialization required.');
+      if (this.renderer)
+        this.gpuTimer = new GpuTimer(
+          this.renderer.getContext() as WebGL2RenderingContext,
+        );
+      console.info(
+        'CyberNoetica: WebGL context restored. Re-initialization required.',
+      );
       if (this._onContextRestored) this._onContextRestored();
       else this.start();
     });
-    }
+  }
 
   setViewportCapabilities(caps: ViewportCapabilities): void {
     this.viewportCaps = caps;
@@ -286,10 +397,18 @@ export class SceneManager {
     }
   }
 
-  onViewportDrag(handler: ViewportDragHandler): void { this._onDrag = handler; }
-  onViewportZoom(handler: ViewportZoomHandler): void { this._onZoom = handler; }
-  onViewportReset(handler: ViewportResetHandler): void { this._onReset = handler; }
-  onContextRestored(handler: ContextRestoredHandler | null): void { this._onContextRestored = handler; }
+  onViewportDrag(handler: ViewportDragHandler | null): void {
+    this._onDrag = handler;
+  }
+  onViewportZoom(handler: ViewportZoomHandler | null): void {
+    this._onZoom = handler;
+  }
+  onViewportReset(handler: ViewportResetHandler | null): void {
+    this._onReset = handler;
+  }
+  onContextRestored(handler: ContextRestoredHandler | null): void {
+    this._onContextRestored = handler;
+  }
 
   resetPerspectiveCamera(): void {
     this.perspCamera.fov = 60;
@@ -307,6 +426,8 @@ export class SceneManager {
    * renderer has not been attached (unit tests).
    */
   clearScene(): void {
+    this.cpuStatistics.reset();
+    this.gpuTimer?.statistics.reset();
     const children = this.scene.children.slice();
     for (const child of children) {
       disposeObject3D(child);
@@ -319,7 +440,9 @@ export class SceneManager {
     this.resetPerspectiveCamera();
   }
 
-  isDragging(): boolean { return this.dragging; }
+  isDragging(): boolean {
+    return this.dragging;
+  }
 
   setCameraPosition(x: number, y: number, z: number): void {
     this.perspCamera.position.set(x, y, z);
@@ -328,7 +451,11 @@ export class SceneManager {
 
   onRender(callback: (time: number) => void): () => void {
     this.renderCallbacks.push(callback);
-    return () => { this.renderCallbacks = this.renderCallbacks.filter(cb => cb !== callback); };
+    return () => {
+      this.renderCallbacks = this.renderCallbacks.filter(
+        (cb) => cb !== callback,
+      );
+    };
   }
 
   setFrameGate(gate: FrameGate | null): void {
@@ -347,25 +474,60 @@ export class SceneManager {
     const loop = (time: number) => {
       this.animationId = requestAnimationFrame(loop);
       if (this.paused) return;
-      for (const cb of this.renderCallbacks) cb(time);
       if (this.frameGate && !this.frameGate()) return;
+      const workStart = performance.now();
+      this.renderer?.info.reset();
+      this.gpuTimer?.begin();
+      for (const cb of this.renderCallbacks) cb(time);
+      this.scene.traverse((object) => {
+        const materials = (object as THREE.Mesh).material;
+        for (const material of Array.isArray(materials)
+          ? materials
+          : materials
+            ? [materials]
+            : []) {
+          const uniforms = (material as THREE.ShaderMaterial).uniforms;
+          if (this.reduceFlashes && uniforms?.u_beatPulse)
+            uniforms.u_beatPulse.value *= 0.15;
+          if (uniforms?.u_workBudget)
+            uniforms.u_workBudget.value = {
+              'sub-performance': 0.45,
+              performance: 0.6,
+              balanced: 0.8,
+              high: 1,
+              ultra: 1,
+            }[this.qualityTier];
+        }
+      });
       this.renderer?.render(this.scene, this.activeCamera);
+      this.gpuTimer?.end();
+      this.cpuMs = performance.now() - workStart;
+      this.cpuStatistics.add(this.cpuMs);
     };
     this.animationId = requestAnimationFrame(loop);
   }
 
   stop(): void {
-    if (this.animationId !== null) { cancelAnimationFrame(this.animationId); this.animationId = null; }
+    if (this.animationId !== null) {
+      cancelAnimationFrame(this.animationId);
+      this.animationId = null;
+    }
     if (this.visibilityListener) {
       document.removeEventListener('visibilitychange', this.visibilityListener);
       this.visibilityListener = null;
     }
   }
 
-  private _pause(): void { this.paused = true; }
-  private _resume(): void { this.paused = false; }
+  private _pause(): void {
+    this.paused = true;
+  }
+  private _resume(): void {
+    this.paused = false;
+  }
 
-  isPaused(): boolean { return this.paused; }
+  isPaused(): boolean {
+    return this.paused;
+  }
 
   setQualityTier(tier: QualityTier): void {
     this.qualityTier = tier;
@@ -376,7 +538,9 @@ export class SceneManager {
     }
   }
 
-  getQualityTier(): QualityTier { return this.qualityTier; }
+  getQualityTier(): QualityTier {
+    return this.qualityTier;
+  }
 
   precompile(): void {
     if (!this.renderer) return;
@@ -408,7 +572,10 @@ export class SceneManager {
 
   getDrawingBufferSize(): { width: number; height: number } {
     const dpr = this.getPixelRatio();
-    return { width: Math.floor(this.width * dpr), height: Math.floor(this.height * dpr) };
+    return {
+      width: Math.floor(this.width * dpr),
+      height: Math.floor(this.height * dpr),
+    };
   }
 
   getRendererInfo(): THREE.WebGLInfo | null {
@@ -423,5 +590,19 @@ export class SceneManager {
     return this.renderer?.domElement ?? null;
   }
 
-  dispose(): void { this.stop(); this.renderer?.dispose(); this.renderer = null; }
+  dispose(): void {
+    this.stop();
+    this.gpuTimer?.dispose();
+    this.gpuTimer = null;
+    this.renderCallbacks = [];
+    this.frameGate = null;
+    this._onDrag = null;
+    this._onZoom = null;
+    this._onReset = null;
+    this._onContextRestored = null;
+    this.clearScene();
+    this.renderer?.domElement.remove();
+    this.renderer?.dispose();
+    this.renderer = null;
+  }
 }

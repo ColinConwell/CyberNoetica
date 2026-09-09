@@ -1,7 +1,12 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -25,16 +30,97 @@ const quasicrystalMetadata: VisualizerMetadata = {
   usesPerspective: false,
   params: [
     // Appearance
-    { key: 'waveCount', label: 'Wave Count', min: 3, max: 12, step: 1, initial: 7, category: 'appearance', description: 'Number of interfering plane waves (symmetry order)' },
-    { key: 'frequency', label: 'Spatial Frequency', min: 2.0, max: 30.0, step: 0.5, initial: 12.0, category: 'appearance', description: 'Spatial density of the pattern' },
-    { key: 'colorSteps', label: 'Color Steps', min: 2, max: 16, step: 1, initial: 6, category: 'appearance', description: 'Quantization levels for mosaic look' },
-    { key: 'animSpeed', label: 'Animation Speed', min: 0.0, max: 1.0, step: 0.05, initial: 0.3, category: 'appearance', description: 'Phase animation rate' },
-    { key: 'colorSaturation', label: 'Saturation', min: 0.0, max: 1.0, step: 0.05, initial: 0.7, category: 'appearance', description: 'Color vibrancy' },
+    {
+      key: 'waveCount',
+      label: 'Wave Count',
+      min: 3,
+      max: 12,
+      step: 1,
+      initial: 7,
+      category: 'appearance',
+      description: 'Number of interfering plane waves (symmetry order)',
+    },
+    {
+      key: 'frequency',
+      label: 'Spatial Frequency',
+      min: 2.0,
+      max: 30.0,
+      step: 0.5,
+      initial: 12.0,
+      category: 'appearance',
+      description: 'Spatial density of the pattern',
+    },
+    {
+      key: 'colorSteps',
+      label: 'Color Steps',
+      min: 2,
+      max: 16,
+      step: 1,
+      initial: 6,
+      category: 'appearance',
+      description: 'Quantization levels for mosaic look',
+    },
+    {
+      key: 'animSpeed',
+      label: 'Animation Speed',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.3,
+      category: 'appearance',
+      description: 'Phase animation rate',
+    },
+    {
+      key: 'colorSaturation',
+      label: 'Saturation',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.7,
+      category: 'appearance',
+      description: 'Color vibrancy',
+    },
     // Audio mapping
-    { key: 'bassToPhase', label: 'Bass → Phase', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly bass pulses the global phase' },
-    { key: 'midToAsymmetry', label: 'Mid → Asymmetry', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly mids break wave symmetry' },
-    { key: 'spectralToFreq', label: 'Spectral → Frequency', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How spectral centroid modulates spatial frequency' },
-    { key: 'rmsToContrast', label: 'RMS → Contrast', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How volume drives color contrast' },
+    {
+      key: 'bassToPhase',
+      label: 'Bass → Phase',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How strongly bass pulses the global phase',
+    },
+    {
+      key: 'midToAsymmetry',
+      label: 'Mid → Asymmetry',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How strongly mids break wave symmetry',
+    },
+    {
+      key: 'spectralToFreq',
+      label: 'Spectral → Frequency',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How spectral centroid modulates spatial frequency',
+    },
+    {
+      key: 'rmsToContrast',
+      label: 'RMS → Contrast',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How volume drives color contrast',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
@@ -45,6 +131,8 @@ const quasicrystalMetadata: VisualizerMetadata = {
 };
 
 export class QuasicrystalVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = quasicrystalMetadata;
 
   private unsub: Unsubscribe;
@@ -73,16 +161,19 @@ export class QuasicrystalVisualizer implements Visualizer {
     high: new EMASmoothing(0.25),
     rms: new EMASmoothing(0.2),
     spectralCentroid: new EMASmoothing(0.1),
-    beatPulse: new EMASmoothing(0.45),
+    beatPulse: new EventEnvelope(),
   };
 
   private material: THREE.ShaderMaterial | null = null;
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
 
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
@@ -93,7 +184,7 @@ export class QuasicrystalVisualizer implements Visualizer {
   }
 
   attach(scene: THREE.Scene): void {
-    this.material = new THREE.RawShaderMaterial({
+    this.material = new THREE.ShaderMaterial({
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
@@ -124,19 +215,26 @@ export class QuasicrystalVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += (1 / 60) * this.userParams.animSpeed;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds * this.userParams.animSpeed;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     if (this.material) {
@@ -162,7 +260,8 @@ export class QuasicrystalVisualizer implements Visualizer {
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -174,9 +273,12 @@ export class QuasicrystalVisualizer implements Visualizer {
   }
 
   setViewState(partial: Record<string, number>): void {
-    if ('zoom' in partial) this._zoom = Math.max(0.2, Math.min(5.0, partial.zoom));
-    if ('panX' in partial) this._panX = Math.max(-5.0, Math.min(5.0, partial.panX));
-    if ('panY' in partial) this._panY = Math.max(-5.0, Math.min(5.0, partial.panY));
+    if ('zoom' in partial)
+      this._zoom = Math.max(0.2, Math.min(5.0, partial.zoom));
+    if ('panX' in partial)
+      this._panX = Math.max(-5.0, Math.min(5.0, partial.panX));
+    if ('panY' in partial)
+      this._panY = Math.max(-5.0, Math.min(5.0, partial.panY));
   }
 
   dispose(): void {
@@ -192,8 +294,6 @@ registerVisualizer({
 });
 
 const VERTEX_SHADER = /* glsl */ `
-  attribute vec3 position;
-  attribute vec2 uv;
   varying vec2 vUv;
   void main() {
     vUv = uv;
@@ -254,7 +354,9 @@ const FRAGMENT_SHADER = /* glsl */ `
       float perWavePhase = float(i) * u_mid * 2.0 * u_midToAsymmetry;
 
       vec2 k = vec2(cos(angle), sin(angle)) * freq;
-      sum += cos(dot(k, uv) + globalPhase + perWavePhase);
+      float phase=dot(k,uv)+globalPhase+perWavePhase;
+      float attenuation=1.0-smoothstep(1.5,3.14159,fwidth(phase));
+      sum += attenuation*cos(phase);
     }
 
     // Normalize to [0, 1]

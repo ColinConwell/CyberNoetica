@@ -1,7 +1,12 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -29,18 +34,126 @@ const auroraMetadata: VisualizerMetadata = {
   description: 'Northern lights curtain simulation',
   usesPerspective: false,
   params: [
-    { key: 'curtainAmplitude', label: 'Curtain Amplitude', min: 0.1, max: 2.0, step: 0.05, initial: 0.8, category: 'appearance', description: 'How far the aurora bands sway' },
-    { key: 'speed', label: 'Speed', min: 0.05, max: 1.5, step: 0.05, initial: 0.4, category: 'appearance', description: 'Animation speed' },
-    { key: 'layers', label: 'Layers', min: 2.0, max: 7.0, step: 1.0, initial: 5.0, category: 'appearance', description: 'Number of aurora bands' },
-    { key: 'brightness', label: 'Brightness', min: 0.3, max: 3.0, step: 0.1, initial: 1.2, category: 'appearance', description: 'Overall luminosity' },
-    { key: 'foldDetail', label: 'Fold Detail', min: 0.5, max: 3.0, step: 0.1, initial: 1.5, category: 'appearance', description: 'Fine detail in curtain folds' },
-    { key: 'verticalSpread', label: 'Vertical Spread', min: 0.2, max: 2.0, step: 0.05, initial: 0.8, category: 'appearance', description: 'How far aurora extends vertically' },
-    { key: 'bassToCurtain', label: 'Bass → Curtain', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Bass drives curtain sway' },
-    { key: 'midToSpeed', label: 'Mid → Speed', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Mids drive animation' },
-    { key: 'highToShimmer', label: 'High → Shimmer', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Highs add shimmer detail' },
-    { key: 'rmsToGlow', label: 'RMS → Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Volume drives brightness' },
-    { key: 'beatToFlare', label: 'Beat → Flare', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Beats trigger bright pulse' },
-    { key: 'centroidToHue', label: 'Centroid → Hue', min: 0.0, max: 2.0, step: 0.1, initial: 0.8, category: 'audio-mapping', description: 'Spectral centroid shifts hue' },
+    {
+      key: 'curtainAmplitude',
+      label: 'Curtain Amplitude',
+      min: 0.1,
+      max: 2.0,
+      step: 0.05,
+      initial: 0.8,
+      category: 'appearance',
+      description: 'How far the aurora bands sway',
+    },
+    {
+      key: 'speed',
+      label: 'Speed',
+      min: 0.05,
+      max: 1.5,
+      step: 0.05,
+      initial: 0.4,
+      category: 'appearance',
+      description: 'Animation speed',
+    },
+    {
+      key: 'layers',
+      label: 'Layers',
+      min: 2.0,
+      max: 7.0,
+      step: 1.0,
+      initial: 5.0,
+      category: 'appearance',
+      description: 'Number of aurora bands',
+    },
+    {
+      key: 'brightness',
+      label: 'Brightness',
+      min: 0.3,
+      max: 3.0,
+      step: 0.1,
+      initial: 1.2,
+      category: 'appearance',
+      description: 'Overall luminosity',
+    },
+    {
+      key: 'foldDetail',
+      label: 'Fold Detail',
+      min: 0.5,
+      max: 3.0,
+      step: 0.1,
+      initial: 1.5,
+      category: 'appearance',
+      description: 'Fine detail in curtain folds',
+    },
+    {
+      key: 'verticalSpread',
+      label: 'Vertical Spread',
+      min: 0.2,
+      max: 2.0,
+      step: 0.05,
+      initial: 0.8,
+      category: 'appearance',
+      description: 'How far aurora extends vertically',
+    },
+    {
+      key: 'bassToCurtain',
+      label: 'Bass → Curtain',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Bass drives curtain sway',
+    },
+    {
+      key: 'midToSpeed',
+      label: 'Mid → Speed',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Mids drive animation',
+    },
+    {
+      key: 'highToShimmer',
+      label: 'High → Shimmer',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Highs add shimmer detail',
+    },
+    {
+      key: 'rmsToGlow',
+      label: 'RMS → Glow',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Volume drives brightness',
+    },
+    {
+      key: 'beatToFlare',
+      label: 'Beat → Flare',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Beats trigger bright pulse',
+    },
+    {
+      key: 'centroidToHue',
+      label: 'Centroid → Hue',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 0.8,
+      category: 'audio-mapping',
+      description: 'Spectral centroid shifts hue',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
@@ -51,6 +164,8 @@ const auroraMetadata: VisualizerMetadata = {
 };
 
 export class AuroraVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = auroraMetadata;
 
   private unsub: Unsubscribe;
@@ -82,16 +197,19 @@ export class AuroraVisualizer implements Visualizer {
     high: new EMASmoothing(0.22),
     rms: new EMASmoothing(0.15),
     spectralCentroid: new EMASmoothing(0.08),
-    beatPulse: new EMASmoothing(0.35),
+    beatPulse: new EventEnvelope(),
   };
 
   private material: THREE.ShaderMaterial | null = null;
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
     this.smoothers.high.reset(0);
@@ -105,6 +223,7 @@ export class AuroraVisualizer implements Visualizer {
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
+        u_speedPhase: { value: 0 },
         u_time: { value: 0.0 },
         u_resolution: { value: new THREE.Vector2(1920, 1080) },
         u_center: { value: new THREE.Vector2(0, 0) },
@@ -130,19 +249,26 @@ export class AuroraVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     if (this.material) {
@@ -154,26 +280,35 @@ export class AuroraVisualizer implements Visualizer {
       u.u_time.value = this.time;
       u.u_center.value.set(this._centerX, this._centerY);
       u.u_zoom.value = this._zoom;
-      u.u_curtainAmplitude.value = this.userParams.curtainAmplitude
-        + bass * 0.5 * this.userParams.bassToCurtain;
-      u.u_speed.value = this.userParams.speed
-        + mid * 0.3 * this.userParams.midToSpeed;
+      u.u_curtainAmplitude.value =
+        this.userParams.curtainAmplitude +
+        bass * 0.5 * this.userParams.bassToCurtain;
+      u.u_speed.value =
+        this.userParams.speed + mid * 0.3 * this.userParams.midToSpeed;
+      u.u_speedPhase.value = this.phases.advance(
+        'u_speed',
+        u.u_speed.value,
+        this.deltaSeconds,
+      );
       u.u_layers.value = this.userParams.layers;
       u.u_brightness.value = this.userParams.brightness;
-      u.u_foldDetail.value = this.userParams.foldDetail
-        + high * 1.0 * this.userParams.highToShimmer;
+      u.u_foldDetail.value =
+        this.userParams.foldDetail + high * 1.0 * this.userParams.highToShimmer;
       u.u_verticalSpread.value = this.userParams.verticalSpread;
       u.u_bass.value = bass;
       u.u_mid.value = mid;
       u.u_high.value = high;
       u.u_rms.value = this.smoothers.rms.value * this.userParams.rmsToGlow;
-      u.u_spectralCentroid.value = this.smoothers.spectralCentroid.value;
-      u.u_beatPulse.value = this.smoothers.beatPulse.value * this.userParams.beatToFlare;
+      u.u_spectralCentroid.value =
+        this.smoothers.spectralCentroid.value * this.userParams.centroidToHue;
+      u.u_beatPulse.value =
+        this.smoothers.beatPulse.value * this.userParams.beatToFlare;
     }
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -185,9 +320,12 @@ export class AuroraVisualizer implements Visualizer {
   }
 
   setViewState(partial: Record<string, number>): void {
-    if ('centerX' in partial) this._centerX = Math.max(-5, Math.min(5, partial.centerX));
-    if ('centerY' in partial) this._centerY = Math.max(-5, Math.min(5, partial.centerY));
-    if ('zoom' in partial) this._zoom = Math.max(0.2, Math.min(4.0, partial.zoom));
+    if ('centerX' in partial)
+      this._centerX = Math.max(-5, Math.min(5, partial.centerX));
+    if ('centerY' in partial)
+      this._centerY = Math.max(-5, Math.min(5, partial.centerY));
+    if ('zoom' in partial)
+      this._zoom = Math.max(0.2, Math.min(4.0, partial.zoom));
   }
 
   dispose(): void {
@@ -218,6 +356,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   #define PI 3.14159265359
   #define TAU 6.28318530718
 
+  uniform float u_speedPhase;
   uniform float u_time;
   uniform vec2 u_resolution;
   uniform vec2 u_center;
@@ -317,7 +456,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     float scale = 2.0 / u_zoom;
     uv = uv * scale + u_center;
 
-    float t = u_time * u_speed;
+    float t = u_speedPhase;
     int numLayers = int(u_layers);
 
     // Dark sky background with subtle gradient
@@ -331,6 +470,8 @@ const FRAGMENT_SHADER = /* glsl */ `
     float twinkle = sin(u_time * 2.0 + stars * 100.0) * 0.5 + 0.5;
     color += vec3(stars * twinkle * 0.5);
 
+    vec2 curtainUv=uv.y<0.0?vec2(uv.x,-uv.y*.6):uv;
+    curtainUv.x-=t*.08;
     // Accumulate aurora bands
     float totalIntensity = 0.0;
     vec3 auroraAccum = vec3(0.0);
@@ -345,8 +486,9 @@ const FRAGMENT_SHADER = /* glsl */ `
       // Slight oscillation in base height
       baseY += sin(t * 0.5 + fi * 1.7) * 0.05;
 
-      float intensity = auroraBand(uv, baseY, t + fi * 0.5, u_foldDetail, u_curtainAmplitude);
-      vec3 bandColor = auroraColor(fi, bandCount, u_spectralCentroid);
+      float intensity = auroraBand(curtainUv, baseY, t + fi * 0.5, u_foldDetail, u_curtainAmplitude);
+      vec3 bandColor = mix(vec3(.12,.9,.35),vec3(.85,.12,.18),smoothstep(.35,1.,curtainUv.y));
+      bandColor=mix(bandColor,auroraColor(fi,bandCount,u_spectralCentroid),.25);
 
       auroraAccum += bandColor * intensity;
       totalIntensity += intensity;
@@ -362,30 +504,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     float flareWhite = u_beatPulse * 0.1 * totalIntensity;
     auroraAccum += vec3(flareWhite);
 
-    color += auroraAccum;
-
-    // Ground reflection: faint mirror below y=0
-    if (uv.y < 0.0) {
-      vec2 reflUv = vec2(uv.x, -uv.y * 0.6);
-      float reflIntensity = 0.0;
-      vec3 reflColor = vec3(0.0);
-      for (int i = 0; i < 7; i++) {
-        if (i >= numLayers) break;
-        float fi = float(i);
-        float bandCount = float(numLayers);
-        float baseY = 0.1 + fi * u_verticalSpread * 0.25;
-        baseY += sin(t * 0.5 + fi * 1.7) * 0.05;
-        float intensity = auroraBand(reflUv, baseY, t + fi * 0.5, u_foldDetail, u_curtainAmplitude);
-        vec3 bandColor = auroraColor(fi, bandCount, u_spectralCentroid);
-        reflColor += bandColor * intensity;
-        reflIntensity += intensity;
-      }
-      // Heavily attenuated reflection
-      reflColor *= lumMult * 0.15;
-      // Fade with distance below horizon
-      reflColor *= exp(uv.y * 3.0);
-      color += reflColor;
-    }
+    color += auroraAccum*(uv.y<0.0?.15*exp(uv.y*3.0):1.0);
 
     // Vignette
     float aspect = u_resolution.x / u_resolution.y;

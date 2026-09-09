@@ -1,7 +1,12 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -25,17 +30,107 @@ const tunnelMetadata: VisualizerMetadata = {
   usesPerspective: false,
   params: [
     // Appearance
-    { key: 'segments', label: 'Segments', min: 3, max: 12, step: 1, initial: 6, category: 'appearance', description: 'Tunnel cross-section polygon sides' },
-    { key: 'flySpeed', label: 'Fly Speed', min: 0.1, max: 3.0, step: 0.1, initial: 1.0, category: 'appearance', description: 'Forward travel speed' },
-    { key: 'twist', label: 'Twist', min: 0.0, max: 2.0, step: 0.05, initial: 0.5, category: 'appearance', description: 'Tunnel twist amount' },
-    { key: 'neonIntensity', label: 'Neon Intensity', min: 0.2, max: 2.0, step: 0.1, initial: 1.0, category: 'appearance', description: 'Brightness of neon edges' },
-    { key: 'colorCycle', label: 'Color Cycle', min: 0.0, max: 1.0, step: 0.01, initial: 0.3, category: 'appearance', description: 'Speed of color cycling' },
+    {
+      key: 'segments',
+      label: 'Segments',
+      min: 3,
+      max: 12,
+      step: 1,
+      initial: 6,
+      category: 'appearance',
+      description: 'Tunnel cross-section polygon sides',
+    },
+    {
+      key: 'flySpeed',
+      label: 'Fly Speed',
+      min: 0.1,
+      max: 3.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'appearance',
+      description: 'Forward travel speed',
+    },
+    {
+      key: 'twist',
+      label: 'Twist',
+      min: 0.0,
+      max: 2.0,
+      step: 0.05,
+      initial: 0.5,
+      category: 'appearance',
+      description: 'Tunnel twist amount',
+    },
+    {
+      key: 'neonIntensity',
+      label: 'Neon Intensity',
+      min: 0.2,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'appearance',
+      description: 'Brightness of neon edges',
+    },
+    {
+      key: 'colorCycle',
+      label: 'Color Cycle',
+      min: 0.0,
+      max: 1.0,
+      step: 0.01,
+      initial: 0.3,
+      category: 'appearance',
+      description: 'Speed of color cycling',
+    },
     // Audio mapping
-    { key: 'bassToWarp', label: 'Bass -> Warp', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Bass warps tunnel walls' },
-    { key: 'midToTwist', label: 'Mid -> Twist', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Mids increase twist' },
-    { key: 'highToGlow', label: 'High -> Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Highs brighten neon' },
-    { key: 'rmsToSpeed', label: 'RMS -> Speed', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Volume drives fly speed' },
-    { key: 'beatToFlash', label: 'Beat -> Flash', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Beats trigger tunnel flash' },
+    {
+      key: 'bassToWarp',
+      label: 'Bass -> Warp',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Bass warps tunnel walls',
+    },
+    {
+      key: 'midToTwist',
+      label: 'Mid -> Twist',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Mids increase twist',
+    },
+    {
+      key: 'highToGlow',
+      label: 'High -> Glow',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Highs brighten neon',
+    },
+    {
+      key: 'rmsToSpeed',
+      label: 'RMS -> Speed',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Volume drives fly speed',
+    },
+    {
+      key: 'beatToFlash',
+      label: 'Beat -> Flash',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Beats trigger tunnel flash',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
@@ -46,6 +141,8 @@ const tunnelMetadata: VisualizerMetadata = {
 };
 
 export class TunnelVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = tunnelMetadata;
 
   private unsub: Unsubscribe;
@@ -76,16 +173,19 @@ export class TunnelVisualizer implements Visualizer {
     high: new EMASmoothing(0.25),
     rms: new EMASmoothing(0.15),
     spectralCentroid: new EMASmoothing(0.08),
-    beatPulse: new EMASmoothing(0.4),
+    beatPulse: new EventEnvelope(),
   };
 
   private material: THREE.ShaderMaterial | null = null;
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
 
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
@@ -100,6 +200,9 @@ export class TunnelVisualizer implements Visualizer {
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
+        u_colorCyclePhase: { value: 0 },
+        u_travelPhase: { value: 0 },
+        u_workBudget: { value: 1 },
         u_time: { value: 0.0 },
         u_resolution: { value: new THREE.Vector2(1920, 1080) },
         u_zoom: { value: 1.0 },
@@ -127,33 +230,44 @@ export class TunnelVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     // Effective speed modulated by RMS
-    const speedMult = 0.7 + this.smoothers.rms.value * 0.6 * this.userParams.rmsToSpeed;
+    const speedMult =
+      0.7 + this.smoothers.rms.value * 0.6 * this.userParams.rmsToSpeed;
 
     // Warp strength from bass
-    const warpStrength = this.smoothers.bass.value * 0.4 * this.userParams.bassToWarp;
+    const warpStrength =
+      this.smoothers.bass.value * 0.4 * this.userParams.bassToWarp;
 
     // Twist amount from base + mids
-    const twistAmount = this.userParams.twist
-      + this.smoothers.mid.value * 0.5 * this.userParams.midToTwist;
+    const twistAmount =
+      this.userParams.twist +
+      this.smoothers.mid.value * 0.5 * this.userParams.midToTwist;
 
     // Glow boost from highs
-    const glowBoost = this.smoothers.high.value * 0.8 * this.userParams.highToGlow;
+    const glowBoost =
+      this.smoothers.high.value * 0.8 * this.userParams.highToGlow;
 
     if (this.material) {
       const u = this.material.uniforms;
@@ -169,16 +283,29 @@ export class TunnelVisualizer implements Visualizer {
       u.u_mid.value = this.smoothers.mid.value;
       u.u_high.value = this.smoothers.high.value;
       u.u_rms.value = this.smoothers.rms.value;
-      u.u_beatPulse.value = this.smoothers.beatPulse.value * this.userParams.beatToFlash;
+      u.u_beatPulse.value =
+        this.smoothers.beatPulse.value * this.userParams.beatToFlash;
       u.u_warpStrength.value = warpStrength;
       u.u_twistAmount.value = twistAmount;
       u.u_glowBoost.value = glowBoost;
       u.u_speedMult.value = speedMult;
+      u.u_travelPhase.value = this.phases.advance(
+        'travel',
+        u.u_flySpeed.value * u.u_speedMult.value,
+        this.deltaSeconds,
+      );
     }
+    if (this.material)
+      this.material.uniforms.u_colorCyclePhase.value = this.phases.advance(
+        'u_colorCyclePhase',
+        this.material.uniforms.u_colorCycle.value,
+        this.deltaSeconds,
+      );
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -243,6 +370,8 @@ const FRAGMENT_SHADER = /* glsl */ `
   #define MAX_DIST 40.0
   #define SURF_DIST 0.002
 
+  uniform float u_travelPhase;
+  uniform float u_workBudget;
   uniform float u_time;
   uniform vec2 u_resolution;
   uniform float u_zoom;
@@ -252,6 +381,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   uniform float u_twist;
   uniform float u_neonIntensity;
   uniform float u_colorCycle;
+  uniform float u_colorCyclePhase;
   uniform float u_bass;
   uniform float u_mid;
   uniform float u_high;
@@ -320,17 +450,24 @@ const FRAGMENT_SHADER = /* glsl */ `
 
     // Distance to polygon wall (negative inside, positive outside)
     float d = -sdPolygon(tp, tunnelRadius, n);
-    return d;
+    // Rotation introduces a z derivative proportional to radius; radius warp
+    // contributes at most (3*.3 + 1.5*.2)*warp. This bounds the full 3D gradient.
+    float radiusBound = 1.2 + abs(warp) * .5;
+    float zBound = radiusBound * abs(u_twistAmount) * .3 + 1.2 * abs(warp);
+    return d / sqrt(1.0 + zBound * zBound);
   }
 
   // Raymarching
   float raymarch(vec3 ro, vec3 rd, float segments) {
-    float t = 0.0;
+    float t = 0.0,previous=0.0;
     for (int i = 0; i < MAX_STEPS; i++) {
+      if (float(i) >= max(32.0, float(MAX_STEPS) * u_workBudget)) break;
       vec3 p = ro + rd * t;
       float d = tunnelSDF(p, segments);
+      if(d<0.0){float lo=previous,hi=t;for(int refine=0;refine<8;refine++){float mid=.5*(lo+hi);if(tunnelSDF(ro+rd*mid,segments)>0.0)lo=mid;else hi=mid;}return .5*(lo+hi);}
       if (d < SURF_DIST) return t;
       if (t > MAX_DIST) break;
+      previous=t;
       t += d * 0.8; // Slightly conservative step for stability
     }
     return -1.0;
@@ -369,7 +506,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution) / min(u_resolution.x, u_resolution.y);
     uv = uv / u_zoom + u_center;
 
-    float flyTime = u_time * u_flySpeed * u_speedMult;
+    float flyTime = u_travelPhase;
 
     // Ray setup -- camera flies forward along z
     vec3 ro = vec3(0.0, 0.0, flyTime);
@@ -405,7 +542,7 @@ const FRAGMENT_SHADER = /* glsl */ `
       float fog = exp(-tG * 0.08);
 
       // Color cycling based on depth and time
-      float colorT = hitG.z * 0.1 + u_time * u_colorCycle;
+      float colorT = hitG.z * 0.1 + u_colorCyclePhase;
 
       // Neon color
       vec3 neon = synthColor(colorT);
@@ -439,7 +576,7 @@ const FRAGMENT_SHADER = /* glsl */ `
         vec3 hitR = ro + rdR * tR;
         float gridR = gridLines(hitR, segments);
         float fogR = exp(-tR * 0.08);
-        float colorTR = hitR.z * 0.1 + u_time * u_colorCycle;
+        float colorTR = hitR.z * 0.1 + u_colorCyclePhase;
         vec3 neonR = synthColor(colorTR) * (u_neonIntensity + u_glowBoost);
         vec3 wallR = vec3(0.01, 0.005, 0.02) + neonR * 0.02;
         vec3 surfR = mix(wallR, neonR, gridR);
@@ -456,7 +593,7 @@ const FRAGMENT_SHADER = /* glsl */ `
         vec3 hitB = ro + rdB * tB;
         float gridB = gridLines(hitB, segments);
         float fogB = exp(-tB * 0.08);
-        float colorTB = hitB.z * 0.1 + u_time * u_colorCycle;
+        float colorTB = hitB.z * 0.1 + u_colorCyclePhase;
         vec3 neonB = synthColor(colorTB) * (u_neonIntensity + u_glowBoost);
         vec3 wallB = vec3(0.01, 0.005, 0.02) + neonB * 0.02;
         vec3 surfB = mix(wallB, neonB, gridB);

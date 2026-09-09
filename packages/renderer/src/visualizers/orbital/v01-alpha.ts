@@ -1,6 +1,17 @@
+import {
+  frameDelta,
+  takeAudioFrame,
+  PhaseClock,
+  FixedStepClock,
+  seededRandom,
+} from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
 import { EMASmoothing } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
@@ -73,6 +84,7 @@ interface Emitter {
 }
 
 function createEmitters(count: number): Emitter[] {
+  const random = seededRandom(731);
   const emitters: Emitter[] = [];
   for (let i = 0; i < count; i++) {
     const t = i / count;
@@ -93,7 +105,7 @@ function updateEmitterPosition(
   speedMul: number,
   radiusBreath: number,
 ): void {
-  const angle = time * emitter.speed * speedMul + emitter.phase;
+  const angle = speedMul * emitter.speed + emitter.phase;
   const r = emitter.baseRadius * (1.0 + radiusBreath * 0.3);
   const x = r * Math.cos(angle);
   const yFlat = r * Math.sin(angle);
@@ -174,13 +186,64 @@ const orbitalMetadata: VisualizerMetadata = {
   usesPerspective: true,
   params: [
     // Appearance
-    { key: 'glowMultiplier', label: 'Glow', min: 0.3, max: 2.5, step: 0.1, initial: 1.0, category: 'appearance' },
-    { key: 'gravityMultiplier', label: 'Gravity', min: 0.2, max: 3.0, step: 0.1, initial: 1.0, category: 'appearance' },
-    { key: 'noiseMultiplier', label: 'Turbulence', min: 0.0, max: 3.0, step: 0.1, initial: 1.0, category: 'appearance' },
+    {
+      key: 'glowMultiplier',
+      label: 'Glow',
+      min: 0.3,
+      max: 2.5,
+      step: 0.1,
+      initial: 1.0,
+      category: 'appearance',
+    },
+    {
+      key: 'gravityMultiplier',
+      label: 'Gravity',
+      min: 0.2,
+      max: 3.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'appearance',
+    },
+    {
+      key: 'noiseMultiplier',
+      label: 'Turbulence',
+      min: 0.0,
+      max: 3.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'appearance',
+    },
     // Audio mapping strengths
-    { key: 'bassToGravity', label: 'Bass \u2192 Gravity', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly bass affects gravitational pull' },
-    { key: 'midToSpeed', label: 'Mid \u2192 Speed', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly mids affect emitter orbit speed' },
-    { key: 'rmsToGlow', label: 'RMS \u2192 Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly overall volume affects glow intensity' },
+    {
+      key: 'bassToGravity',
+      label: 'Bass \u2192 Gravity',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How strongly bass affects gravitational pull',
+    },
+    {
+      key: 'midToSpeed',
+      label: 'Mid \u2192 Speed',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How strongly mids affect emitter orbit speed',
+    },
+    {
+      key: 'rmsToGlow',
+      label: 'RMS \u2192 Glow',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How strongly overall volume affects glow intensity',
+    },
   ],
   viewport: { pan: false, zoom: true, orbit: true },
   viewStateFields: [
@@ -195,6 +258,10 @@ const orbitalMetadata: VisualizerMetadata = {
 // ---------------------------------------------------------------------------
 
 export class OrbitalVisualizer implements Visualizer {
+  private clock = new FixedStepClock();
+  private random = seededRandom(1789);
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = orbitalMetadata;
 
   /** Backward-compat: SceneManager reads this directly until Phase 3 refactor */
@@ -215,10 +282,10 @@ export class OrbitalVisualizer implements Visualizer {
 
   // Smoothed audio parameters
   private smoothBass = new EMASmoothing(0.18);
-  private smoothMid = new EMASmoothing(0.20);
+  private smoothMid = new EMASmoothing(0.2);
   private smoothHigh = new EMASmoothing(0.15);
-  private smoothRms = new EMASmoothing(0.20);
-  private smoothCentroid = new EMASmoothing(0.10);
+  private smoothRms = new EMASmoothing(0.2);
+  private smoothCentroid = new EMASmoothing(0.1);
 
   // Particle data arrays
   private positions: Float32Array;
@@ -243,6 +310,8 @@ export class OrbitalVisualizer implements Visualizer {
 
   // Beat burst state
   private burstCooldown = 0;
+  private emissionRemainder = 0;
+  private emitterPhase = 0;
 
   // Camera view state (spherical coordinates around origin)
   private _orbitAngle = 0;
@@ -251,9 +320,21 @@ export class OrbitalVisualizer implements Visualizer {
   private viewOverrides: Record<string, boolean> = {};
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = {
+          ...msg.payload,
+          beatOnset: msg.payload.beatOnset || !!this.latestFeatures?.beatOnset,
+          beatConfidence: Math.max(
+            msg.payload.beatConfidence,
+            this.latestFeatures?.beatOnset
+              ? this.latestFeatures.beatConfidence
+              : 0,
+          ),
+        };
+      },
+    );
 
     // Allocate particle arrays
     this.positions = new Float32Array(MAX_PARTICLES * 3);
@@ -288,11 +369,26 @@ export class OrbitalVisualizer implements Visualizer {
 
     // --- Particle system ---
     this.particleGeometry = new THREE.BufferGeometry();
-    this.particleGeometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
-    this.particleGeometry.setAttribute('a_age', new THREE.BufferAttribute(this.ages, 1));
-    this.particleGeometry.setAttribute('a_lifetime', new THREE.BufferAttribute(this.lifetimes, 1));
-    this.particleGeometry.setAttribute('a_size', new THREE.BufferAttribute(this.sizes, 1));
-    this.particleGeometry.setAttribute('a_speed', new THREE.BufferAttribute(this.speeds, 1));
+    this.particleGeometry.setAttribute(
+      'position',
+      new THREE.BufferAttribute(this.positions, 3),
+    );
+    this.particleGeometry.setAttribute(
+      'a_age',
+      new THREE.BufferAttribute(this.ages, 1),
+    );
+    this.particleGeometry.setAttribute(
+      'a_lifetime',
+      new THREE.BufferAttribute(this.lifetimes, 1),
+    );
+    this.particleGeometry.setAttribute(
+      'a_size',
+      new THREE.BufferAttribute(this.sizes, 1),
+    );
+    this.particleGeometry.setAttribute(
+      'a_speed',
+      new THREE.BufferAttribute(this.speeds, 1),
+    );
 
     this.particleMaterial = new THREE.ShaderMaterial({
       vertexShader: PARTICLE_VERTEX_SHADER,
@@ -307,48 +403,73 @@ export class OrbitalVisualizer implements Visualizer {
       transparent: true,
     });
 
-    this.particlePoints = new THREE.Points(this.particleGeometry, this.particleMaterial);
+    this.particlePoints = new THREE.Points(
+      this.particleGeometry,
+      this.particleMaterial,
+    );
     this.particlePoints.frustumCulled = false;
     scene.add(this.particlePoints);
   }
 
-  tick(): void {
-    const dt = 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.clock.advance(deltaSeconds, (dt) => this.simulate(dt));
+  }
+
+  private simulate(deltaSeconds: number): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    const dt = this.deltaSeconds;
     this.time += dt;
 
     // Read audio (use idle features if none yet)
-    const f = this.latestFeatures ?? IDLE_FEATURES;
+    const f = takeAudioFrame(this.latestFeatures ?? IDLE_FEATURES);
 
     // Smooth the audio parameters
-    const bass = this.smoothBass.update(f.bass);
-    const mid = this.smoothMid.update(f.mid);
-    const high = this.smoothHigh.update(f.high);
-    const rms = this.smoothRms.update(f.rms);
-    const centroid = this.smoothCentroid.update(f.spectralCentroid);
+    const bass = this.smoothBass.update(f.bass, this.deltaSeconds);
+    const mid = this.smoothMid.update(f.mid, this.deltaSeconds);
+    const high = this.smoothHigh.update(f.high, this.deltaSeconds);
+    const rms = this.smoothRms.update(f.rms, this.deltaSeconds);
+    const centroid = this.smoothCentroid.update(
+      f.spectralCentroid,
+      this.deltaSeconds,
+    );
 
     // Derived parameters (incorporating user multipliers + audio mapping strengths)
     const bToG = this.userParams.bassToGravity;
     const mToS = this.userParams.midToSpeed;
     const rToG = this.userParams.rmsToGlow;
-    const gravStrength = BASE_G * (0.5 + bass * 1.5 * bToG) * this.userParams.gravityMultiplier;
+    const gravStrength =
+      BASE_G * (0.5 + bass * 1.5 * bToG) * this.userParams.gravityMultiplier;
     const emitterSpeedMul = 0.5 + mid * 2.0 * mToS;
     const radiusBreath = (bass - 0.3) * 2.0 * bToG;
-    const noiseStrength = BASE_NOISE_STRENGTH * (0.3 + high * 2.0) * this.userParams.noiseMultiplier;
+    const noiseStrength =
+      BASE_NOISE_STRENGTH *
+      (0.3 + high * 2.0) *
+      this.userParams.noiseMultiplier;
     const spawnVelocityVariance = 0.2 + high * 1.5;
-    const glowIntensity = (0.8 + rms * 1.0 * rToG) * this.userParams.glowMultiplier;
+    const glowIntensity =
+      (0.8 + rms * 1.0 * rToG) * this.userParams.glowMultiplier;
     const hueShift = centroid; // 0 = deep blue, 1 = warm gold
-    const emissionRate = Math.floor(BASE_EMISSION_RATE + bass * 6);
+    this.emissionRemainder += (BASE_EMISSION_RATE + bass * 6) * dt * 60;
+    const emissionRate = Math.floor(this.emissionRemainder);
+    this.emissionRemainder -= emissionRate;
+    this.emitterPhase += emitterSpeedMul * dt;
 
     // Beat burst
-    if (this.burstCooldown > 0) this.burstCooldown--;
-    const doBurst = f.beatOnset && f.beatConfidence > 0.4 && this.burstCooldown === 0;
+    this.burstCooldown = Math.max(0, this.burstCooldown - dt);
+    const doBurst =
+      f.beatOnset && f.beatConfidence > 0.4 && this.burstCooldown === 0;
     if (doBurst) {
-      this.burstCooldown = 6;
+      this.burstCooldown = 0.1;
     }
 
     // Update emitter positions
     for (let i = 0; i < this.emitters.length; i++) {
-      updateEmitterPosition(this.emitters[i], this.time, emitterSpeedMul, radiusBreath);
+      updateEmitterPosition(
+        this.emitters[i],
+        this.time,
+        this.emitterPhase,
+        radiusBreath,
+      );
     }
 
     // Emit new particles from each emitter
@@ -420,9 +541,9 @@ export class OrbitalVisualizer implements Visualizer {
         // Only attract if reasonably close
         if (eDist < 3.0) {
           const ePull = 0.15 / (eDist + 0.5);
-          vx += edx / eDist * ePull * dt;
-          vy += edy / eDist * ePull * dt;
-          vz += edz / eDist * ePull * dt;
+          vx += (edx / eDist) * ePull * dt;
+          vy += (edy / eDist) * ePull * dt;
+          vz += (edz / eDist) * ePull * dt;
         }
       }
 
@@ -431,6 +552,15 @@ export class OrbitalVisualizer implements Visualizer {
       vx *= damp;
       vy *= damp;
       vz *= damp;
+
+      const speedLimit = 30;
+      const speedScale = Math.min(
+        1,
+        speedLimit / Math.max(1e-6, Math.hypot(vx, vy, vz)),
+      );
+      vx *= speedScale;
+      vy *= speedScale;
+      vz *= speedScale;
 
       // Store velocity
       this.velocities[idx] = vx;
@@ -448,17 +578,33 @@ export class OrbitalVisualizer implements Visualizer {
       // Update size — slight shimmer with high
       const life = this.ages[i] / this.lifetimes[i];
       const shimmer = 1.0 + high * 0.4 * Math.sin(t * 18 + i * 1.3);
-      const sizeFade = life < 0.1 ? life / 0.1 : 1.0 - Math.pow(Math.max(0, life - 0.6) * 2.5, 2);
-      this.sizes[i] = Math.max(0.5, (1.5 + rms * 1.5) * shimmer * Math.max(0, sizeFade));
+      const sizeFade =
+        life < 0.1
+          ? life / 0.1
+          : 1.0 - Math.pow(Math.max(0, life - 0.6) * 2.5, 2);
+      this.sizes[i] = Math.max(
+        0.5,
+        (1.5 + rms * 1.5) * shimmer * Math.max(0, sizeFade),
+      );
     }
 
     // Update Three.js buffers
     if (this.particleGeometry) {
-      (this.particleGeometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
-      (this.particleGeometry.attributes.a_age as THREE.BufferAttribute).needsUpdate = true;
-      (this.particleGeometry.attributes.a_lifetime as THREE.BufferAttribute).needsUpdate = true;
-      (this.particleGeometry.attributes.a_size as THREE.BufferAttribute).needsUpdate = true;
-      (this.particleGeometry.attributes.a_speed as THREE.BufferAttribute).needsUpdate = true;
+      (
+        this.particleGeometry.attributes.position as THREE.BufferAttribute
+      ).needsUpdate = true;
+      (
+        this.particleGeometry.attributes.a_age as THREE.BufferAttribute
+      ).needsUpdate = true;
+      (
+        this.particleGeometry.attributes.a_lifetime as THREE.BufferAttribute
+      ).needsUpdate = true;
+      (
+        this.particleGeometry.attributes.a_size as THREE.BufferAttribute
+      ).needsUpdate = true;
+      (
+        this.particleGeometry.attributes.a_speed as THREE.BufferAttribute
+      ).needsUpdate = true;
     }
 
     // Update uniforms
@@ -532,24 +678,24 @@ export class OrbitalVisualizer implements Visualizer {
   private _seedParticles(count: number): void {
     // Place emitters at their initial positions
     for (let i = 0; i < this.emitters.length; i++) {
-      updateEmitterPosition(this.emitters[i], 0, 1.0, 0);
+      updateEmitterPosition(this.emitters[i], 0, 0, 0);
     }
 
     for (let i = 0; i < count && i < MAX_PARTICLES; i++) {
       const eIdx = i % this.emitters.length;
       this._emitParticle(i, eIdx, 0.5, false);
       // Scatter them in different life stages
-      this.ages[i] = Math.random() * this.lifetimes[i] * 0.4;
+      this.ages[i] = this.random() * this.lifetimes[i] * 0.4;
       // Spread positions out along orbital paths
-      const angle = Math.random() * Math.PI * 2;
-      const radius = 1.0 + Math.random() * 3.0;
-      const tiltAngle = (Math.random() - 0.5) * 0.8;
+      const angle = this.random() * Math.PI * 2;
+      const radius = 1.0 + this.random() * 3.0;
+      const tiltAngle = (this.random() - 0.5) * 0.8;
       const idx = i * 3;
       this.positions[idx] = Math.cos(angle) * radius;
       this.positions[idx + 1] = Math.sin(angle) * radius * Math.cos(tiltAngle);
       this.positions[idx + 2] = Math.sin(angle) * radius * Math.sin(tiltAngle);
       // Give them some tangential velocity for initial orbital motion
-      const speed = 0.3 + Math.random() * 0.3;
+      const speed = 0.3 + this.random() * 0.3;
       this.velocities[idx] = -Math.sin(angle) * speed;
       this.velocities[idx + 1] = Math.cos(angle) * speed * Math.cos(tiltAngle);
       this.velocities[idx + 2] = Math.cos(angle) * speed * Math.sin(tiltAngle);
@@ -571,15 +717,15 @@ export class OrbitalVisualizer implements Visualizer {
 
     // Position: at emitter with slight randomness
     const spread = burst ? 0.4 : 0.15;
-    this.positions[idx] = ex + (Math.random() - 0.5) * spread;
-    this.positions[idx + 1] = ey + (Math.random() - 0.5) * spread;
-    this.positions[idx + 2] = ez + (Math.random() - 0.5) * spread;
+    this.positions[idx] = ex + (this.random() - 0.5) * spread;
+    this.positions[idx + 1] = ey + (this.random() - 0.5) * spread;
+    this.positions[idx + 2] = ez + (this.random() - 0.5) * spread;
 
     // Velocity: tangential to orbit + outward scatter + variance
     // Tangential direction (perpendicular to radial, in the orbital plane)
     const radial = Math.sqrt(ex * ex + ey * ey + ez * ez) + 0.01;
     const baseSpeed = burst ? 0.8 : 0.2;
-    const speedNoise = Math.random() * velocityVariance;
+    const speedNoise = this.random() * velocityVariance;
 
     // Build a real 3D tangent so tilted emitters do not collapse back into the XY plane.
     const rx = ex / radial;
@@ -596,14 +742,17 @@ export class OrbitalVisualizer implements Visualizer {
     tangY /= tangLen;
     tangZ /= tangLen;
 
-    this.velocities[idx] = tangX * (baseSpeed + speedNoise) + (Math.random() - 0.5) * 0.15;
-    this.velocities[idx + 1] = tangY * (baseSpeed + speedNoise) + (Math.random() - 0.5) * 0.15;
-    this.velocities[idx + 2] = tangZ * (baseSpeed + speedNoise) + (Math.random() - 0.5) * 0.15;
+    this.velocities[idx] =
+      tangX * (baseSpeed + speedNoise) + (this.random() - 0.5) * 0.15;
+    this.velocities[idx + 1] =
+      tangY * (baseSpeed + speedNoise) + (this.random() - 0.5) * 0.15;
+    this.velocities[idx + 2] =
+      tangZ * (baseSpeed + speedNoise) + (this.random() - 0.5) * 0.15;
 
     // Lifetime (in seconds)
-    this.lifetimes[i] = MAX_LIFETIME * (0.4 + Math.random() * 0.6);
+    this.lifetimes[i] = MAX_LIFETIME * (0.4 + this.random() * 0.6);
     this.ages[i] = 0;
-    this.sizes[i] = 1.5 + Math.random() * 2.0;
+    this.sizes[i] = 1.5 + this.random() * 2.0;
     this.speeds[i] = baseSpeed + speedNoise;
     this.alive[i] = 1;
     this.emitterIndex[i] = emitterIdx;

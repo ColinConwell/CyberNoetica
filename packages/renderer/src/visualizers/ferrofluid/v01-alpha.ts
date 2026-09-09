@@ -1,7 +1,12 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -30,31 +35,147 @@ import { registerVisualizer } from '../registry.js';
 const ferrofluidMetadata: VisualizerMetadata = {
   type: 'ferrofluid',
   label: 'Ferrofluid',
-  description: 'Magnetic fluid with Rosensweig spike instability',
+  description: 'Ferrofluid-inspired spiked surface',
   usesPerspective: true,
   params: [
-    { key: 'spikeAmplitude', label: 'Spike Height', min: 0.1, max: 1.5, step: 0.05, initial: 0.5, category: 'appearance', description: 'Magnetic spike prominence' },
-    { key: 'spikeCount', label: 'Spike Density', min: 3.0, max: 12.0, step: 1.0, initial: 7.0, category: 'appearance', description: 'Number of spike lobes' },
-    { key: 'rotationSpeed', label: 'Rotation', min: 0.0, max: 1.0, step: 0.05, initial: 0.2, category: 'appearance', description: 'Auto-rotation speed' },
-    { key: 'iridescence', label: 'Iridescence', min: 0.0, max: 1.0, step: 0.05, initial: 0.6, category: 'appearance', description: 'Thin-film color effect' },
-    { key: 'metallic', label: 'Metallic', min: 0.0, max: 1.0, step: 0.05, initial: 0.85, category: 'appearance', description: 'Metallic reflectance' },
-    { key: 'envBrightness', label: 'Environment', min: 0.3, max: 2.0, step: 0.1, initial: 1.0, category: 'appearance', description: 'Environment light intensity' },
-    { key: 'bassToSpikes', label: 'Bass → Spikes', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Bass drives spike height' },
-    { key: 'midToRotation', label: 'Mid → Rotation', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Mids drive rotation' },
-    { key: 'highToIridescence', label: 'High → Shimmer', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Highs intensify iridescence' },
-    { key: 'rmsToScale', label: 'RMS → Breathe', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Volume breathes the blob' },
-    { key: 'beatToBurst', label: 'Beat → Burst', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Beats extend spikes' },
-    { key: 'centroidToHue', label: 'Centroid → Hue', min: 0.0, max: 2.0, step: 0.1, initial: 0.8, category: 'audio-mapping', description: 'Spectral centroid shifts hue' },
+    {
+      key: 'spikeAmplitude',
+      label: 'Spike Height',
+      min: 0.1,
+      max: 1.5,
+      step: 0.05,
+      initial: 0.5,
+      category: 'appearance',
+      description: 'Magnetic spike prominence',
+    },
+    {
+      key: 'spikeCount',
+      label: 'Spike Density',
+      min: 3.0,
+      max: 12.0,
+      step: 1.0,
+      initial: 7.0,
+      category: 'appearance',
+      description: 'Number of spike lobes',
+    },
+    {
+      key: 'rotationSpeed',
+      label: 'Rotation',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.2,
+      category: 'appearance',
+      description: 'Auto-rotation speed',
+    },
+    {
+      key: 'iridescence',
+      label: 'Iridescence',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.6,
+      category: 'appearance',
+      description: 'Thin-film color effect',
+    },
+    {
+      key: 'metallic',
+      label: 'Metallic',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.85,
+      category: 'appearance',
+      description: 'Metallic reflectance',
+    },
+    {
+      key: 'envBrightness',
+      label: 'Environment',
+      min: 0.3,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'appearance',
+      description: 'Environment light intensity',
+    },
+    {
+      key: 'bassToSpikes',
+      label: 'Bass → Spikes',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Bass drives spike height',
+    },
+    {
+      key: 'midToRotation',
+      label: 'Mid → Rotation',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Mids drive rotation',
+    },
+    {
+      key: 'highToIridescence',
+      label: 'High → Shimmer',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Highs intensify iridescence',
+    },
+    {
+      key: 'rmsToScale',
+      label: 'RMS → Breathe',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Volume breathes the blob',
+    },
+    {
+      key: 'beatToBurst',
+      label: 'Beat → Burst',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Beats extend spikes',
+    },
+    {
+      key: 'centroidToHue',
+      label: 'Centroid → Hue',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 0.8,
+      category: 'audio-mapping',
+      description: 'Spectral centroid shifts hue',
+    },
   ],
   viewport: { pan: false, zoom: true, orbit: true },
   viewStateFields: [
-    { key: 'orbitAngle', label: 'Orbit Angle', min: -Math.PI, max: Math.PI, step: 0.02 },
+    {
+      key: 'orbitAngle',
+      label: 'Orbit Angle',
+      min: -Math.PI,
+      max: Math.PI,
+      step: 0.02,
+    },
     { key: 'elevation', label: 'Elevation', min: -1.2, max: 1.2, step: 0.02 },
     { key: 'distance', label: 'Distance', min: 2.0, max: 8.0, step: 0.1 },
   ],
 };
 
 export class FerrofluidVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = ferrofluidMetadata;
 
   private unsub: Unsubscribe;
@@ -87,7 +208,7 @@ export class FerrofluidVisualizer implements Visualizer {
     high: new EMASmoothing(0.22),
     rms: new EMASmoothing(0.15),
     spectralCentroid: new EMASmoothing(0.1),
-    beatPulse: new EMASmoothing(0.3),
+    beatPulse: new EventEnvelope(),
   };
 
   private beatBurst = new EMASmoothing(0.08);
@@ -95,9 +216,12 @@ export class FerrofluidVisualizer implements Visualizer {
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
     this.smoothers.high.reset(0);
@@ -112,6 +236,8 @@ export class FerrofluidVisualizer implements Visualizer {
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
+        u_rotationSpeedPhase: { value: 0 },
+        u_workBudget: { value: 1 },
         u_time: { value: 0.0 },
         u_resolution: { value: new THREE.Vector2(1920, 1080) },
         u_orbitAngle: { value: 0.0 },
@@ -139,22 +265,29 @@ export class FerrofluidVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
       if (f.beatOnset && this.userParams.beatToBurst > 0) {
         this.beatBurst.reset(1.0);
       }
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
     this.beatBurst.update(0.0);
 
@@ -167,14 +300,17 @@ export class FerrofluidVisualizer implements Visualizer {
       u.u_orbitAngle.value = this._orbitAngle;
       u.u_elevation.value = this._elevation;
       u.u_distance.value = this._distance;
-      u.u_spikeAmplitude.value = this.userParams.spikeAmplitude
-        + bass * 0.4 * this.userParams.bassToSpikes
-        + this.beatBurst.value * 0.3 * this.userParams.beatToBurst;
+      u.u_spikeAmplitude.value =
+        this.userParams.spikeAmplitude +
+        bass * 0.4 * this.userParams.bassToSpikes +
+        this.beatBurst.value * 0.3 * this.userParams.beatToBurst;
       u.u_spikeCount.value = this.userParams.spikeCount;
-      u.u_rotationSpeed.value = this.userParams.rotationSpeed
-        + mid * 0.15 * this.userParams.midToRotation;
-      u.u_iridescence.value = this.userParams.iridescence
-        + this.smoothers.high.value * 0.3 * this.userParams.highToIridescence;
+      u.u_rotationSpeed.value =
+        this.userParams.rotationSpeed +
+        mid * 0.15 * this.userParams.midToRotation;
+      u.u_iridescence.value =
+        this.userParams.iridescence +
+        this.smoothers.high.value * 0.3 * this.userParams.highToIridescence;
       u.u_metallic.value = this.userParams.metallic;
       u.u_envBrightness.value = this.userParams.envBrightness;
       u.u_bass.value = bass;
@@ -183,12 +319,22 @@ export class FerrofluidVisualizer implements Visualizer {
       u.u_rms.value = this.smoothers.rms.value * this.userParams.rmsToScale;
       u.u_spectralCentroid.value = this.smoothers.spectralCentroid.value;
       u.u_beatBurst.value = this.beatBurst.value * this.userParams.beatToBurst;
-      u.u_hueShift.value = this.smoothers.spectralCentroid.value * 0.3 * this.userParams.centroidToHue;
+      u.u_hueShift.value =
+        this.smoothers.spectralCentroid.value *
+        0.3 *
+        this.userParams.centroidToHue;
     }
+    if (this.material)
+      this.material.uniforms.u_rotationSpeedPhase.value = this.phases.advance(
+        'u_rotationSpeedPhase',
+        this.material.uniforms.u_rotationSpeed.value,
+        this.deltaSeconds,
+      );
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -249,6 +395,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   #define MAX_DIST 12.0
   #define SURF_DIST 0.002
 
+  uniform float u_workBudget;
   uniform float u_time;
   uniform vec2 u_resolution;
   uniform float u_orbitAngle;
@@ -257,6 +404,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   uniform float u_spikeAmplitude;
   uniform float u_spikeCount;
   uniform float u_rotationSpeed;
+  uniform float u_rotationSpeedPhase;
   uniform float u_iridescence;
   uniform float u_metallic;
   uniform float u_envBrightness;
@@ -301,7 +449,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     vec3 n = normalize(p);
 
     // Animate rotation of spike field
-    float rotAngle = t * u_rotationSpeed;
+    float rotAngle = u_rotationSpeedPhase;
     n.xz *= rot2(rotAngle);
     n.yz *= rot2(rotAngle * 0.7);
 
@@ -358,10 +506,18 @@ const FRAGMENT_SHADER = /* glsl */ `
 
   // Thin-film iridescence: wavelength-dependent interference
   vec3 thinFilmIridescence(float cosTheta, float thickness) {
-    float delta = thickness * cosTheta * 2.0;
-    vec3 wavelengths = vec3(650.0, 510.0, 475.0); // RGB wavelengths in nm
-    vec3 phase = TAU * delta / (wavelengths * 0.001);
-    return 0.5 + 0.5 * cos(phase);
+    float n0=1.0,n1=1.46,n2=2.2;
+    float c0=clamp(cosTheta,0.001,1.0),s0sq=1.0-c0*c0;
+    float c1=sqrt(max(0.0,1.0-(n0/n1)*(n0/n1)*s0sq));
+    float c2=sqrt(max(0.0,1.0-(n0/n2)*(n0/n2)*s0sq));
+    float rs01=(n0*c0-n1*c1)/(n0*c0+n1*c1),rs12=(n1*c1-n2*c2)/(n1*c1+n2*c2);
+    float rp01=(n1*c0-n0*c1)/(n1*c0+n0*c1),rp12=(n2*c1-n1*c2)/(n2*c1+n1*c2);
+    vec3 phase=TAU*(2.0*n1*thickness*c1)/vec3(650.0,510.0,475.0);
+    vec3 interference=cos(phase);
+    // Signed interface amplitudes include reflection phase inversions.
+    vec3 rs=(rs01*rs01+rs12*rs12+2.0*rs01*rs12*interference)/(1.0+rs01*rs01*rs12*rs12+2.0*rs01*rs12*interference);
+    vec3 rp=(rp01*rp01+rp12*rp12+2.0*rp01*rp12*interference)/(1.0+rp01*rp01*rp12*rp12+2.0*rp01*rp12*interference);
+    return clamp(.5*(rs+rp),0.0,1.0);
   }
 
   // Environment: simple gradient + fake reflections
@@ -409,6 +565,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     bool hit = false;
 
     for (int i = 0; i < MAX_STEPS; i++) {
+      if (float(i) >= max(32.0, float(MAX_STEPS) * u_workBudget)) break;
       p = camPos + rd * totalDist;
       dist = sdFerrofluid(p, t);
       if (dist < SURF_DIST) {
@@ -459,7 +616,7 @@ const FRAGMENT_SHADER = /* glsl */ `
       color += specular * 0.8;
 
       // Apply iridescence
-      color = mix(color, color * iridColor * 2.0, u_iridescence);
+      color = mix(color, reflColor * iridColor * 2.0, clamp(u_iridescence,0.0,1.0));
 
       // Edge glow on spikes
       float edgeGlow = pow(1.0 - NdotV, 3.0);

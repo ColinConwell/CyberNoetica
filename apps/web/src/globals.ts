@@ -37,6 +37,9 @@ export interface CyberNoeticaGlobals {
 export interface CyberNoeticaDebugInfo {
   fps: number;
   frameTime: number;
+  cpuMs?: number;
+  gpuMs?: number | null;
+  targetFps?: number;
   vizType: string;
   playbackState?: string;
   qualityTier?: string;

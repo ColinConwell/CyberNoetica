@@ -1,7 +1,12 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -26,17 +31,105 @@ const moireMetadata: VisualizerMetadata = {
   usesPerspective: false,
   params: [
     // Appearance
-    { key: 'gratingFreq', label: 'Grating Density', min: 5.0, max: 60.0, step: 1.0, initial: 25.0, category: 'appearance', description: 'Base spatial frequency of gratings' },
-    { key: 'layerCount', label: 'Layers', min: 2, max: 5, step: 1, initial: 3, category: 'appearance', description: 'Number of overlapping grating layers' },
-    { key: 'patternType', label: 'Pattern Type', min: 0.0, max: 1.0, step: 0.05, initial: 0.5, category: 'appearance', description: 'Concentric circles (0) vs radial lines (1)' },
-    { key: 'contrast', label: 'Contrast', min: 0.3, max: 2.0, step: 0.05, initial: 1.0, category: 'appearance' },
-    { key: 'rotationSpeed', label: 'Rotation Speed', min: 0.0, max: 0.5, step: 0.01, initial: 0.08, category: 'appearance' },
-    { key: 'colorShift', label: 'Color Shift', min: 0.0, max: 1.0, step: 0.05, initial: 0.4, category: 'appearance', description: 'Hue offset between layers' },
+    {
+      key: 'gratingFreq',
+      label: 'Grating Density',
+      min: 5.0,
+      max: 60.0,
+      step: 1.0,
+      initial: 25.0,
+      category: 'appearance',
+      description: 'Base spatial frequency of gratings',
+    },
+    {
+      key: 'layerCount',
+      label: 'Layers',
+      min: 2,
+      max: 5,
+      step: 1,
+      initial: 3,
+      category: 'appearance',
+      description: 'Number of overlapping grating layers',
+    },
+    {
+      key: 'patternType',
+      label: 'Pattern Type',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.5,
+      category: 'appearance',
+      description: 'Concentric circles (0) vs radial lines (1)',
+    },
+    {
+      key: 'contrast',
+      label: 'Contrast',
+      min: 0.3,
+      max: 2.0,
+      step: 0.05,
+      initial: 1.0,
+      category: 'appearance',
+    },
+    {
+      key: 'rotationSpeed',
+      label: 'Rotation Speed',
+      min: 0.0,
+      max: 0.5,
+      step: 0.01,
+      initial: 0.08,
+      category: 'appearance',
+    },
+    {
+      key: 'colorShift',
+      label: 'Color Shift',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.4,
+      category: 'appearance',
+      description: 'Hue offset between layers',
+    },
     // Audio mapping
-    { key: 'bassToOffset', label: 'Bass -> Offset', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Bass shifts grating centers' },
-    { key: 'midToFreq', label: 'Mid -> Density', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Mids modulate grating frequency' },
-    { key: 'spectralToRotation', label: 'Spectral -> Rotation', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Spectral centroid drives rotation' },
-    { key: 'rmsToContrast', label: 'RMS -> Contrast', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Volume boosts pattern contrast' },
+    {
+      key: 'bassToOffset',
+      label: 'Bass -> Offset',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Bass shifts grating centers',
+    },
+    {
+      key: 'midToFreq',
+      label: 'Mid -> Density',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Mids modulate grating frequency',
+    },
+    {
+      key: 'spectralToRotation',
+      label: 'Spectral -> Rotation',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Spectral centroid drives rotation',
+    },
+    {
+      key: 'rmsToContrast',
+      label: 'RMS -> Contrast',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Volume boosts pattern contrast',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
@@ -47,6 +140,8 @@ const moireMetadata: VisualizerMetadata = {
 };
 
 export class MoireVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = moireMetadata;
 
   private unsub: Unsubscribe;
@@ -77,16 +172,19 @@ export class MoireVisualizer implements Visualizer {
     high: new EMASmoothing(0.25),
     rms: new EMASmoothing(0.15),
     spectralCentroid: new EMASmoothing(0.08),
-    beatPulse: new EMASmoothing(0.4),
+    beatPulse: new EventEnvelope(),
   };
 
   private material: THREE.ShaderMaterial | null = null;
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
 
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
@@ -97,10 +195,11 @@ export class MoireVisualizer implements Visualizer {
   }
 
   attach(scene: THREE.Scene): void {
-    this.material = new THREE.RawShaderMaterial({
+    this.material = new THREE.ShaderMaterial({
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
+        u_rotationSpeedPhase: { value: 0 },
         u_time: { value: 0.0 },
         u_resolution: { value: new THREE.Vector2(1920, 1080) },
         u_zoom: { value: 1.0 },
@@ -126,19 +225,26 @@ export class MoireVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     if (this.material) {
@@ -148,31 +254,41 @@ export class MoireVisualizer implements Visualizer {
       u.u_center.value.set(this._centerX, this._centerY);
 
       // Effective grating frequency modulated by mids
-      const effFreq = this.userParams.gratingFreq
-        + this.smoothers.mid.value * 8.0 * this.userParams.midToFreq;
+      const effFreq =
+        this.userParams.gratingFreq +
+        this.smoothers.mid.value * 8.0 * this.userParams.midToFreq;
       u.u_gratingFreq.value = effFreq;
 
       u.u_layerCount.value = this.userParams.layerCount;
       u.u_patternType.value = this.userParams.patternType;
 
       // Contrast boosted by RMS
-      const effContrast = this.userParams.contrast
-        * (0.6 + this.smoothers.rms.value * 0.8 * this.userParams.rmsToContrast);
+      const effContrast =
+        this.userParams.contrast *
+        (0.6 + this.smoothers.rms.value * 0.8 * this.userParams.rmsToContrast);
       u.u_contrast.value = effContrast;
 
       u.u_rotationSpeed.value = this.userParams.rotationSpeed;
+      u.u_rotationSpeedPhase.value = this.phases.advance(
+        'u_rotationSpeed',
+        u.u_rotationSpeed.value,
+        this.deltaSeconds,
+      );
       u.u_colorShift.value = this.userParams.colorShift;
-      u.u_bass.value = this.smoothers.bass.value;
+      u.u_bass.value = this.smoothers.bass.value * this.userParams.bassToOffset;
       u.u_mid.value = this.smoothers.mid.value;
       u.u_high.value = this.smoothers.high.value;
       u.u_rms.value = this.smoothers.rms.value;
-      u.u_spectralCentroid.value = this.smoothers.spectralCentroid.value;
+      u.u_spectralCentroid.value =
+        this.smoothers.spectralCentroid.value *
+        this.userParams.spectralToRotation;
       u.u_beatPulse.value = this.smoothers.beatPulse.value;
     }
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -219,8 +335,6 @@ registerVisualizer({
 // ── Shaders ────────────────────────────────────────────
 
 const VERTEX_SHADER = /* glsl */ `
-  attribute vec3 position;
-  attribute vec2 uv;
   varying vec2 vUv;
   void main() {
     vUv = uv;
@@ -234,6 +348,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   #define PI 3.14159265359
   #define TAU 6.28318530718
 
+  uniform float u_rotationSpeedPhase;
   uniform float u_time;
   uniform vec2 u_resolution;
   uniform float u_zoom;
@@ -266,11 +381,13 @@ const FRAGMENT_SHADER = /* glsl */ `
   // Single grating layer: concentric circles blended with radial lines
   float grating(vec2 p, float freq, float blend) {
     // Concentric circles pattern
-    float circles = sin(length(p) * freq * TAU);
+    float circlePhase = length(p) * freq * TAU;
+    float circles = sin(circlePhase) * (1.0 - smoothstep(1.5, 3.14, fwidth(circlePhase)));
 
     // Radial line pattern (angular)
     float angle = atan(p.y, p.x);
-    float radial = sin(angle * freq * 0.5);
+    float radialPhase = angle * max(1.0, floor(freq * .5 + .5));
+    float radial = sin(radialPhase) * (1.0 - smoothstep(1.5, 3.14, fwidth(radialPhase)));
 
     return mix(circles, radial, blend);
   }
@@ -290,7 +407,7 @@ const FRAGMENT_SHADER = /* glsl */ `
 
       // Each layer has a different center, rotation, and slight frequency offset
       float layerAngle = fi * PI / float(layers)
-        + u_time * u_rotationSpeed * (1.0 + fi * 0.3)
+        + u_rotationSpeedPhase * (1.0 + fi * 0.3)
         + u_spectralCentroid * fi * 0.5;
 
       // Center offset: each layer drifts based on bass

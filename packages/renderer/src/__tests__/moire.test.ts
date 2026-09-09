@@ -15,9 +15,15 @@ describe('MoireVisualizer', () => {
     const viz = new MoireVisualizer(bus);
     const features: AudioFeatures = {
       fftBins: new Float32Array(1024).fill(0.5),
-      bass: 0.8, mid: 0.5, high: 0.3,
-      spectralCentroid: 0.6, spectralFlux: 0.2, rms: 0.7,
-      beatOnset: true, beatConfidence: 0.9, degraded: false,
+      bass: 0.8,
+      mid: 0.5,
+      high: 0.3,
+      spectralCentroid: 0.6,
+      spectralFlux: 0.2,
+      rms: 0.7,
+      beatOnset: true,
+      beatConfidence: 0.9,
+      degraded: false,
     };
     bus.publish('audio:features', features);
     viz.tick();
@@ -27,7 +33,7 @@ describe('MoireVisualizer', () => {
   it('has correct metadata', () => {
     const bus = new MessageBus();
     const viz = new MoireVisualizer(bus);
-    expect(viz.metadata.label).toBe('Moire');
+    expect(viz.metadata.label).toBe('Moiré');
     expect(viz.metadata.usesPerspective).toBe(false);
     expect(viz.metadata.viewport.pan).toBe(true);
     expect(viz.metadata.viewport.zoom).toBe(true);
@@ -62,7 +68,9 @@ describe('MoireVisualizer', () => {
   it('has audio-mapping params', () => {
     const bus = new MessageBus();
     const viz = new MoireVisualizer(bus);
-    const audioParams = viz.metadata.params.filter(p => p.category === 'audio-mapping');
+    const audioParams = viz.metadata.params.filter(
+      (p) => p.category === 'audio-mapping',
+    );
     expect(audioParams.length).toBeGreaterThanOrEqual(3);
   });
 
@@ -70,7 +78,7 @@ describe('MoireVisualizer', () => {
     const bus = new MessageBus();
     const viz = new MoireVisualizer(bus);
     expect(viz.metadata.viewStateFields.length).toBe(3);
-    const keys = viz.metadata.viewStateFields.map(f => f.key);
+    const keys = viz.metadata.viewStateFields.map((f) => f.key);
     expect(keys).toContain('centerX');
     expect(keys).toContain('centerY');
     expect(keys).toContain('zoom');

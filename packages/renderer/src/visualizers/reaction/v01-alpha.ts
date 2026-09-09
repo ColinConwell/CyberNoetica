@@ -1,7 +1,12 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -20,20 +25,101 @@ import { registerVisualizer } from '../registry.js';
 const reactionMetadata: VisualizerMetadata = {
   type: 'reaction',
   label: 'Reaction-Diffusion',
-  description: 'Turing morphogenesis patterns',
+  description: 'Noise patterns inspired by reaction-diffusion',
   usesPerspective: false,
   params: [
     // Appearance
-    { key: 'patternScale', label: 'Pattern Scale', min: 1.0, max: 8.0, step: 0.25, initial: 3.0, category: 'appearance', description: 'Scale of the Turing patterns' },
-    { key: 'morphSpeed', label: 'Morph Speed', min: 0.0, max: 1.0, step: 0.05, initial: 0.3, category: 'appearance', description: 'How fast patterns evolve' },
-    { key: 'sharpness', label: 'Sharpness', min: 0.0, max: 1.0, step: 0.05, initial: 0.5, category: 'appearance', description: 'Crisp edges vs soft gradients' },
-    { key: 'colorWarmth', label: 'Color Warmth', min: 0.0, max: 1.0, step: 0.05, initial: 0.4, category: 'appearance', description: 'Color palette from cool to warm' },
-    { key: 'layerCount', label: 'Layers', min: 1.0, max: 4.0, step: 1.0, initial: 3.0, category: 'appearance', description: 'Pattern complexity layers' },
+    {
+      key: 'patternScale',
+      label: 'Pattern Scale',
+      min: 1.0,
+      max: 8.0,
+      step: 0.25,
+      initial: 3.0,
+      category: 'appearance',
+      description: 'Scale of the Turing patterns',
+    },
+    {
+      key: 'morphSpeed',
+      label: 'Morph Speed',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.3,
+      category: 'appearance',
+      description: 'How fast patterns evolve',
+    },
+    {
+      key: 'sharpness',
+      label: 'Sharpness',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.5,
+      category: 'appearance',
+      description: 'Crisp edges vs soft gradients',
+    },
+    {
+      key: 'colorWarmth',
+      label: 'Color Warmth',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.4,
+      category: 'appearance',
+      description: 'Color palette from cool to warm',
+    },
+    {
+      key: 'layerCount',
+      label: 'Layers',
+      min: 1.0,
+      max: 4.0,
+      step: 1.0,
+      initial: 3.0,
+      category: 'appearance',
+      description: 'Pattern complexity layers',
+    },
     // Audio mapping
-    { key: 'bassToScale', label: 'Bass \u2192 Scale', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Bass modulates pattern scale' },
-    { key: 'midToMorph', label: 'Mid \u2192 Morph', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Mids drive pattern morphing' },
-    { key: 'rmsToIntensity', label: 'RMS \u2192 Intensity', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Volume drives brightness' },
-    { key: 'beatPulse', label: 'Beat \u2192 Pulse', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Beats create radial disturbances' },
+    {
+      key: 'bassToScale',
+      label: 'Bass \u2192 Scale',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Bass modulates pattern scale',
+    },
+    {
+      key: 'midToMorph',
+      label: 'Mid \u2192 Morph',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Mids drive pattern morphing',
+    },
+    {
+      key: 'rmsToIntensity',
+      label: 'RMS \u2192 Intensity',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Volume drives brightness',
+    },
+    {
+      key: 'beatPulse',
+      label: 'Beat \u2192 Pulse',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Beats create radial disturbances',
+    },
   ],
   viewport: { pan: false, zoom: true, orbit: false },
   viewStateFields: [
@@ -42,6 +128,8 @@ const reactionMetadata: VisualizerMetadata = {
 };
 
 export class ReactionDiffusionVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = reactionMetadata;
 
   private unsub: Unsubscribe;
@@ -70,16 +158,19 @@ export class ReactionDiffusionVisualizer implements Visualizer {
     rms: new EMASmoothing(0.15),
     spectralCentroid: new EMASmoothing(0.1),
     spectralFlux: new EMASmoothing(0.2),
-    beatPulse: new EMASmoothing(0.45),
+    beatPulse: new EventEnvelope(),
   };
 
   private material: THREE.ShaderMaterial | null = null;
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
 
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
@@ -95,6 +186,7 @@ export class ReactionDiffusionVisualizer implements Visualizer {
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
+        u_morphSpeedPhase: { value: 0 },
         u_time: { value: 0.0 },
         u_resolution: { value: new THREE.Vector2(1920, 1080) },
         u_zoom: { value: 1.0 },
@@ -123,20 +215,27 @@ export class ReactionDiffusionVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.spectralFlux.update(f.spectralFlux);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.spectralFlux.update(f.spectralFlux, this.deltaSeconds);
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     if (this.material) {
@@ -145,6 +244,11 @@ export class ReactionDiffusionVisualizer implements Visualizer {
       u.u_zoom.value = this._zoom;
       u.u_patternScale.value = this.userParams.patternScale;
       u.u_morphSpeed.value = this.userParams.morphSpeed;
+      u.u_morphSpeedPhase.value = this.phases.advance(
+        'u_morphSpeed',
+        u.u_morphSpeed.value,
+        this.deltaSeconds,
+      );
       u.u_sharpness.value = this.userParams.sharpness;
       u.u_warmth.value = this.userParams.colorWarmth;
       u.u_layers.value = this.userParams.layerCount;
@@ -163,7 +267,8 @@ export class ReactionDiffusionVisualizer implements Visualizer {
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -213,6 +318,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   #define PI 3.14159265359
   #define TAU 6.28318530718
 
+  uniform float u_morphSpeedPhase;
   uniform float u_time;
   uniform vec2 u_resolution;
   uniform float u_zoom;
@@ -281,7 +387,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution) / min(u_resolution.x, u_resolution.y);
     uv /= u_zoom;
 
-    float t = u_time * u_morphSpeed;
+    float t = u_morphSpeedPhase;
 
     // Audio-modulated pattern scale
     float scale = u_patternScale + u_bass * 2.0 * u_bassToScale;

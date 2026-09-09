@@ -76,12 +76,14 @@ impl AudioAnalyzer {
             .collect();
 
         let bin_freq = self.sample_rate / n as f32;
+        let bass_start = (20.0 / bin_freq).ceil() as usize;
         let bass_end = (250.0 / bin_freq).ceil() as usize;
         let mid_end = (4000.0 / bin_freq).ceil() as usize;
+        let high_end = (20000.0 / bin_freq).ceil() as usize;
 
-        let bass_energy = band_energy(&magnitudes, 1, bass_end.min(half));
+        let bass_energy = band_energy(&magnitudes, bass_start, bass_end.min(half));
         let mid_energy = band_energy(&magnitudes, bass_end, mid_end.min(half));
-        let high_energy = band_energy(&magnitudes, mid_end, half);
+        let high_energy = band_energy(&magnitudes, mid_end, high_end.min(half));
 
         let rms = (samples.iter().take(n).map(|s| s * s).sum::<f32>() / n as f32).sqrt();
 

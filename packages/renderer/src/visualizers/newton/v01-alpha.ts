@@ -1,7 +1,13 @@
+import { topologyValue } from '../../audio-mapping.js';
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -20,7 +26,7 @@ import { registerVisualizer } from '../registry.js';
  *
  * Audio mapping:
  *   bass  -> relaxation parameter "a" (pulling trajectory to different basins)
- *   mid   -> exponent n morph
+ *   mid   -> integer polynomial degree
  *   high  -> boundary highlight intensity
  *   rms   -> overall luminance
  *   beat  -> root rotation impulse
@@ -33,19 +39,127 @@ const newtonMetadata: VisualizerMetadata = {
   usesPerspective: false,
   params: [
     // Appearance
-    { key: 'exponent', label: 'Exponent', min: 3, max: 8, step: 1, initial: 5, category: 'appearance', description: 'Polynomial z^n - 1 exponent' },
-    { key: 'relaxation', label: 'Relaxation', min: 0.3, max: 1.8, step: 0.02, initial: 1.0, category: 'appearance', description: 'Over/under-relaxation factor a' },
-    { key: 'iterations', label: 'Detail', min: 10, max: 40, step: 1, initial: 20, category: 'appearance', description: 'Newton iteration count' },
-    { key: 'brightness', label: 'Brightness', min: 0.3, max: 2.5, step: 0.05, initial: 1.1, category: 'appearance', description: 'Overall luminance' },
-    { key: 'boundaryGlow', label: 'Boundary Glow', min: 0.0, max: 2.0, step: 0.05, initial: 0.8, category: 'appearance', description: 'Strength of fractal edge highlight' },
-    { key: 'hueShift', label: 'Hue Shift', min: 0.0, max: 1.0, step: 0.01, initial: 0.0, category: 'appearance', description: 'Base palette rotation' },
-    { key: 'rootRotation', label: 'Root Rotation', min: -1.0, max: 1.0, step: 0.01, initial: 0.0, category: 'appearance', description: 'Phase offset of roots' },
+    {
+      key: 'exponent',
+      label: 'Exponent',
+      min: 3,
+      max: 8,
+      step: 1,
+      initial: 5,
+      category: 'appearance',
+      description: 'Polynomial z^n - 1 exponent',
+    },
+    {
+      key: 'relaxation',
+      label: 'Relaxation',
+      min: 0.3,
+      max: 1.8,
+      step: 0.02,
+      initial: 1.0,
+      category: 'appearance',
+      description: 'Over/under-relaxation factor a',
+    },
+    {
+      key: 'iterations',
+      label: 'Detail',
+      min: 10,
+      max: 40,
+      step: 1,
+      initial: 20,
+      category: 'appearance',
+      description: 'Newton iteration count',
+    },
+    {
+      key: 'brightness',
+      label: 'Brightness',
+      min: 0.3,
+      max: 2.5,
+      step: 0.05,
+      initial: 1.1,
+      category: 'appearance',
+      description: 'Overall luminance',
+    },
+    {
+      key: 'boundaryGlow',
+      label: 'Boundary Glow',
+      min: 0.0,
+      max: 2.0,
+      step: 0.05,
+      initial: 0.8,
+      category: 'appearance',
+      description: 'Strength of fractal edge highlight',
+    },
+    {
+      key: 'hueShift',
+      label: 'Hue Shift',
+      min: 0.0,
+      max: 1.0,
+      step: 0.01,
+      initial: 0.0,
+      category: 'appearance',
+      description: 'Base palette rotation',
+    },
+    {
+      key: 'rootRotation',
+      label: 'Root Rotation',
+      min: -1.0,
+      max: 1.0,
+      step: 0.01,
+      initial: 0.0,
+      category: 'appearance',
+      description: 'Phase offset of roots',
+    },
     // Audio mapping
-    { key: 'bassToRelax', label: 'Bass \u2192 Relax', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Bass modulates relaxation factor' },
-    { key: 'midToExponent', label: 'Mid \u2192 Exponent', min: 0.0, max: 2.0, step: 0.1, initial: 0.8, category: 'audio-mapping', description: 'Mids shift exponent morph' },
-    { key: 'highToBoundary', label: 'High \u2192 Boundary', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Highs intensify boundary glow' },
-    { key: 'rmsToGlow', label: 'RMS \u2192 Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Volume drives overall brightness' },
-    { key: 'beatToSpin', label: 'Beat \u2192 Spin', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Beats spin the root configuration' },
+    {
+      key: 'bassToRelax',
+      label: 'Bass \u2192 Relax',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Bass modulates relaxation factor',
+    },
+    {
+      key: 'midToExponent',
+      label: 'Mid \u2192 Exponent',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 0.8,
+      category: 'audio-mapping',
+      description: 'Mids select an integer polynomial degree',
+    },
+    {
+      key: 'highToBoundary',
+      label: 'High \u2192 Boundary',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Highs intensify boundary glow',
+    },
+    {
+      key: 'rmsToGlow',
+      label: 'RMS \u2192 Glow',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Volume drives overall brightness',
+    },
+    {
+      key: 'beatToSpin',
+      label: 'Beat \u2192 Spin',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Beats spin the root configuration',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
@@ -56,11 +170,14 @@ const newtonMetadata: VisualizerMetadata = {
 };
 
 export class NewtonVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = newtonMetadata;
 
   private unsub: Unsubscribe;
   private latestFeatures: AudioFeatures | null = null;
   private time = 0;
+  private degree = 3;
   private rootSpinVelocity = 0;
   private rootSpinAccum = 0;
 
@@ -89,16 +206,19 @@ export class NewtonVisualizer implements Visualizer {
     mid: new EMASmoothing(0.18),
     high: new EMASmoothing(0.25),
     rms: new EMASmoothing(0.15),
-    beatPulse: new EMASmoothing(0.35),
+    beatPulse: new EventEnvelope(),
   };
 
   private material: THREE.ShaderMaterial | null = null;
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
     this.smoothers.high.reset(0);
@@ -134,48 +254,58 @@ export class NewtonVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
 
       if (f.beatOnset && this.userParams.beatToSpin > 0) {
         this.rootSpinVelocity += 0.6 * this.userParams.beatToSpin;
       }
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     // Decay spin impulse
-    this.rootSpinVelocity *= 0.95;
-    this.rootSpinAccum += this.rootSpinVelocity * (1 / 60);
+    this.rootSpinVelocity *= Math.pow(0.95, this.deltaSeconds * 60);
+    this.rootSpinAccum += this.rootSpinVelocity * this.deltaSeconds;
 
     // Relaxation breathing
-    const relax = this.userParams.relaxation
-      + (this.smoothers.bass.value - 0.3) * 0.25 * this.userParams.bassToRelax;
+    const relax =
+      this.userParams.relaxation +
+      (this.smoothers.bass.value - 0.3) * 0.25 * this.userParams.bassToRelax;
 
-    // Exponent fractional morph via mid
-    const expMorph = this.userParams.exponent
-      + this.smoothers.mid.value * 0.9 * this.userParams.midToExponent;
+    // Integer polynomial degree, bounded by the shader power loop
+    const expMorph =
+      this.userParams.exponent +
+      this.smoothers.mid.value * 0.9 * this.userParams.midToExponent;
 
     if (this.material) {
       const u = this.material.uniforms;
       u.u_time.value = this.time;
       u.u_zoom.value = this._zoom;
       u.u_pan.value.set(this._panX, this._panY);
-      u.u_exponent.value = expMorph;
+      this.degree = topologyValue(this.degree, expMorph, 2, 8);
+      u.u_exponent.value = this.degree;
       u.u_relaxation.value = relax;
       u.u_iterations.value = this.userParams.iterations;
       u.u_brightness.value = this.userParams.brightness;
-      u.u_boundaryGlow.value = this.userParams.boundaryGlow * (1.0 + this.smoothers.high.value * this.userParams.highToBoundary);
+      u.u_boundaryGlow.value =
+        this.userParams.boundaryGlow *
+        (1.0 + this.smoothers.high.value * this.userParams.highToBoundary);
       u.u_hueShift.value = this.userParams.hueShift;
-      u.u_rootRotation.value = this.userParams.rootRotation + this.rootSpinAccum;
+      u.u_rootRotation.value =
+        this.userParams.rootRotation + this.rootSpinAccum;
       u.u_rms.value = this.smoothers.rms.value * this.userParams.rmsToGlow;
       u.u_high.value = this.smoothers.high.value;
       u.u_beatPulse.value = this.smoothers.beatPulse.value;
@@ -183,7 +313,8 @@ export class NewtonVisualizer implements Visualizer {
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -267,7 +398,7 @@ const FRAGMENT_SHADER = /* glsl */ `
 
   // Complex division: a/b
   vec2 cdiv(vec2 a, vec2 b) {
-    float denom = dot(b, b) + 1e-8;
+    float denom = dot(b, b);
     return vec2(a.x * b.x + a.y * b.y, a.y * b.x - a.x * b.y) / denom;
   }
 
@@ -287,9 +418,10 @@ const FRAGMENT_SHADER = /* glsl */ `
     // Map screen to complex plane
     float scale = 2.5 / u_zoom;
     vec2 z = uv * scale + u_pan;
+    // Solve in the rotated root frame: world roots are exp(i*(rotation+2πk/n)).
+    z = cmul(z, vec2(cos(u_rootRotation), -sin(u_rootRotation)));
 
     int n = int(clamp(floor(u_exponent + 0.5), 2.0, 8.0));
-    float fracN = u_exponent - float(n);
 
     int iters = int(u_iterations);
     int hitIter = iters;
@@ -304,36 +436,24 @@ const FRAGMENT_SHADER = /* glsl */ `
       vec2 numer = zn - vec2(1.0, 0.0);
       vec2 znm1 = cpow(z, n - 1);
       vec2 denom = float(n) * znm1;
+      if (dot(numer, numer) < 1e-10) {
+        hitIter = i;
+        converged = true;
+        break;
+      }
+      // A stationary point is not a root; do not divide by f'(z)=0.
+      if (dot(denom, denom) < 1e-20 || dot(z, z) > 1e8) break;
       vec2 step = cdiv(numer, denom);
 
       vec2 zNext = z - u_relaxation * step;
 
-      // Fractional exponent morph: linearly blend with a z^(n+1) step
-      if (fracN > 0.001) {
-        vec2 znp1 = cpow(z, n + 1);
-        vec2 numer2 = znp1 - vec2(1.0, 0.0);
-        vec2 znm1_2 = cpow(z, n);
-        vec2 denom2 = float(n + 1) * znm1_2;
-        vec2 step2 = cdiv(numer2, denom2);
-        vec2 zNext2 = z - u_relaxation * step2;
-        zNext = mix(zNext, zNext2, fracN);
-      }
-
-      // Convergence test
-      vec2 delta = zNext - z;
-      if (dot(delta, delta) < 1e-5) {
-        hitIter = i;
-        converged = true;
-        z = zNext;
-        break;
-      }
       z = zNext;
     }
 
     // Identify which root we converged to
     float theta = atan(z.y, z.x);
     // Nearest root angle: 2*pi*k/n with a possible global rotation
-    float rootIdxF = (theta - u_rootRotation) / TAU * float(n);
+    float rootIdxF = theta / TAU * float(n);
     rootIdxF = floor(rootIdxF + 0.5);
     float rootFrac = fract(rootIdxF / float(n) + 1.0);
 
@@ -346,7 +466,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     float bodyVal = (1.0 - convT) * u_brightness;
 
     // Distance to nearest root in complex plane (proxy for "edge softness")
-    float rootAngle = rootIdxF * TAU / float(n) + u_rootRotation;
+    float rootAngle = rootIdxF * TAU / float(n);
     vec2 rootPos = vec2(cos(rootAngle), sin(rootAngle));
     float rootDist = length(z - rootPos);
 

@@ -1,9 +1,17 @@
+import { resonantLevel } from '../../audio-mapping.js';
+import { membraneRoots, membraneModeDescriptor } from './membrane-modes.js';
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
+import { membraneModeTable, RADIAL_SAMPLES } from './membrane-modes.js';
 
 /**
  * Chladni Circular visualizer -- Bessel-function cymatics on a circular membrane.
@@ -11,14 +19,13 @@ import { registerVisualizer } from '../registry.js';
  * Where v01-alpha uses the rectangular Chladni equation (sin/cos products),
  * this variant models a circular drumhead using Bessel functions of the first
  * kind, J_n(k_nm * r) * cos(n*theta). Multiple modes are superposed with
- * amplitudes driven directly by FFT frequency bins, creating authentic
- * cymatics where each frequency literally generates its own standing wave.
+ * amplitudes driven by eight spectrum bands. These are membrane eigenfunctions;
+ * the audio weights are artistic, not a calibrated mechanical resonance model.
  *
- * The circular plate geometry is more physically accurate and produces
- * rotationally symmetric patterns with striking radial nodal lines.
+ * A fixed-edge membrane differs from a rigid Chladni plate (biharmonic modes).
  *
  * Audio mapping:
- *   fftBins[0..7] -> amplitudes of 8 Bessel modes (direct frequency-to-mode)
+ *   fftBins -> eight equal-width bands driving membrane modes
  *   bass          -> plate radius breathing
  *   rms           -> overall pattern brightness
  *   beat          -> mode phase reset (sharp pattern transitions)
@@ -31,19 +38,138 @@ const chladniCircularMetadata: VisualizerMetadata = {
   description: 'Bessel-function cymatics on circular membrane',
   usesPerspective: false,
   params: [
+    {
+      key: 'fundamentalHz',
+      label: 'Fundamental (Hz)',
+      min: 40,
+      max: 440,
+      step: 1,
+      initial: 110,
+      category: 'appearance',
+      description:
+        'f₀₁ = j₀₁ c / (2πR); all mode frequencies follow the Bessel-root ratios.',
+    },
+    {
+      key: 'qualityFactor',
+      label: 'Resonance Q',
+      min: 5,
+      max: 120,
+      step: 1,
+      initial: 30,
+      category: 'appearance',
+    },
     // Appearance
-    { key: 'modeCount', label: 'Mode Count', min: 2, max: 8, step: 1, initial: 6, category: 'appearance', description: 'Number of superposed Bessel modes' },
-    { key: 'lineSharpness', label: 'Sharpness', min: 0.5, max: 5.0, step: 0.25, initial: 2.5, category: 'appearance', description: 'Nodal line crispness' },
-    { key: 'plateRadius', label: 'Plate Radius', min: 0.5, max: 1.5, step: 0.05, initial: 0.9, category: 'appearance', description: 'Circular plate size' },
-    { key: 'colorSaturation', label: 'Saturation', min: 0.0, max: 1.0, step: 0.05, initial: 0.7, category: 'appearance', description: 'Color richness' },
-    { key: 'rotationalOrder', label: 'Rotational Order', min: 0, max: 6, step: 1, initial: 3, category: 'appearance', description: 'Angular mode symmetry number n' },
-    { key: 'animSpeed', label: 'Animation', min: 0.0, max: 1.0, step: 0.05, initial: 0.2, category: 'appearance', description: 'Idle pattern drift speed' },
+    {
+      key: 'modeCount',
+      label: 'Mode Count',
+      min: 2,
+      max: 8,
+      step: 1,
+      initial: 6,
+      category: 'appearance',
+      description: 'Number of superposed Bessel modes',
+    },
+    {
+      key: 'lineSharpness',
+      label: 'Sharpness',
+      min: 0.5,
+      max: 5.0,
+      step: 0.25,
+      initial: 2.5,
+      category: 'appearance',
+      description: 'Nodal line crispness',
+    },
+    {
+      key: 'plateRadius',
+      label: 'Plate Radius',
+      min: 0.5,
+      max: 1.5,
+      step: 0.05,
+      initial: 0.9,
+      category: 'appearance',
+      description: 'Circular plate size',
+    },
+    {
+      key: 'colorSaturation',
+      label: 'Saturation',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.7,
+      category: 'appearance',
+      description: 'Color richness',
+    },
+    {
+      key: 'rotationalOrder',
+      label: 'Rotational Order',
+      min: 0,
+      max: 6,
+      step: 1,
+      initial: 3,
+      category: 'appearance',
+      description: 'Angular mode symmetry number n',
+    },
+    {
+      key: 'animSpeed',
+      label: 'Animation',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.2,
+      category: 'appearance',
+      description: 'Idle pattern drift speed',
+    },
     // Audio mapping
-    { key: 'fftToModes', label: 'FFT → Modes', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'FFT bins drive mode amplitudes' },
-    { key: 'bassToRadius', label: 'Bass → Radius', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Bass breathes plate radius' },
-    { key: 'rmsToGlow', label: 'RMS → Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Volume drives brightness' },
-    { key: 'beatToPhase', label: 'Beat → Phase', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Beats shift mode phases' },
-    { key: 'centroidToMode', label: 'Centroid → Mode', min: 0.0, max: 2.0, step: 0.1, initial: 0.8, category: 'audio-mapping', description: 'Spectral centroid selects dominant mode' },
+    {
+      key: 'fftToModes',
+      label: 'FFT → Modes',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'FFT bins drive mode amplitudes',
+    },
+    {
+      key: 'bassToRadius',
+      label: 'Bass → Radius',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Bass breathes plate radius',
+    },
+    {
+      key: 'rmsToGlow',
+      label: 'RMS → Glow',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Volume drives brightness',
+    },
+    {
+      key: 'beatToPhase',
+      label: 'Beat → Phase',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Beats shift mode phases',
+    },
+    {
+      key: 'centroidToMode',
+      label: 'Centroid → Mode',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 0.8,
+      category: 'audio-mapping',
+      description: 'Spectral centroid selects dominant mode',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
@@ -54,6 +180,8 @@ const chladniCircularMetadata: VisualizerMetadata = {
 };
 
 export class ChladniCircularVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = chladniCircularMetadata;
 
   private unsub: Unsubscribe;
@@ -62,6 +190,8 @@ export class ChladniCircularVisualizer implements Visualizer {
   private phaseAccum = 0;
 
   private userParams: Record<string, number> = {
+    fundamentalHz: 110,
+    qualityFactor: 30,
     modeCount: 6,
     lineSharpness: 2.5,
     plateRadius: 0.9,
@@ -77,11 +207,13 @@ export class ChladniCircularVisualizer implements Visualizer {
 
   private _centerX = 0;
   private _centerY = 0;
-  private _zoom = 1.0;
+  private _zoom = 0.48;
   private viewOverrides: Record<string, boolean> = {};
 
   // Store 8 FFT band amplitudes for mode driving
   private modeBands = new Float32Array(8);
+  private radialTexture: THREE.DataTexture | null = null;
+  private radialOrder = -1;
 
   private smoothers = {
     bass: new EMASmoothing(0.12),
@@ -89,16 +221,19 @@ export class ChladniCircularVisualizer implements Visualizer {
     high: new EMASmoothing(0.22),
     rms: new EMASmoothing(0.15),
     spectralCentroid: new EMASmoothing(0.1),
-    beatPulse: new EMASmoothing(0.4),
+    beatPulse: new EventEnvelope(),
   };
 
   private material: THREE.ShaderMaterial | null = null;
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
     this.smoothers.high.reset(0);
@@ -108,10 +243,11 @@ export class ChladniCircularVisualizer implements Visualizer {
   }
 
   attach(scene: THREE.Scene): void {
-    this.material = new THREE.RawShaderMaterial({
+    this.material = new THREE.ShaderMaterial({
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
+        u_radialModes: { value: null },
         u_time: { value: 0.0 },
         u_resolution: { value: new THREE.Vector2(1920, 1080) },
         u_center: { value: new THREE.Vector2(0, 0) },
@@ -139,58 +275,91 @@ export class ChladniCircularVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
 
-      // Extract 8 frequency bands from FFT bins for mode amplitudes
-      if (f.fftBins && f.fftBins.length > 0) {
-        const binCount = f.fftBins.length;
-        const bandsPerMode = Math.floor(binCount / 8);
-        for (let i = 0; i < 8; i++) {
-          let sum = 0;
-          const start = i * bandsPerMode;
-          const end = Math.min(start + bandsPerMode, binCount);
-          for (let j = start; j < end; j++) {
-            sum += f.fftBins[j];
-          }
-          this.modeBands[i] = sum / bandsPerMode;
-        }
+      const order = Math.max(
+        0,
+        Math.min(6, Math.round(this.userParams.rotationalOrder)),
+      );
+      const fundamental = this.userParams.fundamentalHz;
+      const q = this.userParams.qualityFactor;
+      for (let i = 0; i < 8; i++) {
+        const frequency =
+          (membraneModeDescriptor(order, i).root / membraneRoots(0)[0]) *
+          fundamental;
+        const response = resonantLevel(f, frequency, q);
+        const decay = Math.exp((-Math.PI * frequency * this.deltaSeconds) / q);
+        this.modeBands[i] = this.modeBands[i] * decay + response * (1 - decay);
       }
 
       if (f.beatOnset && this.userParams.beatToPhase > 0) {
         this.phaseAccum += 0.5 * this.userParams.beatToPhase;
       }
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     if (this.material) {
       const u = this.material.uniforms;
-      u.u_time.value = this.time * this.userParams.animSpeed;
+      const order = Math.max(
+        0,
+        Math.min(6, Math.round(this.userParams.rotationalOrder)),
+      );
+      if (order !== this.radialOrder) {
+        this.radialTexture?.dispose();
+        this.radialTexture = new THREE.DataTexture(
+          membraneModeTable(order),
+          RADIAL_SAMPLES,
+          8,
+          THREE.RGBAFormat,
+          THREE.FloatType,
+        );
+        this.radialTexture.needsUpdate = true;
+        this.radialOrder = order;
+        u.u_radialModes.value = this.radialTexture;
+      }
+      u.u_time.value = this.phases.advance(
+        'animation',
+        this.userParams.animSpeed,
+        this.deltaSeconds,
+      );
       u.u_center.value.set(this._centerX, this._centerY);
       u.u_zoom.value = this._zoom;
       u.u_modeCount.value = this.userParams.modeCount;
       u.u_lineSharpness.value = this.userParams.lineSharpness;
-      u.u_plateRadius.value = this.userParams.plateRadius
-        + (this.smoothers.bass.value - 0.3) * 0.1 * this.userParams.bassToRadius;
+      u.u_plateRadius.value =
+        this.userParams.plateRadius +
+        (this.smoothers.bass.value - 0.3) * 0.1 * this.userParams.bassToRadius;
       u.u_saturation.value = this.userParams.colorSaturation;
-      u.u_rotOrder.value = this.userParams.rotationalOrder;
+      u.u_rotOrder.value = order;
 
       // Mix FFT-driven amplitudes with idle defaults
       const fftScale = this.userParams.fftToModes;
-      const amps = [];
+      const amps = u.u_modeAmps.value as number[];
       for (let i = 0; i < 8; i++) {
-        const idle = 0.5 / (1 + i * 0.5);
-        amps.push(idle + this.modeBands[i] * fftScale);
+        const idle = this.latestFeatures ? 0 : 0.5 / (1 + i * 0.5);
+        const selected = this.smoothers.spectralCentroid.value * 7;
+        const emphasis =
+          1 +
+          this.userParams.centroidToMode * Math.exp(-0.5 * (i - selected) ** 2);
+        amps[i] = idle + this.modeBands[i] * 8 * fftScale * emphasis;
       }
       u.u_modeAmps.value = amps;
 
@@ -206,7 +375,8 @@ export class ChladniCircularVisualizer implements Visualizer {
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -234,6 +404,7 @@ export class ChladniCircularVisualizer implements Visualizer {
 
   dispose(): void {
     this.unsub();
+    this.radialTexture?.dispose();
     this.material?.dispose();
     this.mesh?.geometry.dispose();
   }
@@ -247,8 +418,6 @@ registerVisualizer({
 // ── Shaders ────────────────────────────────────────────
 
 const VERTEX_SHADER = /* glsl */ `
-  attribute vec3 position;
-  attribute vec2 uv;
   varying vec2 vUv;
   void main() {
     vUv = uv;
@@ -262,6 +431,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   #define PI 3.14159265359
   #define TAU 6.28318530718
 
+  uniform sampler2D u_radialModes;
   uniform float u_time;
   uniform vec2 u_resolution;
   uniform vec2 u_center;
@@ -285,77 +455,14 @@ const FRAGMENT_SHADER = /* glsl */ `
 
   #include <cyber_hsv2rgb>
 
-  // Approximate Bessel function J_n(x) using polynomial approximation
-  // Good enough for n=0..6 and moderate x values
-  float besselJ0(float x) {
-    float ax = abs(x);
-    if (ax < 8.0) {
-      float y = x * x;
-      return 1.0 - y * (0.25 - y * (0.015625 - y * (0.000434028 - y * (0.0000067816 - y * 6.78e-8))));
-    }
-    float z = 8.0 / ax;
-    float y = z * z;
-    float p = 1.0 + y * (-0.001098628 + y * 0.00002734510);
-    float q = -0.01562499 + y * (0.0001430488 + y * (-0.000006911148));
-    return sqrt(0.636619772 / ax) * cos(ax - 0.785398164 + z * q) * p;
-  }
-
-  float besselJ1(float x) {
-    float ax = abs(x);
-    float sign = x < 0.0 ? -1.0 : 1.0;
-    if (ax < 8.0) {
-      float y = x * x;
-      return sign * ax * 0.5 * (1.0 - y * (0.125 - y * (0.003906 - y * (0.0000651 - y * 6.5e-7))));
-    }
-    float z = 8.0 / ax;
-    float y = z * z;
-    float p = 1.0 + y * (0.00183105 + y * (-0.00003516396));
-    float q = 0.04687499 + y * (-0.0002002690 + y * 0.000008449199);
-    return sign * sqrt(0.636619772 / ax) * cos(ax - 2.356194491 + z * q) * p;
-  }
-
-  // Higher-order Bessel via recurrence: J_{n+1}(x) = (2n/x)*J_n(x) - J_{n-1}(x)
-  float besselJn(int n, float x) {
-    if (n == 0) return besselJ0(x);
-    if (n == 1) return besselJ1(x);
-    if (abs(x) < 1e-6) return 0.0;
-
-    float jPrev = besselJ0(x);
-    float jCurr = besselJ1(x);
-    for (int i = 1; i < 7; i++) {
-      if (i >= n) break;
-      float jNext = (2.0 * float(i) / x) * jCurr - jPrev;
-      jPrev = jCurr;
-      jCurr = jNext;
-    }
-    return jCurr;
-  }
-
-  // Zeros of Bessel functions (precomputed for modes)
-  // k_nm = m-th zero of J_n, approximate first 3 zeros for n=0..6
-  float besselZero(int n, int m) {
-    // Approximate zeros using McMahon's expansion for large arguments
-    // For small m, use tabulated values
-    float zeros[21]; // 7 orders x 3 zeros each
-    // J_0 zeros
-    zeros[0] = 2.4048; zeros[1] = 5.5201; zeros[2] = 8.6537;
-    // J_1 zeros
-    zeros[3] = 3.8317; zeros[4] = 7.0156; zeros[5] = 10.1735;
-    // J_2 zeros
-    zeros[6] = 5.1356; zeros[7] = 8.4172; zeros[8] = 11.6198;
-    // J_3 zeros
-    zeros[9] = 6.3802; zeros[10] = 9.7610; zeros[11] = 13.0152;
-    // J_4 zeros
-    zeros[12] = 7.5883; zeros[13] = 11.0647; zeros[14] = 14.3725;
-    // J_5 zeros
-    zeros[15] = 8.7715; zeros[16] = 12.3386; zeros[17] = 15.7002;
-    // J_6 zeros
-    zeros[18] = 9.9361; zeros[19] = 13.5893; zeros[20] = 17.0038;
-
-    int idx = n * 3 + m;
-    if (idx >= 0 && idx < 21) return zeros[idx];
-    // Fallback: asymptotic approximation
-    return PI * (float(m) + 0.5 * float(n) - 0.25);
+  // Manual interpolation avoids requiring float-texture linear filtering.
+  float radialMode(int mode, float radius) {
+    float x = clamp(radius, 0.0, 1.0) * ${RADIAL_SAMPLES - 1}.0;
+    float i = floor(x);
+    float y = (float(mode) + 0.5) / 8.0;
+    float a = texture2D(u_radialModes, vec2((i + 0.5) / ${RADIAL_SAMPLES}.0, y)).r;
+    float b = texture2D(u_radialModes, vec2((min(i + 1.0, ${RADIAL_SAMPLES - 1}.0) + 0.5) / ${RADIAL_SAMPLES}.0, y)).r;
+    return mix(a, b, fract(x));
   }
 
   void main() {
@@ -372,6 +479,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     // Each mode: J_n(k_nm * r/R) * cos(n*theta + phase)
     // where n = rotational order, m = radial mode index
     float field = 0.0;
+    float excitation = 0.0;
     int nModes = int(u_modeCount);
     int rotN = int(u_rotOrder);
 
@@ -379,14 +487,11 @@ const FRAGMENT_SHADER = /* glsl */ `
       if (m >= nModes) break;
 
       float amp = u_modeAmps[m];
+      excitation += abs(amp);
 
-      // Use different radial modes with the same angular order
-      // Alternate between angular orders for variety
+      // Pairs share a radial/angular eigenmode with different angular phase.
       int angularN = rotN + (m / 2);
-      int radialM = m - (m / 2); // 0,0,1,1,2,2,3,3
-
-      float k = besselZero(angularN, radialM);
-      float radialPart = besselJn(angularN, k * r / plateR);
+      float radialPart = radialMode(m, r / plateR);
 
       // Angular part with phase offset from beat accumulation
       float phase = u_phaseShift + float(m) * PI * 0.3 + u_time * float(m + 1) * 0.15;
@@ -398,28 +503,10 @@ const FRAGMENT_SHADER = /* glsl */ `
     // Nodal line detection: |field| ~ 0
     float absField = abs(field);
     float thickness = 0.06 / u_lineSharpness;
-    float nodalIntensity = 1.0 - smoothstep(0.0, thickness, absField);
+    float nodalIntensity = (1.0 - smoothstep(0.0, thickness * max(excitation, 0.01), absField)) * smoothstep(0.0, 0.1, excitation);
 
-    // Gradient for direction coloring
-    float eps = 0.003;
-    vec2 uvR = uv + vec2(eps, 0.0);
-    vec2 uvU = uv + vec2(0.0, eps);
-    float rR = length(uvR); float tR = atan(uvR.y, uvR.x);
-    float rU = length(uvU); float tU = atan(uvU.y, uvU.x);
-
-    float fieldR = 0.0;
-    float fieldU = 0.0;
-    for (int m = 0; m < 8; m++) {
-      if (m >= nModes) break;
-      float amp = u_modeAmps[m];
-      int angularN = int(u_rotOrder) + (m / 2);
-      int radialM = m - (m / 2);
-      float k = besselZero(angularN, radialM);
-      float phase = u_phaseShift + float(m) * PI * 0.3 + u_time * float(m + 1) * 0.15;
-      fieldR += amp * besselJn(angularN, k * rR / plateR) * cos(float(angularN) * tR + phase);
-      fieldU += amp * besselJn(angularN, k * rU / plateR) * cos(float(angularN) * tU + phase);
-    }
-    vec2 grad = vec2(fieldR - field, fieldU - field) / eps;
+    // Screen derivatives preserve gradient direction without two more mode sums.
+    vec2 grad = vec2(dFdx(field), dFdy(field));
     float gradAngle = atan(grad.y, grad.x);
 
     // Coloring

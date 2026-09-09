@@ -1,7 +1,13 @@
+import { topologyValue, resonantLevel } from '../../audio-mapping.js';
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -21,20 +27,115 @@ import { registerVisualizer } from '../registry.js';
 const chladniMetadata: VisualizerMetadata = {
   type: 'chladni',
   label: 'Chladni',
-  description: 'Cymatics standing wave patterns',
+  description: 'Integer standing modes of a square membrane with fixed edges',
   usesPerspective: false,
   params: [
+    {
+      key: 'fundamentalHz',
+      label: 'Fundamental (Hz)',
+      min: 40,
+      max: 440,
+      step: 1,
+      initial: 110,
+      category: 'appearance',
+    },
+    {
+      key: 'qualityFactor',
+      label: 'Resonance Q',
+      min: 5,
+      max: 120,
+      step: 1,
+      initial: 30,
+      category: 'appearance',
+    },
     // Appearance
-    { key: 'modeN', label: 'Mode N', min: 1, max: 12, step: 1, initial: 3, category: 'appearance' },
-    { key: 'modeM', label: 'Mode M', min: 1, max: 12, step: 1, initial: 5, category: 'appearance' },
-    { key: 'lineThickness', label: 'Line Thickness', min: 0.5, max: 5.0, step: 0.25, initial: 2.0, category: 'appearance' },
-    { key: 'colorIntensity', label: 'Color Intensity', min: 0.3, max: 1.5, step: 0.05, initial: 0.8, category: 'appearance' },
-    { key: 'animSpeed', label: 'Animation Speed', min: 0.0, max: 1.0, step: 0.05, initial: 0.3, category: 'appearance' },
+    {
+      key: 'modeN',
+      label: 'Mode N',
+      min: 1,
+      max: 12,
+      step: 1,
+      initial: 3,
+      category: 'appearance',
+    },
+    {
+      key: 'modeM',
+      label: 'Mode M',
+      min: 1,
+      max: 12,
+      step: 1,
+      initial: 5,
+      category: 'appearance',
+    },
+    {
+      key: 'lineThickness',
+      label: 'Line Thickness',
+      min: 0.5,
+      max: 5.0,
+      step: 0.25,
+      initial: 2.0,
+      category: 'appearance',
+    },
+    {
+      key: 'colorIntensity',
+      label: 'Color Intensity',
+      min: 0.3,
+      max: 1.5,
+      step: 0.05,
+      initial: 0.8,
+      category: 'appearance',
+    },
+    {
+      key: 'animSpeed',
+      label: 'Animation Speed',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.3,
+      category: 'appearance',
+    },
     // Audio mapping
-    { key: 'spectralToMode', label: 'Spectral -> Mode', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly spectral centroid shifts mode numbers' },
-    { key: 'bassToBlend', label: 'Bass -> Blend', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly bass shifts sin/cos blend coefficient' },
-    { key: 'rmsToGlow', label: 'RMS -> Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly volume affects nodal line glow' },
-    { key: 'midToScatter', label: 'Mid -> Scatter', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly mids scatter the pattern' },
+    {
+      key: 'spectralToMode',
+      label: 'Spectral -> Mode',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How strongly spectral centroid shifts mode numbers',
+    },
+    {
+      key: 'bassToBlend',
+      label: 'Bass -> Blend',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How strongly bass shifts sin/cos blend coefficient',
+    },
+    {
+      key: 'rmsToGlow',
+      label: 'RMS -> Glow',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How strongly volume affects nodal line glow',
+    },
+    {
+      key: 'midToScatter',
+      label: 'Mid → Node Shimmer',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description:
+        'Color shimmer near the nodes; geometry retains fixed-edge eigenmodes',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
@@ -45,13 +146,20 @@ const chladniMetadata: VisualizerMetadata = {
 };
 
 export class ChladniVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = chladniMetadata;
 
   private unsub: Unsubscribe;
   private latestFeatures: AudioFeatures | null = null;
   private time = 0;
+  private modeN = 3;
+  private modeM = 5;
+  private modalLevel = new EMASmoothing(0.2, 0.05);
 
   private userParams: Record<string, number> = {
+    fundamentalHz: 110,
+    qualityFactor: 30,
     modeN: 3,
     modeM: 5,
     lineThickness: 2.0,
@@ -74,7 +182,7 @@ export class ChladniVisualizer implements Visualizer {
     high: new EMASmoothing(0.25),
     rms: new EMASmoothing(0.2),
     spectralCentroid: new EMASmoothing(0.1),
-    beatPulse: new EMASmoothing(0.45),
+    beatPulse: new EventEnvelope(),
     modeNSmooth: new EMASmoothing(0.05),
     modeMSmooth: new EMASmoothing(0.05),
   };
@@ -83,9 +191,12 @@ export class ChladniVisualizer implements Visualizer {
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
 
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
@@ -128,38 +239,74 @@ export class ChladniVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     // Mode numbers: base + spectral centroid modulation
-    const spectralOffset = this.smoothers.spectralCentroid.value * 4 * this.userParams.spectralToMode;
-    const targetN = Math.max(1, Math.min(12, Math.round(this.userParams.modeN + spectralOffset * 0.5)));
-    const targetM = Math.max(1, Math.min(12, Math.round(this.userParams.modeM + spectralOffset)));
-    this.smoothers.modeNSmooth.update(targetN);
-    this.smoothers.modeMSmooth.update(targetM);
+    const spectralOffset =
+      this.smoothers.spectralCentroid.value *
+      4 *
+      this.userParams.spectralToMode;
+    this.modeN = topologyValue(
+      this.modeN,
+      this.userParams.modeN + spectralOffset * 0.5,
+      1,
+      12,
+    );
+    this.modeM = topologyValue(
+      this.modeM,
+      this.userParams.modeM + spectralOffset,
+      1,
+      12,
+    );
+    const frequency =
+      (this.userParams.fundamentalHz * Math.hypot(this.modeN, this.modeM)) /
+      Math.SQRT2;
+    const level = this.latestFeatures
+      ? resonantLevel(
+          this.latestFeatures,
+          frequency,
+          this.userParams.qualityFactor,
+        )
+      : 0.1;
+    this.modalLevel.update(level, this.deltaSeconds);
 
     // Blend coefficient driven by bass
-    const blend = 0.5 + (this.smoothers.bass.value - 0.5) * this.userParams.bassToBlend;
+    const blend =
+      0.5 + (this.smoothers.bass.value - 0.5) * this.userParams.bassToBlend;
 
     if (this.material) {
       const u = this.material.uniforms;
-      u.u_time.value = this.time * this.userParams.animSpeed;
-      u.u_modeN.value = this.smoothers.modeNSmooth.value;
-      u.u_modeM.value = this.smoothers.modeMSmooth.value;
+      u.u_time.value = this.phases.advance(
+        'animation',
+        this.userParams.animSpeed,
+        this.deltaSeconds,
+      );
+      u.u_modeN.value = this.modeN;
+      u.u_modeM.value = this.modeM;
       u.u_lineThickness.value = this.userParams.lineThickness;
-      u.u_colorIntensity.value = this.userParams.colorIntensity;
+      u.u_colorIntensity.value =
+        this.userParams.colorIntensity *
+        Math.min(1, this.modalLevel.value * 15);
       u.u_blend.value = Math.max(0, Math.min(1, blend));
       u.u_bass.value = this.smoothers.bass.value;
       u.u_mid.value = this.smoothers.mid.value;
@@ -175,7 +322,8 @@ export class ChladniVisualizer implements Visualizer {
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -284,7 +432,9 @@ const FRAGMENT_SHADER = /* glsl */ `
   // --- Chladni equation ---
   // Chladni equation for center-mounted square plate
   float chladni(vec2 p, float n, float m) {
-    return cos(PI * n * p.x) * cos(PI * m * p.y) - cos(PI * m * p.x) * cos(PI * n * p.y);
+    p += 0.5;
+    float first = sin(PI * n * p.x) * sin(PI * m * p.y);
+    return n == m ? first : first - sin(PI * m * p.x) * sin(PI * n * p.y);
   }
 
   // Superposition of two Chladni modes for richer patterns
@@ -302,10 +452,10 @@ const FRAGMENT_SHADER = /* glsl */ `
     // Scatter/jitter driven by mids (simulates sand vibrating away from nodes)
     float scatterAmt = u_mid * 0.015 * u_midToScatter;
     vec2 scatter = vec2(gnoise(uv * 30.0 + u_time * 2.0), gnoise(uv * 30.0 + 100.0 + u_time * 2.0)) * scatterAmt;
-    vec2 p = uv + scatter;
+    vec2 p = uv;
 
     // Slow animation: modes drift slightly with time
-    float timeWarp = sin(u_time * 0.5) * 0.15;
+    float timeWarp = 0.0; // Integer fixed-edge membrane eigenmodes.
 
     // Evaluate Chladni function
     float f = chladniSuper(p, u_modeN + timeWarp, u_modeM - timeWarp * 0.7, u_blend);
@@ -328,7 +478,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     // --- Coloring ---
 
     // Nodal lines: bright, colored by gradient direction
-    float hue = fract(gradAngle / TAU + u_time * 0.05 + u_spectralCentroid * 0.3);
+    float hue = fract(gradAngle / TAU + u_time * 0.05 + u_spectralCentroid * 0.3 + scatter.x * 3.0);
     float sat = 0.6 + 0.3 * nodalIntensity;
     float val = nodalIntensity * u_colorIntensity;
 
@@ -352,12 +502,12 @@ const FRAGMENT_SHADER = /* glsl */ `
     color += hsv2rgb(vec3(fract(hue + 0.5), 0.3, antiNodal * u_bass * 0.15));
 
     // Plate boundary: circular fade
-    float r = length(uv);
-    float plateMask = 1.0 - smoothstep(0.8, 1.0, r);
+    float r = max(abs(uv.x), abs(uv.y));
+    float plateMask = 1.0 - smoothstep(0.495, 0.5, r);
     color *= plateMask;
 
     // Plate edge ring
-    float edgeRing = exp(-pow((r - 0.9) * 15.0, 2.0)) * 0.2;
+    float edgeRing = exp(-pow((r - 0.5) * 150.0, 2.0)) * 0.2;
     color += vec3(edgeRing * (0.5 + u_high * 0.5));
 
     // Vignette

@@ -1,7 +1,13 @@
+import { SegmentBatch } from '../../geometry/segment-batch.js';
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -15,31 +21,130 @@ const hopfMetadata: VisualizerMetadata = {
   description: 'Topological fiber bundles from S³ to S²',
   usesPerspective: true,
   params: [
-    { key: 'latitude', label: 'Latitude', min: -0.9, max: 0.9, step: 0.05, initial: 0.3, category: 'appearance', description: 'S² latitude of fibers' },
-    { key: 'fiberSpread', label: 'Fiber Spread', min: 0.1, max: 1.0, step: 0.05, initial: 0.5, category: 'appearance', description: 'Distribution of fiber latitudes' },
-    { key: 'twistSpeed', label: 'Twist Speed', min: 0.0, max: 2.0, step: 0.1, initial: 0.5, category: 'appearance', description: '4D rotation speed' },
-    { key: 'lineWidth', label: 'Line Width', min: 1.0, max: 5.0, step: 0.5, initial: 2.0, category: 'appearance', description: 'Fiber line thickness' },
-    { key: 'colorShift', label: 'Color Shift', min: 0.0, max: 1.0, step: 0.05, initial: 0.3, category: 'appearance', description: 'Hue cycling speed' },
-    { key: 'bassToLatitude', label: 'Bass -> Latitude', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Bass shifts fiber latitude band' },
-    { key: 'midToTwist', label: 'Mid -> Twist', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Mids drive 4D rotation' },
-    { key: 'highToSpread', label: 'High -> Spread', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Highs expand fiber distribution' },
-    { key: 'rmsToGlow', label: 'RMS -> Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Volume drives brightness' },
-    { key: 'beatToPulse', label: 'Beat -> Pulse', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Beats flash fibers' },
+    {
+      key: 'latitude',
+      label: 'Latitude',
+      min: -0.9,
+      max: 0.9,
+      step: 0.05,
+      initial: 0.3,
+      category: 'appearance',
+      description: 'S² latitude of fibers',
+    },
+    {
+      key: 'fiberSpread',
+      label: 'Fiber Spread',
+      min: 0.1,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.5,
+      category: 'appearance',
+      description: 'Distribution of fiber latitudes',
+    },
+    {
+      key: 'twistSpeed',
+      label: 'Twist Speed',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 0.5,
+      category: 'appearance',
+      description: '4D rotation speed',
+    },
+    {
+      key: 'lineWidth',
+      label: 'Line Width',
+      min: 1.0,
+      max: 5.0,
+      step: 0.5,
+      initial: 2.0,
+      category: 'appearance',
+      description: 'Fiber line thickness',
+    },
+    {
+      key: 'colorShift',
+      label: 'Color Shift',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.3,
+      category: 'appearance',
+      description: 'Hue cycling speed',
+    },
+    {
+      key: 'bassToLatitude',
+      label: 'Bass -> Latitude',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Bass shifts fiber latitude band',
+    },
+    {
+      key: 'midToTwist',
+      label: 'Mid -> Twist',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Mids drive 4D rotation',
+    },
+    {
+      key: 'highToSpread',
+      label: 'High -> Spread',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Highs expand fiber distribution',
+    },
+    {
+      key: 'rmsToGlow',
+      label: 'RMS -> Glow',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Volume drives brightness',
+    },
+    {
+      key: 'beatToPulse',
+      label: 'Beat -> Pulse',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Beats flash fibers',
+    },
   ],
   viewport: { pan: false, zoom: false, orbit: true },
   viewStateFields: [
-    { key: 'orbitAngle', label: 'Orbit', min: -Math.PI, max: Math.PI, step: 0.02 },
+    {
+      key: 'orbitAngle',
+      label: 'Orbit',
+      min: -Math.PI,
+      max: Math.PI,
+      step: 0.02,
+    },
     { key: 'elevation', label: 'Elevation', min: -1.2, max: 1.2, step: 0.02 },
     { key: 'distance', label: 'Distance', min: 3, max: 15, step: 0.1 },
   ],
 };
 
 export class HopfVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = hopfMetadata;
 
   private unsub: Unsubscribe;
   private latestFeatures: AudioFeatures | null = null;
   private time = 0;
+  private twistPhase = 0;
 
   private userParams: Record<string, number> = {
     latitude: 0.3,
@@ -63,20 +168,26 @@ export class HopfVisualizer implements Visualizer {
     mid: new EMASmoothing(0.18),
     high: new EMASmoothing(0.25),
     rms: new EMASmoothing(0.15),
-    beatPulse: new EMASmoothing(0.4),
+    beatPulse: new EventEnvelope(),
     spectralCentroid: new EMASmoothing(0.08),
   };
 
-  private lines: THREE.Line[] = [];
-  private positions: Float32Array[] = [];
-  private colors: Float32Array[] = [];
-  private geometries: THREE.BufferGeometry[] = [];
-  private material: THREE.ShaderMaterial | null = null;
-
+  private batch: SegmentBatch | null = null;
+  private uniforms = {
+    u_latitude: { value: 0.3 },
+    u_spread: { value: 0.5 },
+    u_twist: { value: 0 },
+    u_hue: { value: 0 },
+    u_glow: { value: 1 },
+    u_beatPulse: { value: 0 },
+  };
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
     this.smoothers.high.reset(0);
@@ -85,131 +196,103 @@ export class HopfVisualizer implements Visualizer {
     this.smoothers.spectralCentroid.reset(0.5);
   }
 
-  private stereographicProject(x: number, y: number, z: number, w: number): [number, number, number] {
-    const denom = 1.0 - w + 0.001;
-    return [x / denom, y / denom, z / denom];
-  }
-
-  private hopfFiber(
-    theta: number, phi: number, fiberParam: number, twist4D: number
-  ): [number, number, number] {
-    const cosTheta2 = Math.cos(theta / 2);
-    const sinTheta2 = Math.sin(theta / 2);
-
-    let z1Re = cosTheta2 * Math.cos(fiberParam);
-    let z1Im = cosTheta2 * Math.sin(fiberParam);
-    let z2Re = sinTheta2 * Math.cos(fiberParam + phi);
-    let z2Im = sinTheta2 * Math.sin(fiberParam + phi);
-
-    const ct = Math.cos(twist4D);
-    const st = Math.sin(twist4D);
-    const newZ1Re = z1Re * ct - z2Re * st;
-    const newZ1Im = z1Im * ct - z2Im * st;
-    const newZ2Re = z1Re * st + z2Re * ct;
-    const newZ2Im = z1Im * st + z2Im * ct;
-
-    return this.stereographicProject(newZ1Re, newZ1Im, newZ2Re, newZ2Im);
-  }
-
   attach(scene: THREE.Scene): void {
-    this.material = new THREE.ShaderMaterial({
-      vertexShader: VERTEX_SHADER,
-      fragmentShader: FRAGMENT_SHADER,
-      uniforms: {
-        u_opacity: { value: 0.85 },
-        u_glowIntensity: { value: 1.0 },
-        u_beatPulse: { value: 0.0 },
-      },
-      transparent: true,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      vertexColors: true,
-    });
-
-    for (let f = 0; f < FIBER_COUNT; f++) {
-      const posArr = new Float32Array(POINTS_PER_FIBER * 3);
-      const colArr = new Float32Array(POINTS_PER_FIBER * 3);
-
-      const geom = new THREE.BufferGeometry();
-      geom.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
-      geom.setAttribute('color', new THREE.BufferAttribute(colArr, 3));
-
-      const line = new THREE.Line(geom, this.material);
-      line.frustumCulled = false;
-
-      this.positions.push(posArr);
-      this.colors.push(colArr);
-      this.geometries.push(geom);
-      this.lines.push(line);
-      scene.add(line);
-    }
+    this.batch = new SegmentBatch(FIBER_COUNT * POINTS_PER_FIBER);
+    const batch = this.batch;
+    for (let fiber = 0; fiber < FIBER_COUNT; fiber++)
+      for (let point = 0; point < POINTS_PER_FIBER; point++) {
+        const offset = (fiber * POINTS_PER_FIBER + point) * 6;
+        batch.positions.set(
+          [
+            fiber / FIBER_COUNT,
+            (point / POINTS_PER_FIBER) * 2 * Math.PI,
+            0,
+            fiber / FIBER_COUNT,
+            ((point + 1) / POINTS_PER_FIBER) * 2 * Math.PI,
+            0,
+          ],
+          offset,
+        );
+      }
+    batch.upload(FIBER_COUNT * POINTS_PER_FIBER);
+    Object.assign(batch.material.uniforms, this.uniforms);
+    batch.material.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, this.uniforms);
+      shader.vertexShader = HOPF_VERTEX + shader.vertexShader;
+      shader.vertexShader = shader.vertexShader.replace(
+        'vec4 start = modelViewMatrix * vec4( instanceStart, 1.0 );',
+        `vec4 hs = hopf(instanceStart.xy); vec4 he = hopf(instanceEnd.xy);
+         if (min(hs.w, he.w) < .025 || max(length(hs.xyz / max(hs.w,.025)),length(he.xyz / max(he.w,.025))) > 40.0) { gl_Position=vec4(2,2,2,1); return; }
+         vec4 start = modelViewMatrix * vec4(2.0 * hs.xyz / hs.w, 1.0);`,
+      );
+      shader.vertexShader = shader.vertexShader.replace(
+        'vec4 end = modelViewMatrix * vec4( instanceEnd, 1.0 );',
+        'vec4 end = modelViewMatrix * vec4(2.0 * he.xyz / he.w, 1.0);',
+      );
+      shader.vertexShader = shader.vertexShader.replace(
+        'vColor.xyz = ( position.y < 0.5 ) ? instanceColorStart : instanceColorEnd;',
+        'vColor.xyz = (.5+.5*cos(6.2831853*(instanceStart.x+u_hue+vec3(0,.333333,.666667))))*(u_glow+u_beatPulse*.15);',
+      );
+    };
+    batch.material.customProgramCacheKey = () => 'hopf-ribbons-v1';
+    scene.add(batch.object);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
-    const baseLat = this.userParams.latitude
-      + (this.smoothers.bass.value - 0.3) * 0.4 * this.userParams.bassToLatitude;
-    const spread = this.userParams.fiberSpread
-      + this.smoothers.high.value * 0.3 * this.userParams.highToSpread;
-    const twistPhase = this.time * this.userParams.twistSpeed
-      * (0.5 + this.smoothers.mid.value * 1.0 * this.userParams.midToTwist);
-    const glowMult = 0.6 + this.smoothers.rms.value * 0.8 * this.userParams.rmsToGlow;
-    const beatFlash = this.smoothers.beatPulse.value * this.userParams.beatToPulse;
+    const baseLat =
+      this.userParams.latitude +
+      (this.smoothers.bass.value - 0.3) * 0.4 * this.userParams.bassToLatitude;
+    const spread =
+      this.userParams.fiberSpread +
+      this.smoothers.high.value * 0.3 * this.userParams.highToSpread;
+    this.twistPhase +=
+      this.userParams.twistSpeed *
+      (0.5 + this.smoothers.mid.value * this.userParams.midToTwist) *
+      this.deltaSeconds;
+    const glowMult =
+      0.6 + this.smoothers.rms.value * 0.8 * this.userParams.rmsToGlow;
+    const beatFlash =
+      this.smoothers.beatPulse.value * this.userParams.beatToPulse;
 
-    if (this.material) {
-      this.material.uniforms.u_glowIntensity.value = glowMult;
-      this.material.uniforms.u_beatPulse.value = beatFlash;
-    }
-
-    for (let f = 0; f < FIBER_COUNT; f++) {
-      const fiberRatio = f / FIBER_COUNT;
-      const theta = Math.acos(baseLat + (fiberRatio - 0.5) * 2.0 * spread);
-      const phi = fiberRatio * Math.PI * 2.0;
-
-      const hue = (fiberRatio + this.time * this.userParams.colorShift
-        + this.smoothers.spectralCentroid.value * 0.3) % 1.0;
-
-      const r = 0.5 + 0.5 * Math.cos(hue * Math.PI * 2.0);
-      const g = 0.5 + 0.5 * Math.cos(hue * Math.PI * 2.0 + Math.PI * 2.0 / 3.0);
-      const b = 0.5 + 0.5 * Math.cos(hue * Math.PI * 2.0 + Math.PI * 4.0 / 3.0);
-
-      const posArr = this.positions[f];
-      const colArr = this.colors[f];
-
-      for (let p = 0; p < POINTS_PER_FIBER; p++) {
-        const t = (p / POINTS_PER_FIBER) * Math.PI * 2.0;
-        const [x, y, z] = this.hopfFiber(theta, phi, t, twistPhase);
-
-        const scale = 2.0;
-        posArr[p * 3] = x * scale;
-        posArr[p * 3 + 1] = y * scale;
-        posArr[p * 3 + 2] = z * scale;
-
-        const intensity = glowMult + beatFlash * 0.3;
-        colArr[p * 3] = r * intensity;
-        colArr[p * 3 + 1] = g * intensity;
-        colArr[p * 3 + 2] = b * intensity;
-      }
-
-      this.geometries[f].attributes.position.needsUpdate = true;
-      this.geometries[f].attributes.color.needsUpdate = true;
-    }
+    this.uniforms.u_latitude.value = baseLat;
+    this.uniforms.u_spread.value = spread;
+    this.uniforms.u_twist.value = this.twistPhase;
+    this.uniforms.u_glow.value = glowMult;
+    this.uniforms.u_beatPulse.value = beatFlash;
+    this.uniforms.u_hue.value =
+      this.phases.advance(
+        'color',
+        this.userParams.colorShift,
+        this.deltaSeconds,
+      ) +
+      this.smoothers.spectralCentroid.value * 0.3;
+    if (this.batch) this.batch.material.linewidth = this.userParams.lineWidth;
   }
 
-  setResolution(_w: number, _h: number): void {}
+  setResolution(w: number, h: number): void {
+    this.batch?.setResolution(w, h);
+  }
 
   setUserParam(key: string, value: number): void {
     if (key in this.userParams) this.userParams[key] = value;
@@ -225,20 +308,16 @@ export class HopfVisualizer implements Visualizer {
 
   setViewState(partial: Record<string, number>): void {
     if ('orbitAngle' in partial) this._orbitAngle = partial.orbitAngle;
-    if ('elevation' in partial) this._elevation = Math.max(-1.2, Math.min(1.2, partial.elevation));
-    if ('distance' in partial) this._distance = Math.max(3, Math.min(15, partial.distance));
+    if ('elevation' in partial)
+      this._elevation = Math.max(-1.2, Math.min(1.2, partial.elevation));
+    if ('distance' in partial)
+      this._distance = Math.max(3, Math.min(15, partial.distance));
   }
 
   dispose(): void {
     this.unsub();
-    for (const line of this.lines) {
-      line.geometry.dispose();
-    }
-    this.material?.dispose();
-    this.lines = [];
-    this.geometries = [];
-    this.positions = [];
-    this.colors = [];
+    this.batch?.dispose();
+    this.batch = null;
   }
 }
 
@@ -247,34 +326,15 @@ registerVisualizer({
   create: (bus) => new HopfVisualizer(bus),
 });
 
-const VERTEX_SHADER = /* glsl */ `
-  varying vec3 vColor;
-  varying float vDepth;
-
-  void main() {
-    vColor = color;
-    vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
-    vDepth = -mvPos.z;
-    gl_Position = projectionMatrix * mvPos;
-  }
-`;
-
-const FRAGMENT_SHADER = /* glsl */ `
-  uniform float u_opacity;
-  uniform float u_glowIntensity;
-  uniform float u_beatPulse;
-
-  varying vec3 vColor;
-  varying float vDepth;
-
-  void main() {
-    float depthFade = exp(-vDepth * 0.06);
-    vec3 col = vColor * u_glowIntensity * depthFade;
-    col += vColor * u_beatPulse * 0.2;
-
-    // Soft glow via color boost
-    col = col / (0.8 + col);
-
-    gl_FragColor = vec4(col, u_opacity * depthFade);
+const HOPF_VERTEX = `
+  uniform float u_latitude, u_spread, u_twist, u_hue, u_glow, u_beatPulse;
+  vec4 hopf(vec2 parameter) {
+    float theta=acos(clamp(u_latitude+(parameter.x-.5)*2.0*u_spread,-.999,.999));
+    float phi=parameter.x*6.28318530718;
+    vec2 z1=cos(theta*.5)*vec2(cos(parameter.y),sin(parameter.y));
+    vec2 z2=sin(theta*.5)*vec2(cos(parameter.y+phi),sin(parameter.y+phi));
+    vec2 a=z1*cos(u_twist)-z2*sin(u_twist);
+    vec2 b=z1*sin(u_twist)+z2*cos(u_twist);
+    return vec4(a,b.x,1.0-b.y);
   }
 `;

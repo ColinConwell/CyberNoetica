@@ -34,10 +34,10 @@ EMCC_FLAGS=(
   -I "$SRC"
   -s MODULARIZE=1
   -s EXPORT_ES6=1
-  -s ENVIRONMENT=web
+  -s ENVIRONMENT=web,worker
   -s ALLOW_MEMORY_GROWTH=1
   -s EXPORT_NAME=createVoroModule
-  -s EXPORTED_FUNCTIONS=_voro_create,_voro_destroy,_voro_compute,_voro_compute_weighted,_voro_set_sphere_radius,_voro_n_cells,_voro_n_vertices,_voro_n_indices,_voro_n_edge_floats,_voro_vertices,_voro_normals,_voro_indices,_voro_cell_ids,_voro_edges,_voro_edge_cell_ids,_voro_centroids,_voro_volumes,_malloc,_free
+  -s EXPORTED_FUNCTIONS=_voro_create,_voro_destroy,_voro_compute,_voro_compute_weighted,_voro_set_sphere_radius,_voro_n_cells,_voro_n_vertices,_voro_n_indices,_voro_n_edge_floats,_voro_vertices,_voro_normals,_voro_indices,_voro_cell_ids,_voro_edges,_voro_edge_cell_ids,_voro_centroids,_voro_volumes,_voro_seed_ids,_malloc,_free
   -s EXPORTED_RUNTIME_METHODS=HEAPF32,HEAPU32
   -o "$OUT_DIR/voro.js"
 )
@@ -73,10 +73,10 @@ else
       -I third_party/voro++/src \
       -s MODULARIZE=1 \
       -s EXPORT_ES6=1 \
-      -s ENVIRONMENT=web \
+      -s ENVIRONMENT=web,worker \
       -s ALLOW_MEMORY_GROWTH=1 \
       -s EXPORT_NAME=createVoroModule \
-      -s EXPORTED_FUNCTIONS=_voro_create,_voro_destroy,_voro_compute,_voro_compute_weighted,_voro_set_sphere_radius,_voro_n_cells,_voro_n_vertices,_voro_n_indices,_voro_n_edge_floats,_voro_vertices,_voro_normals,_voro_indices,_voro_cell_ids,_voro_edges,_voro_edge_cell_ids,_voro_centroids,_voro_volumes,_malloc,_free \
+      -s EXPORTED_FUNCTIONS=_voro_create,_voro_destroy,_voro_compute,_voro_compute_weighted,_voro_set_sphere_radius,_voro_n_cells,_voro_n_vertices,_voro_n_indices,_voro_n_edge_floats,_voro_vertices,_voro_normals,_voro_indices,_voro_cell_ids,_voro_edges,_voro_edge_cell_ids,_voro_centroids,_voro_volumes,_voro_seed_ids,_malloc,_free \
       -s EXPORTED_RUNTIME_METHODS=HEAPF32,HEAPU32 \
       -o packages/renderer/wasm/voro/voro.js
 fi

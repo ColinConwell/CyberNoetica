@@ -9,14 +9,27 @@ import {
 import type { Visualizer, VisualizerMetadata } from '@cybernoetica/renderer';
 
 const DEFAULT_DRIFT_SPEED = 0.08;
+function wrapAngle(angle: number, metadata: VisualizerMetadata): number {
+  const field = metadata.viewStateFields.find(
+    (field) => field.key === 'orbitAngle',
+  );
+  const minimum = field?.min ?? -Math.PI,
+    period = (field?.max ?? Math.PI) - minimum;
+  return ((((angle - minimum) % period) + period) % period) + minimum;
+}
 
-export type SwitchHook = (type: string, phase: 'loading' | 'ready' | 'error', detail?: Error) => void;
+export type SwitchHook = (
+  type: string,
+  phase: 'loading' | 'ready' | 'error',
+  detail?: Error,
+) => void;
 
 export interface VisualizerManagerOptions {
   resetGovernor?: () => void;
 }
 
 export class VisualizerManager {
+  private disposed = false;
   private activeViz: Visualizer | null = null;
   private activeType = '';
   private driftEnabled = true;
@@ -40,8 +53,12 @@ export class VisualizerManager {
         this.scene.start();
         return;
       }
-      console.info('VisualizerManager: Re-initializing active visualizer after context restore.');
-      void this.switchTo(type).then(() => this.scene.start());
+      console.info(
+        'VisualizerManager: Re-initializing active visualizer after context restore.',
+      );
+      void this.switchTo(type).then((viz) => {
+        if (viz && !this.disposed) this.scene.start();
+      });
     });
   }
 
@@ -54,22 +71,28 @@ export class VisualizerManager {
   }
 
   async switchTo(type: string): Promise<Visualizer | null> {
+    if (this.disposed) return null;
     const gen = ++this.switchGen;
     this.pendingType = type;
     let entry = getVisualizerEntry(type);
     if (!entry) {
       this.switchHook?.(type, 'loading');
       try {
-        entry = await loadVisualizer(type) ?? undefined;
+        entry = (await loadVisualizer(type)) ?? undefined;
       } catch (err) {
-        if (gen === this.switchGen) this.switchHook?.(type, 'error', err as Error);
+        if (gen === this.switchGen)
+          this.switchHook?.(type, 'error', err as Error);
         return null;
       }
       if (gen !== this.switchGen || this.pendingType !== type) {
         return null;
       }
       if (!entry) {
-        this.switchHook?.(type, 'error', new Error(`Visualizer not found: ${type}`));
+        this.switchHook?.(
+          type,
+          'error',
+          new Error(`Visualizer not found: ${type}`),
+        );
         return null;
       }
     }
@@ -79,77 +102,113 @@ export class VisualizerManager {
     this.teardownActive();
     this.resetGovernor?.();
 
-    this.activeType = type;
-    this.activeViz = entry.create(this.bus);
+    try {
+      this.activeType = type;
+      this.activeViz = entry.create(this.bus);
 
-    const renderer = this.scene.getRenderer();
-    if (renderer) {
-      this.activeViz.setRenderer?.(renderer);
-    }
+      const renderer = this.scene.getRenderer();
+      if (renderer) {
+        this.activeViz.setRenderer?.(renderer);
+      }
 
-    const canvas = this.scene.getCanvasElement();
-    if (canvas) {
-      this.activeViz.setInteractionContext?.({
-        canvas,
-        getPerspectiveCamera: () => this.scene.perspCamera,
-      });
-    }
+      const canvas = this.scene.getCanvasElement();
+      if (canvas) {
+        this.activeViz.setInteractionContext?.({
+          canvas,
+          getPerspectiveCamera: () => this.scene.perspCamera,
+        });
+      }
 
-    this.activeViz.attach(this.scene.scene);
-    const buf = this.scene.getDrawingBufferSize();
-    this.activeViz.setResolution(buf.width, buf.height);
+      this.activeViz.attach(this.scene.scene);
+      const buf = this.scene.getDrawingBufferSize();
+      this.activeViz.setResolution(buf.width, buf.height);
 
-    this.scene.activeCamera = this.activeViz.metadata.usesPerspective
-      ? this.scene.perspCamera : this.scene.camera;
-    this.scene.setViewportCapabilities(this.activeViz.metadata.viewport);
-    this.scene.setCursorMode(this.activeViz.getCursorMode?.() ?? 'default');
-    this.driftEnabled = true;
-    this.applyPerspectiveCamera();
+      this.scene.activeCamera = this.activeViz.metadata.usesPerspective
+        ? this.scene.perspCamera
+        : this.scene.camera;
+      this.scene.setViewportCapabilities(this.activeViz.metadata.viewport);
+      this.scene.setCursorMode(this.activeViz.getCursorMode?.() ?? 'default');
+      this.driftEnabled = true;
+      this.applyPerspectiveCamera();
 
-    this.scene.precompile();
+      this.scene.precompile();
 
-    if (gen !== this.switchGen) {
+      if (gen !== this.switchGen) {
+        this.teardownActive();
+        return null;
+      }
+
+      this.switchHook?.(type, 'ready');
+      return this.activeViz;
+    } catch (error) {
       this.teardownActive();
+      this.activeType = '';
+      this.switchHook?.(
+        type,
+        'error',
+        error instanceof Error ? error : new Error(String(error)),
+      );
       return null;
     }
-
-    this.switchHook?.(type, 'ready');
-    return this.activeViz;
   }
 
   async switchRandom(exclude?: string): Promise<Visualizer | null> {
     const types = getVisualizerTypes();
-    const candidates = exclude ? types.filter(t => t !== exclude) : types;
+    const candidates = exclude ? types.filter((t) => t !== exclude) : types;
     const pick = candidates.length > 0 ? candidates : types;
     const type = pick[Math.floor(Math.random() * pick.length)];
     return this.switchTo(type);
   }
 
-  getActive(): Visualizer | null { return this.activeViz; }
-  getActiveType(): string { return this.activeType; }
-  getAvailableTypes(): string[] { return getVisualizerTypes(); }
-  getMetadataList(): VisualizerMetadata[] { return listVisualizers(); }
+  getActive(): Visualizer | null {
+    return this.activeViz;
+  }
+  getActiveType(): string {
+    return this.activeType;
+  }
+  getAvailableTypes(): string[] {
+    return getVisualizerTypes();
+  }
+  getMetadataList(): VisualizerMetadata[] {
+    return listVisualizers();
+  }
 
   resize(_w: number, _h: number): void {
     const buf = this.scene.getDrawingBufferSize();
     this.activeViz?.setResolution(buf.width, buf.height);
   }
 
-  tick(): void {
+  tick(deltaSeconds = 1 / 60): void {
     if (!this.activeViz) return;
 
     if (this.activeViz.metadata.usesPerspective) {
       if (this.driftEnabled && !this.scene.isDragging()) {
         const vs = this.activeViz.getViewState();
         this.activeViz.setViewState({
-          orbitAngle: (vs.orbitAngle ?? 0) + DEFAULT_DRIFT_SPEED / 60,
+          orbitAngle: wrapAngle(
+            (vs.orbitAngle ?? 0) + DEFAULT_DRIFT_SPEED * deltaSeconds,
+            this.activeViz.metadata,
+          ),
         });
       }
       this.applyPerspectiveCamera();
     }
 
-    this.activeViz.tick();
+    this.activeViz.tick(deltaSeconds);
     this.scene.setCursorMode(this.activeViz.getCursorMode?.() ?? 'default');
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    this.switchGen++;
+    this.pendingType = null;
+    this.scene.onViewportDrag(null);
+    this.scene.onViewportZoom(null);
+    this.scene.onViewportReset(null);
+    this.scene.onContextRestored(null);
+    this.switchHook = null;
+    this.teardownActive();
+    this.activeType = '';
   }
 
   private teardownActive(): void {
@@ -168,9 +227,9 @@ export class VisualizerManager {
     const angle = vs.orbitAngle ?? 0;
     const elev = vs.elevation ?? 0;
     this.scene.setCameraPosition(
-      Math.sin(angle) * dist,
-      elev * dist * 0.3,
-      Math.cos(angle) * dist,
+      Math.sin(angle) * Math.cos(elev) * dist,
+      Math.sin(elev) * dist,
+      Math.cos(angle) * Math.cos(elev) * dist,
     );
   }
 
@@ -181,8 +240,14 @@ export class VisualizerManager {
 
     if (meta.viewport.orbit) {
       this.activeViz.setViewState({
-        orbitAngle: (vs.orbitAngle ?? 0) + dx * 3.0,
-        elevation: Math.max(-1.5, Math.min(1.5, (vs.elevation ?? 0) - dy * 2.0)),
+        orbitAngle: wrapAngle(
+          (vs.orbitAngle ?? 0) + dx * 3.0,
+          this.activeViz.metadata,
+        ),
+        elevation: Math.max(
+          -1.5,
+          Math.min(1.5, (vs.elevation ?? 0) - dy * 2.0),
+        ),
       });
     } else if (meta.viewport.pan) {
       const zoom = vs.zoom ?? 1;

@@ -1,6 +1,7 @@
 export type VoroMode = 'box' | 'periodic' | 'radical' | 'sphere';
 
 export interface VoroMesh {
+  inputSeeds: Float32Array;
   vertices: Float32Array;
   normals: Float32Array;
   indices: Uint32Array;
@@ -10,6 +11,8 @@ export interface VoroMesh {
   centroids: Float32Array;
   volumes: Float32Array;
   cellCount: number;
+  /** Compact mesh cell index → persistent input seed index. */
+  seedIds: Uint32Array;
 }
 
 export interface VoroBackendOptions {
@@ -28,12 +31,25 @@ const MODE_CODE: Record<VoroMode, number> = {
 
 type VoroModule = {
   _voro_create(
-    ax: number, bx: number, ay: number, by: number, az: number, bz: number,
-    nx: number, ny: number, nz: number, mode: number,
+    ax: number,
+    bx: number,
+    ay: number,
+    by: number,
+    az: number,
+    bz: number,
+    nx: number,
+    ny: number,
+    nz: number,
+    mode: number,
   ): number;
   _voro_destroy(ctx: number): void;
   _voro_compute(ctx: number, xyzPtr: number, n: number): number;
-  _voro_compute_weighted(ctx: number, xyzPtr: number, radiiPtr: number, n: number): number;
+  _voro_compute_weighted(
+    ctx: number,
+    xyzPtr: number,
+    radiiPtr: number,
+    n: number,
+  ): number;
   _voro_set_sphere_radius(ctx: number, r: number): void;
   _voro_n_cells(ctx: number): number;
   _voro_n_vertices(ctx: number): number;
@@ -46,6 +62,7 @@ type VoroModule = {
   _voro_edges(ctx: number): number;
   _voro_edge_cell_ids(ctx: number): number;
   _voro_centroids(ctx: number): number;
+  _voro_seed_ids(ctx: number): number;
   _voro_volumes(ctx: number): number;
   _malloc(bytes: number): number;
   _free(ptr: number): void;
@@ -80,7 +97,18 @@ export class VoroBackend {
   ) {
     this.mode = mode;
     const h = halfExtent;
-    this.ctx = mod._voro_create(-h, h, -h, h, -h, h, grid, grid, grid, MODE_CODE[mode]);
+    this.ctx = mod._voro_create(
+      -h,
+      h,
+      -h,
+      h,
+      -h,
+      h,
+      grid,
+      grid,
+      grid,
+      MODE_CODE[mode],
+    );
     if (mode === 'sphere' && sphereRadius != null) {
       mod._voro_set_sphere_radius(this.ctx, sphereRadius);
     }
@@ -112,7 +140,12 @@ export class VoroBackend {
         this.radiiCap = rBytes;
       }
       this.mod.HEAPF32.set(radii.subarray(0, n), this.radiiPtr >> 2);
-      cellCount = this.mod._voro_compute_weighted(this.ctx, this.xyzPtr, this.radiiPtr, n);
+      cellCount = this.mod._voro_compute_weighted(
+        this.ctx,
+        this.xyzPtr,
+        this.radiiPtr,
+        n,
+      );
     } else {
       cellCount = this.mod._voro_compute(this.ctx, this.xyzPtr, n);
     }
@@ -122,15 +155,29 @@ export class VoroBackend {
     const nEdge = this.mod._voro_n_edge_floats(this.ctx);
 
     return {
-      vertices: copyF32(this.mod, this.mod._voro_vertices(this.ctx), nVerts * 3),
+      inputSeeds: xyz.slice(),
+      vertices: copyF32(
+        this.mod,
+        this.mod._voro_vertices(this.ctx),
+        nVerts * 3,
+      ),
       normals: copyF32(this.mod, this.mod._voro_normals(this.ctx), nVerts * 3),
       indices: copyU32(this.mod, this.mod._voro_indices(this.ctx), nIdx),
       cellIds: copyU32(this.mod, this.mod._voro_cell_ids(this.ctx), nVerts),
       edges: copyF32(this.mod, this.mod._voro_edges(this.ctx), nEdge),
-      edgeCellIds: copyU32(this.mod, this.mod._voro_edge_cell_ids(this.ctx), nEdge / 3),
-      centroids: copyF32(this.mod, this.mod._voro_centroids(this.ctx), cellCount * 3),
+      edgeCellIds: copyU32(
+        this.mod,
+        this.mod._voro_edge_cell_ids(this.ctx),
+        nEdge / 3,
+      ),
+      centroids: copyF32(
+        this.mod,
+        this.mod._voro_centroids(this.ctx),
+        cellCount * 3,
+      ),
       volumes: copyF32(this.mod, this.mod._voro_volumes(this.ctx), cellCount),
       cellCount,
+      seedIds: copyU32(this.mod, this.mod._voro_seed_ids(this.ctx), cellCount),
     };
   }
 

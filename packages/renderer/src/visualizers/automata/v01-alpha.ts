@@ -1,22 +1,21 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
 /**
  * Cellular Automata visualizer — generative life patterns.
  *
- * Renders a continuous-valued cellular automaton inspired by Lenia
- * (continuous Game of Life). Rather than discrete alive/dead states,
- * cells have smooth values that evolve via a growth function applied
- * to neighborhood sums, producing organic, amoeba-like patterns.
- *
- * The automaton state is computed in the fragment shader using a
- * multi-pass-like approach: previous state is encoded in a feedback
- * texture, but for simplicity we use a procedural approximation
- * that captures the visual essence of cellular automata.
+ * Procedural cellular patterns inspired by Lenia. A local growth function
+ * is applied to freshly generated noise. No feedback texture or persistent
+ * grid is used, so this is not an evolving cellular automaton.
  *
  * Bass drives the growth rate, mids control neighborhood radius,
  * spectral centroid shifts the growth function center, and beats
@@ -26,20 +25,101 @@ import { registerVisualizer } from '../registry.js';
 const automataMetadata: VisualizerMetadata = {
   type: 'automata',
   label: 'Automata',
-  description: 'Continuous cellular automata patterns',
+  description: 'Procedural cellular patterns',
   usesPerspective: false,
   params: [
     // Appearance
-    { key: 'cellScale', label: 'Cell Scale', min: 2.0, max: 20.0, step: 1.0, initial: 8.0, category: 'appearance', description: 'Size of cell grid' },
-    { key: 'brightness', label: 'Brightness', min: 0.5, max: 3.0, step: 0.1, initial: 1.3, category: 'appearance', description: 'Overall brightness' },
-    { key: 'evolutionSpeed', label: 'Evolution Speed', min: 0.1, max: 2.0, step: 0.1, initial: 0.6, category: 'appearance', description: 'How fast patterns evolve' },
-    { key: 'colorShift', label: 'Color Shift', min: 0.0, max: 1.0, step: 0.05, initial: 0.0, category: 'appearance', description: 'Base hue offset' },
-    { key: 'trailLength', label: 'Trail Length', min: 0.0, max: 1.0, step: 0.05, initial: 0.5, category: 'appearance', description: 'Temporal persistence of cells' },
+    {
+      key: 'cellScale',
+      label: 'Cell Scale',
+      min: 2.0,
+      max: 20.0,
+      step: 1.0,
+      initial: 8.0,
+      category: 'appearance',
+      description: 'Size of cell grid',
+    },
+    {
+      key: 'brightness',
+      label: 'Brightness',
+      min: 0.5,
+      max: 3.0,
+      step: 0.1,
+      initial: 1.3,
+      category: 'appearance',
+      description: 'Overall brightness',
+    },
+    {
+      key: 'evolutionSpeed',
+      label: 'Evolution Speed',
+      min: 0.1,
+      max: 2.0,
+      step: 0.1,
+      initial: 0.6,
+      category: 'appearance',
+      description: 'How fast patterns evolve',
+    },
+    {
+      key: 'colorShift',
+      label: 'Color Shift',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.0,
+      category: 'appearance',
+      description: 'Base hue offset',
+    },
+    {
+      key: 'trailLength',
+      label: 'Trail Length',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.5,
+      category: 'appearance',
+      description: 'Temporal persistence of cells',
+    },
     // Audio mapping
-    { key: 'bassToGrowth', label: 'Bass -> Growth', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How bass drives growth rate' },
-    { key: 'midToRadius', label: 'Mid -> Radius', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How mids expand neighborhood radius' },
-    { key: 'spectralToRule', label: 'Spectral -> Rule', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How spectral centroid shifts the growth function' },
-    { key: 'rmsToLife', label: 'RMS -> Life', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How volume affects cell vitality' },
+    {
+      key: 'bassToGrowth',
+      label: 'Bass -> Growth',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How bass drives growth rate',
+    },
+    {
+      key: 'midToRadius',
+      label: 'Mid -> Radius',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How mids expand neighborhood radius',
+    },
+    {
+      key: 'spectralToRule',
+      label: 'Spectral -> Rule',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How spectral centroid shifts the growth function',
+    },
+    {
+      key: 'rmsToLife',
+      label: 'RMS -> Life',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How volume affects cell vitality',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
@@ -50,6 +130,8 @@ const automataMetadata: VisualizerMetadata = {
 };
 
 export class AutomataVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = automataMetadata;
 
   private unsub: Unsubscribe;
@@ -78,16 +160,19 @@ export class AutomataVisualizer implements Visualizer {
     high: new EMASmoothing(0.22),
     rms: new EMASmoothing(0.15),
     spectralCentroid: new EMASmoothing(0.1),
-    beatPulse: new EMASmoothing(0.45),
+    beatPulse: new EventEnvelope(),
   };
 
   private material: THREE.ShaderMaterial | null = null;
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
 
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
@@ -98,7 +183,7 @@ export class AutomataVisualizer implements Visualizer {
   }
 
   attach(scene: THREE.Scene): void {
-    this.material = new THREE.RawShaderMaterial({
+    this.material = new THREE.ShaderMaterial({
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
@@ -128,24 +213,35 @@ export class AutomataVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     if (this.material) {
       const u = this.material.uniforms;
-      u.u_time.value = this.time * this.userParams.evolutionSpeed;
+      u.u_time.value = this.phases.advance(
+        'animation',
+        this.userParams.evolutionSpeed,
+        this.deltaSeconds,
+      );
       u.u_zoom.value = this._zoom;
       u.u_pan.value.set(this._panX, this._panY);
       u.u_cellScale.value = this.userParams.cellScale;
@@ -154,25 +250,30 @@ export class AutomataVisualizer implements Visualizer {
       u.u_colorShift.value = this.userParams.colorShift;
 
       // Bass drives growth rate
-      u.u_growthRate.value = 0.5 + this.smoothers.bass.value * 1.5 * this.userParams.bassToGrowth;
+      u.u_growthRate.value =
+        0.5 + this.smoothers.bass.value * 1.5 * this.userParams.bassToGrowth;
 
       // Mids expand neighborhood radius
-      u.u_neighborRadius.value = 1.0 + this.smoothers.mid.value * 0.8 * this.userParams.midToRadius;
+      u.u_neighborRadius.value =
+        1.0 + this.smoothers.mid.value * 0.8 * this.userParams.midToRadius;
 
       // Spectral centroid shifts rule parameters
-      u.u_ruleShift.value = (this.smoothers.spectralCentroid.value - 0.5) * this.userParams.spectralToRule;
+      u.u_ruleShift.value =
+        (this.smoothers.spectralCentroid.value - 0.5) *
+        this.userParams.spectralToRule;
 
       u.u_bass.value = this.smoothers.bass.value;
       u.u_mid.value = this.smoothers.mid.value;
       u.u_high.value = this.smoothers.high.value;
-      u.u_rms.value = this.smoothers.rms.value;
+      u.u_rms.value = this.smoothers.rms.value * this.userParams.rmsToLife;
       u.u_spectralCentroid.value = this.smoothers.spectralCentroid.value;
       u.u_beatPulse.value = this.smoothers.beatPulse.value;
     }
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -184,9 +285,12 @@ export class AutomataVisualizer implements Visualizer {
   }
 
   setViewState(partial: Record<string, number>): void {
-    if ('zoom' in partial) this._zoom = Math.max(0.3, Math.min(5.0, partial.zoom));
-    if ('panX' in partial) this._panX = Math.max(-3.0, Math.min(3.0, partial.panX));
-    if ('panY' in partial) this._panY = Math.max(-3.0, Math.min(3.0, partial.panY));
+    if ('zoom' in partial)
+      this._zoom = Math.max(0.3, Math.min(5.0, partial.zoom));
+    if ('panX' in partial)
+      this._panX = Math.max(-3.0, Math.min(3.0, partial.panX));
+    if ('panY' in partial)
+      this._panY = Math.max(-3.0, Math.min(3.0, partial.panY));
   }
 
   dispose(): void {
@@ -202,8 +306,6 @@ registerVisualizer({
 });
 
 const VERTEX_SHADER = /* glsl */ `
-  attribute vec3 position;
-  attribute vec2 uv;
   varying vec2 vUv;
   void main() {
     vUv = uv;

@@ -1,26 +1,121 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
 const kleinianMetadata: VisualizerMetadata = {
   type: 'kleinian',
   label: 'Kleinian',
-  description: "Indra's Pearls — Möbius-group limit sets",
+  description: 'Kleinian-inspired circle inversions',
   usesPerspective: false,
   params: [
-    { key: 'paramRe', label: 'Trace Re', min: 1.5, max: 2.5, step: 0.01, initial: 1.96, category: 'appearance', description: 'Real part of generator trace' },
-    { key: 'paramIm', label: 'Trace Im', min: -0.5, max: 0.5, step: 0.01, initial: 0.0, category: 'appearance', description: 'Imaginary part of generator trace' },
-    { key: 'iterations', label: 'Iterations', min: 30, max: 200, step: 5, initial: 80, category: 'appearance', description: 'Max orbit iterations' },
-    { key: 'colorSpeed', label: 'Color Speed', min: 0.0, max: 1.0, step: 0.05, initial: 0.2, category: 'appearance', description: 'Hue cycling rate' },
-    { key: 'brightness', label: 'Brightness', min: 0.5, max: 3.0, step: 0.1, initial: 1.5, category: 'appearance', description: 'Overall brightness' },
-    { key: 'bassToTrace', label: 'Bass -> Trace', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Bass modulates generator trace' },
-    { key: 'midToColor', label: 'Mid -> Color', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Mids shift palette hue' },
-    { key: 'highToDetail', label: 'High -> Detail', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Highs increase iteration clarity' },
-    { key: 'rmsToGlow', label: 'RMS -> Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Volume drives glow' },
-    { key: 'beatToPulse', label: 'Beat -> Pulse', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Beats flash the fractal' },
+    {
+      key: 'paramRe',
+      label: 'Trace Re',
+      min: 1.5,
+      max: 2.5,
+      step: 0.01,
+      initial: 1.96,
+      category: 'appearance',
+      description: 'Real part of generator trace',
+    },
+    {
+      key: 'paramIm',
+      label: 'Trace Im',
+      min: -0.5,
+      max: 0.5,
+      step: 0.01,
+      initial: 0.0,
+      category: 'appearance',
+      description: 'Imaginary part of generator trace',
+    },
+    {
+      key: 'iterations',
+      label: 'Iterations',
+      min: 30,
+      max: 200,
+      step: 5,
+      initial: 80,
+      category: 'appearance',
+      description: 'Max orbit iterations',
+    },
+    {
+      key: 'colorSpeed',
+      label: 'Color Speed',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.2,
+      category: 'appearance',
+      description: 'Hue cycling rate',
+    },
+    {
+      key: 'brightness',
+      label: 'Brightness',
+      min: 0.5,
+      max: 3.0,
+      step: 0.1,
+      initial: 1.5,
+      category: 'appearance',
+      description: 'Overall brightness',
+    },
+    {
+      key: 'bassToTrace',
+      label: 'Bass -> Trace',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Bass modulates generator trace',
+    },
+    {
+      key: 'midToColor',
+      label: 'Mid -> Color',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Mids shift palette hue',
+    },
+    {
+      key: 'highToDetail',
+      label: 'High -> Detail',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Highs increase iteration clarity',
+    },
+    {
+      key: 'rmsToGlow',
+      label: 'RMS -> Glow',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Volume drives glow',
+    },
+    {
+      key: 'beatToPulse',
+      label: 'Beat -> Pulse',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Beats flash the fractal',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
@@ -31,6 +126,8 @@ const kleinianMetadata: VisualizerMetadata = {
 };
 
 export class KleinianVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = kleinianMetadata;
 
   private unsub: Unsubscribe;
@@ -59,7 +156,7 @@ export class KleinianVisualizer implements Visualizer {
     mid: new EMASmoothing(0.18),
     high: new EMASmoothing(0.25),
     rms: new EMASmoothing(0.15),
-    beatPulse: new EMASmoothing(0.4),
+    beatPulse: new EventEnvelope(),
     spectralCentroid: new EMASmoothing(0.08),
   };
 
@@ -67,9 +164,12 @@ export class KleinianVisualizer implements Visualizer {
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
     this.smoothers.high.reset(0);
@@ -83,6 +183,7 @@ export class KleinianVisualizer implements Visualizer {
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
+        u_colorSpeedPhase: { value: 0 },
         u_time: { value: 0.0 },
         u_resolution: { value: new THREE.Vector2(1920, 1080) },
         u_zoom: { value: 1.0 },
@@ -93,6 +194,7 @@ export class KleinianVisualizer implements Visualizer {
         u_colorSpeed: { value: 0.2 },
         u_brightness: { value: 1.5 },
         u_bass: { value: 0.0 },
+        u_midToColor: { value: 1.0 },
         u_mid: { value: 0.0 },
         u_high: { value: 0.0 },
         u_rms: { value: 0.1 },
@@ -107,19 +209,26 @@ export class KleinianVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     if (this.material) {
@@ -127,25 +236,40 @@ export class KleinianVisualizer implements Visualizer {
       u.u_time.value = this.time;
       u.u_zoom.value = this._zoom;
       u.u_center.value.set(this._centerX, this._centerY);
-      u.u_paramRe.value = this.userParams.paramRe
-        + (this.smoothers.bass.value - 0.2) * 0.15 * this.userParams.bassToTrace;
-      u.u_paramIm.value = this.userParams.paramIm
-        + this.smoothers.mid.value * 0.1 * this.userParams.bassToTrace;
-      u.u_iterations.value = this.userParams.iterations;
+      u.u_paramRe.value =
+        this.userParams.paramRe +
+        (this.smoothers.bass.value - 0.2) * 0.15 * this.userParams.bassToTrace;
+      u.u_paramIm.value =
+        this.userParams.paramIm +
+        this.smoothers.mid.value * 0.1 * this.userParams.bassToTrace;
+      u.u_iterations.value = Math.min(
+        200,
+        this.userParams.iterations +
+          this.smoothers.high.value * 20 * this.userParams.highToDetail,
+      );
       u.u_colorSpeed.value = this.userParams.colorSpeed;
-      u.u_brightness.value = this.userParams.brightness
-        + this.smoothers.rms.value * 0.5 * this.userParams.rmsToGlow;
+      u.u_colorSpeedPhase.value = this.phases.advance(
+        'u_colorSpeed',
+        u.u_colorSpeed.value,
+        this.deltaSeconds,
+      );
+      u.u_brightness.value =
+        this.userParams.brightness +
+        this.smoothers.rms.value * 0.5 * this.userParams.rmsToGlow;
       u.u_bass.value = this.smoothers.bass.value;
       u.u_mid.value = this.smoothers.mid.value;
+      u.u_midToColor.value = this.userParams.midToColor;
       u.u_high.value = this.smoothers.high.value;
       u.u_rms.value = this.smoothers.rms.value;
-      u.u_beatPulse.value = this.smoothers.beatPulse.value * this.userParams.beatToPulse;
+      u.u_beatPulse.value =
+        this.smoothers.beatPulse.value * this.userParams.beatToPulse;
       u.u_spectralCentroid.value = this.smoothers.spectralCentroid.value;
     }
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -157,9 +281,12 @@ export class KleinianVisualizer implements Visualizer {
   }
 
   setViewState(partial: Record<string, number>): void {
-    if ('centerX' in partial) this._centerX = Math.max(-4, Math.min(4, partial.centerX));
-    if ('centerY' in partial) this._centerY = Math.max(-4, Math.min(4, partial.centerY));
-    if ('zoom' in partial) this._zoom = Math.max(0.1, Math.min(10.0, partial.zoom));
+    if ('centerX' in partial)
+      this._centerX = Math.max(-4, Math.min(4, partial.centerX));
+    if ('centerY' in partial)
+      this._centerY = Math.max(-4, Math.min(4, partial.centerY));
+    if ('zoom' in partial)
+      this._zoom = Math.max(0.1, Math.min(10.0, partial.zoom));
   }
 
   dispose(): void {
@@ -190,6 +317,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   #define PI 3.14159265359
   #define TAU 6.28318530718
 
+  uniform float u_colorSpeedPhase;
   uniform float u_time;
   uniform vec2 u_resolution;
   uniform float u_zoom;
@@ -200,6 +328,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   uniform float u_colorSpeed;
   uniform float u_brightness;
   uniform float u_bass;
+  uniform float u_midToColor;
   uniform float u_mid;
   uniform float u_high;
   uniform float u_rms;
@@ -229,7 +358,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   // Circle inversion: invert z through circle with center c and radius r
   vec2 circleInvert(vec2 z, vec2 center, float radius) {
     vec2 diff = z - center;
-    float d2 = dot(diff, diff);
+    float d2 = max(dot(diff, diff), 1e-12);
     return center + radius * radius * diff / d2;
   }
 
@@ -302,9 +431,9 @@ const FRAGMENT_SHADER = /* glsl */ `
 
     // Coloring
     float iterRatio = float(escapeIter) / float(maxIter);
-    float hue = u_time * u_colorSpeed
+    float hue = u_colorSpeedPhase
       + iterRatio * 0.5
-      + u_mid * 0.3 * u_spectralCentroid
+      + u_mid * u_midToColor * 0.3 * u_spectralCentroid
       + totalAngle * 0.02;
 
     float sat = 0.7 + u_high * 0.3;

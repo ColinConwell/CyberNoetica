@@ -1,7 +1,12 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -37,28 +42,155 @@ const orbitTrapMetadata: VisualizerMetadata = {
   description: 'Julia fractal with geometric orbit trap coloring',
   usesPerspective: false,
   params: [
-    { key: 'trapRadius', label: 'Trap Radius', min: 0.05, max: 1.5, step: 0.05, initial: 0.5, category: 'appearance', description: 'Size of the orbit trap' },
-    { key: 'cSpeed', label: 'C Speed', min: 0.0, max: 1.0, step: 0.05, initial: 0.3, category: 'appearance', description: 'Julia parameter animation speed' },
-    { key: 'maxIterations', label: 'Iterations', min: 32, max: 200, step: 8, initial: 96, category: 'appearance', description: 'Fractal iteration depth' },
-    { key: 'colorIntensity', label: 'Color Intensity', min: 0.3, max: 2.0, step: 0.1, initial: 1.2, category: 'appearance', description: 'Color saturation' },
-    { key: 'trapMix', label: 'Trap Mix', min: 0.0, max: 1.0, step: 0.05, initial: 0.5, category: 'appearance', description: 'Cross vs ring trap blend' },
-    { key: 'paletteRotation', label: 'Palette', min: 0.0, max: 1.0, step: 0.05, initial: 0.0, category: 'appearance', description: 'Color palette rotation' },
-    { key: 'bassToTrap', label: 'Bass → Trap', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Bass modulates trap size' },
-    { key: 'midToC', label: 'Mid → C-Param', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Mids drive c animation' },
-    { key: 'highToMorph', label: 'High → Morph', min: 0.0, max: 2.0, step: 0.1, initial: 0.8, category: 'audio-mapping', description: 'Highs morph trap shape' },
-    { key: 'rmsToGlow', label: 'RMS → Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Volume drives brightness' },
-    { key: 'beatToPalette', label: 'Beat → Palette', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Beats shift palette phase' },
-    { key: 'centroidToHue', label: 'Centroid → Hue', min: 0.0, max: 2.0, step: 0.1, initial: 0.8, category: 'audio-mapping', description: 'Spectral centroid rotates hue' },
+    {
+      key: 'mappingMode',
+      label: 'Mapping (0 both · 1 dynamics · 2 measurement)',
+      min: 0,
+      max: 2,
+      step: 1,
+      initial: 2,
+      category: 'appearance',
+      description:
+        'Measurement mode fixes c=-1; dynamics mode fixes the trap geometry',
+    },
+    {
+      key: 'trapRadius',
+      label: 'Trap Radius',
+      min: 0.05,
+      max: 1.5,
+      step: 0.05,
+      initial: 0.5,
+      category: 'appearance',
+      description: 'Size of the orbit trap',
+    },
+    {
+      key: 'cSpeed',
+      label: 'C Speed',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.3,
+      category: 'appearance',
+      description: 'Julia parameter animation speed',
+    },
+    {
+      key: 'maxIterations',
+      label: 'Iterations',
+      min: 32,
+      max: 200,
+      step: 8,
+      initial: 96,
+      category: 'appearance',
+      description: 'Fractal iteration depth',
+    },
+    {
+      key: 'colorIntensity',
+      label: 'Color Intensity',
+      min: 0.3,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.2,
+      category: 'appearance',
+      description: 'Color saturation',
+    },
+    {
+      key: 'trapMix',
+      label: 'Trap Mix',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.5,
+      category: 'appearance',
+      description: 'Cross vs ring trap blend',
+    },
+    {
+      key: 'paletteRotation',
+      label: 'Palette',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.0,
+      category: 'appearance',
+      description: 'Color palette rotation',
+    },
+    {
+      key: 'bassToTrap',
+      label: 'Bass → Trap',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Bass modulates trap size',
+    },
+    {
+      key: 'midToC',
+      label: 'Mid → C-Param',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Mids drive c animation',
+    },
+    {
+      key: 'highToMorph',
+      label: 'High → Morph',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 0.8,
+      category: 'audio-mapping',
+      description: 'Highs morph trap shape',
+    },
+    {
+      key: 'rmsToGlow',
+      label: 'RMS → Glow',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Volume drives brightness',
+    },
+    {
+      key: 'beatToPalette',
+      label: 'Beat → Palette',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Beats shift palette phase',
+    },
+    {
+      key: 'centroidToHue',
+      label: 'Centroid → Hue',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 0.8,
+      category: 'audio-mapping',
+      description: 'Spectral centroid rotates hue',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
     { key: 'centerReal', label: 'Center Real', min: -3, max: 3, step: 0.01 },
-    { key: 'centerImaginary', label: 'Center Imaginary', min: -3, max: 3, step: 0.01 },
+    {
+      key: 'centerImaginary',
+      label: 'Center Imaginary',
+      min: -3,
+      max: 3,
+      step: 0.01,
+    },
     { key: 'zoom', label: 'Zoom', min: 0.3, max: 500.0, step: 0.1 },
   ],
 };
 
 export class OrbitTrapVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = orbitTrapMetadata;
 
   private unsub: Unsubscribe;
@@ -67,6 +199,7 @@ export class OrbitTrapVisualizer implements Visualizer {
   private palettePhase = 0;
 
   private userParams: Record<string, number> = {
+    mappingMode: 2,
     trapRadius: 0.5,
     cSpeed: 0.3,
     maxIterations: 96,
@@ -92,16 +225,19 @@ export class OrbitTrapVisualizer implements Visualizer {
     high: new EMASmoothing(0.22),
     rms: new EMASmoothing(0.15),
     spectralCentroid: new EMASmoothing(0.1),
-    beatPulse: new EMASmoothing(0.35),
+    beatPulse: new EventEnvelope(),
   };
 
   private material: THREE.ShaderMaterial | null = null;
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
     this.smoothers.high.reset(0);
@@ -142,60 +278,78 @@ export class OrbitTrapVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
       if (f.beatOnset) {
         this.palettePhase += 0.15 * this.userParams.beatToPalette;
       }
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
-    const cSpeed = this.userParams.cSpeed
-      + this.smoothers.mid.value * 0.15 * this.userParams.midToC;
-    const t = this.time * cSpeed;
+    const cSpeed =
+      this.userParams.cSpeed +
+      this.smoothers.mid.value * 0.15 * this.userParams.midToC;
+    const t = this.phases.advance('seed', cSpeed, this.deltaSeconds);
 
     // Smooth lemniscate path through interesting Julia c-parameter space
-    const cReal = -0.4 + 0.35 * Math.sin(t * 0.7) + 0.1 * Math.cos(t * 1.3);
-    const cImag = 0.6 + 0.25 * Math.cos(t * 0.9) + 0.08 * Math.sin(t * 1.7);
+    const cReal =
+      this.userParams.mappingMode === 2 ? -1 : -1 + 0.15 * Math.cos(t);
+    const cImag = this.userParams.mappingMode === 2 ? 0 : 0.15 * Math.sin(t);
 
     if (this.material) {
       const u = this.material.uniforms;
-      const bass = this.smoothers.bass.value;
+      const bass =
+        this.userParams.mappingMode === 1 ? 0 : this.smoothers.bass.value;
 
       u.u_time.value = this.time;
       u.u_center.value.set(this._centerReal, this._centerImag);
       u.u_zoom.value = this._zoom;
-      u.u_trapRadius.value = this.userParams.trapRadius
-        + bass * 0.2 * this.userParams.bassToTrap;
+      u.u_trapRadius.value =
+        this.userParams.trapRadius + bass * 0.2 * this.userParams.bassToTrap;
       u.u_cReal.value = cReal;
       u.u_cImag.value = cImag;
       u.u_maxIter.value = this.userParams.maxIterations;
       u.u_colorIntensity.value = this.userParams.colorIntensity;
-      u.u_trapMix.value = this.userParams.trapMix
-        + this.smoothers.high.value * 0.3 * this.userParams.highToMorph;
-      u.u_palettePhase.value = this.userParams.paletteRotation + this.palettePhase;
+      u.u_trapMix.value =
+        this.userParams.trapMix +
+        (this.userParams.mappingMode === 1 ? 0 : this.smoothers.high.value) *
+          0.3 *
+          this.userParams.highToMorph;
+      u.u_palettePhase.value =
+        this.userParams.paletteRotation + this.palettePhase;
       u.u_bass.value = bass;
       u.u_mid.value = this.smoothers.mid.value;
       u.u_high.value = this.smoothers.high.value;
       u.u_rms.value = this.smoothers.rms.value * this.userParams.rmsToGlow;
       u.u_spectralCentroid.value = this.smoothers.spectralCentroid.value;
       u.u_beatPulse.value = this.smoothers.beatPulse.value;
-      u.u_hueShift.value = this.smoothers.spectralCentroid.value * 0.3 * this.userParams.centroidToHue;
+      u.u_hueShift.value =
+        this.smoothers.spectralCentroid.value *
+        0.3 *
+        this.userParams.centroidToHue;
     }
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {

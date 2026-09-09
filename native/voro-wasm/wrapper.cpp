@@ -1,3 +1,5 @@
+#include <set>
+#include <utility>
 // Thin C ABI around Voro++ for WASM tessellation of 3D Voronoi cells.
 // Upstream library: https://math.lbl.gov/voro++/
 //
@@ -43,6 +45,7 @@ struct VoroContext {
   std::vector<std::uint32_t> edge_cell_ids;
   std::vector<float> centroids;
   std::vector<float> volumes;
+  std::vector<std::uint32_t> seed_ids;
   int n_cells;
 };
 
@@ -55,6 +58,7 @@ static void clear_mesh(VoroContext *ctx) {
   ctx->edge_cell_ids.clear();
   ctx->centroids.clear();
   ctx->volumes.clear();
+  ctx->seed_ids.clear();
   ctx->n_cells = 0;
 }
 
@@ -77,6 +81,7 @@ static void append_cell(
   cell.face_vertices(faces);
 
   const int nverts = static_cast<int>(verts.size() / 3);
+  std::set<std::pair<int, int>> emitted_edges;
   int f = 0;
   while (f < static_cast<int>(faces.size())) {
     const int nv = faces[f++];
@@ -118,6 +123,8 @@ static void append_cell(
 
     const std::uint32_t cid = static_cast<std::uint32_t>(cell_index);
     for (int i = 0; i < nv; i++) {
+      const int va = faces[f + i], vb = faces[f + (i + 1) % nv];
+      if (!emitted_edges.insert(std::minmax(va, vb)).second) continue;
       float p0[3], p1[3];
       vert_at(i, p0);
       vert_at((i + 1) % nv, p1);
@@ -139,6 +146,7 @@ static int extract_cells(VoroContext *ctx, CON *con) {
     if (!con->compute_cell(cell, cl)) continue;
     double px, py, pz;
     cl.pos(px, py, pz);
+    ctx->seed_ids.push_back(static_cast<std::uint32_t>(cl.pid()));
     append_cell(ctx, cell, px, py, pz, cell_index);
     cell_index++;
   } while (cl.inc());
@@ -319,6 +327,9 @@ EMSCRIPTEN_KEEPALIVE const float *voro_edges(VoroContext *ctx) {
 }
 EMSCRIPTEN_KEEPALIVE const std::uint32_t *voro_edge_cell_ids(VoroContext *ctx) {
   return ctx && !ctx->edge_cell_ids.empty() ? ctx->edge_cell_ids.data() : nullptr;
+}
+EMSCRIPTEN_KEEPALIVE const std::uint32_t *voro_seed_ids(VoroContext *ctx) {
+  return ctx && !ctx->seed_ids.empty() ? ctx->seed_ids.data() : nullptr;
 }
 EMSCRIPTEN_KEEPALIVE const float *voro_centroids(VoroContext *ctx) {
   return ctx && !ctx->centroids.empty() ? ctx->centroids.data() : nullptr;

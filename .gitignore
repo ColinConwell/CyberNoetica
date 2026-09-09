@@ -6,6 +6,10 @@ xyzopts/
 GOAL.md
 TODO.md
 
+# Environ
+.env.local
+!.env.example
+
 # Data
 data/
 
@@ -25,6 +29,7 @@ node_modules/
 dist/
 
 # TypeScript
+.pnpm-store
 *.tsbuildinfo
 
 # Rust / Cargo
@@ -37,14 +42,13 @@ vite.config.ts.timestamp-*
 # Testing / Coverage
 coverage/
 *.lcov
-
-# Environment
-.env
-.env.*
-!.env.example
+.playwright-mcp/
 
 # Logs
 *.log
 
 # OS-generated
 .DS_Store
+
+# Bundled production
+apps/web/server.cjs

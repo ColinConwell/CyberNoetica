@@ -1,22 +1,21 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
 /**
  * Penrose tiling visualizer -- aperiodic beauty.
  *
- * Renders a Penrose-like quasiperiodic tiling using the de Bruijn dual-grid
- * method. Five families of parallel lines (at 72-degree angles) create a
- * multigrid; the dual of their intersections produces the rhombic Penrose
- * tiling with its characteristic 5-fold rotational symmetry.
- *
- * In the shader, we approximate the tiling by computing distances to the
- * nearest grid lines from 5 directional families, producing cells whose
- * edges glow with audio-reactive neon. The result is an infinitely extending
- * aperiodic pattern that never repeats.
+ * Draws the five directional grids used in the de Bruijn construction.
+ * Their dual would form Penrose rhombs, but this shader renders the multigrid
+ * itself. It does not implement the dualization or rhomb matching rules.
  *
  * Audio: bass shifts grid offsets (tiles breathe), spectral centroid drives
  * color cycling, mids control edge glow width, beats trigger symmetry pulses.
@@ -28,15 +27,96 @@ const penroseMetadata: VisualizerMetadata = {
   description: 'Aperiodic tiling with 5-fold symmetry',
   usesPerspective: false,
   params: [
-    { key: 'edgeGlow', label: 'Edge Glow', min: 0.3, max: 3.0, step: 0.1, initial: 1.2, category: 'appearance', description: 'Brightness of tile edges' },
-    { key: 'fillOpacity', label: 'Fill Opacity', min: 0.0, max: 1.0, step: 0.05, initial: 0.3, category: 'appearance', description: 'Tile interior fill strength' },
-    { key: 'scale', label: 'Scale', min: 2.0, max: 20.0, step: 0.5, initial: 8.0, category: 'appearance', description: 'Tiling scale' },
-    { key: 'colorCycle', label: 'Color Cycle', min: 0.0, max: 1.0, step: 0.01, initial: 0.2, category: 'appearance', description: 'Speed of palette rotation' },
-    { key: 'animSpeed', label: 'Anim Speed', min: 0.0, max: 1.0, step: 0.05, initial: 0.2, category: 'appearance', description: 'Grid drift animation speed' },
-    { key: 'bassToBreath', label: 'Bass -> Breath', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Bass makes tiles breathe' },
-    { key: 'spectralToColor', label: 'Spectral -> Color', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Spectral centroid shifts colors' },
-    { key: 'midToEdge', label: 'Mid -> Edge', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Mids widen edge glow' },
-    { key: 'beatToPulse', label: 'Beat -> Pulse', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Beats flash the pattern' },
+    {
+      key: 'edgeGlow',
+      label: 'Edge Glow',
+      min: 0.3,
+      max: 3.0,
+      step: 0.1,
+      initial: 1.2,
+      category: 'appearance',
+      description: 'Brightness of tile edges',
+    },
+    {
+      key: 'fillOpacity',
+      label: 'Fill Opacity',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.3,
+      category: 'appearance',
+      description: 'Tile interior fill strength',
+    },
+    {
+      key: 'scale',
+      label: 'Scale',
+      min: 2.0,
+      max: 20.0,
+      step: 0.5,
+      initial: 8.0,
+      category: 'appearance',
+      description: 'Tiling scale',
+    },
+    {
+      key: 'colorCycle',
+      label: 'Color Cycle',
+      min: 0.0,
+      max: 1.0,
+      step: 0.01,
+      initial: 0.2,
+      category: 'appearance',
+      description: 'Speed of palette rotation',
+    },
+    {
+      key: 'animSpeed',
+      label: 'Anim Speed',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.2,
+      category: 'appearance',
+      description: 'Grid drift animation speed',
+    },
+    {
+      key: 'bassToBreath',
+      label: 'Bass -> Breath',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Bass makes tiles breathe',
+    },
+    {
+      key: 'spectralToColor',
+      label: 'Spectral -> Color',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Spectral centroid shifts colors',
+    },
+    {
+      key: 'midToEdge',
+      label: 'Mid -> Edge',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Mids widen edge glow',
+    },
+    {
+      key: 'beatToPulse',
+      label: 'Beat -> Pulse',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Beats flash the pattern',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
@@ -47,6 +127,8 @@ const penroseMetadata: VisualizerMetadata = {
 };
 
 export class PenroseVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = penroseMetadata;
 
   private unsub: Unsubscribe;
@@ -76,16 +158,19 @@ export class PenroseVisualizer implements Visualizer {
     high: new EMASmoothing(0.22),
     rms: new EMASmoothing(0.15),
     spectralCentroid: new EMASmoothing(0.08),
-    beatPulse: new EMASmoothing(0.4),
+    beatPulse: new EventEnvelope(),
   };
 
   private material: THREE.ShaderMaterial | null = null;
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
 
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
@@ -100,6 +185,7 @@ export class PenroseVisualizer implements Visualizer {
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
+        u_colorCyclePhase: { value: 0 },
         u_time: { value: 0.0 },
         u_resolution: { value: new THREE.Vector2(1920, 1080) },
         u_center: { value: new THREE.Vector2(0, 0) },
@@ -125,27 +211,40 @@ export class PenroseVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
-    const breathOffset = this.smoothers.bass.value * 0.1 * this.userParams.bassToBreath;
-    const edgeWidth = 1.0 + this.smoothers.mid.value * 0.5 * this.userParams.midToEdge;
+    const breathOffset =
+      this.smoothers.bass.value * 0.1 * this.userParams.bassToBreath;
+    const edgeWidth =
+      1.0 + this.smoothers.mid.value * 0.5 * this.userParams.midToEdge;
 
     if (this.material) {
       const u = this.material.uniforms;
-      u.u_time.value = this.time * this.userParams.animSpeed;
+      u.u_time.value = this.phases.advance(
+        'animation',
+        this.userParams.animSpeed,
+        this.deltaSeconds,
+      );
       u.u_center.value.set(this._centerX, this._centerY);
       u.u_zoom.value = this._zoom;
       u.u_edgeGlow.value = this.userParams.edgeGlow;
@@ -156,15 +255,24 @@ export class PenroseVisualizer implements Visualizer {
       u.u_mid.value = this.smoothers.mid.value;
       u.u_high.value = this.smoothers.high.value;
       u.u_rms.value = this.smoothers.rms.value;
-      u.u_spectralCentroid.value = this.smoothers.spectralCentroid.value;
-      u.u_beatPulse.value = this.smoothers.beatPulse.value * this.userParams.beatToPulse;
+      u.u_spectralCentroid.value =
+        this.smoothers.spectralCentroid.value * this.userParams.spectralToColor;
+      u.u_beatPulse.value =
+        this.smoothers.beatPulse.value * this.userParams.beatToPulse;
       u.u_breathOffset.value = breathOffset;
       u.u_edgeWidth.value = edgeWidth;
     }
+    if (this.material)
+      this.material.uniforms.u_colorCyclePhase.value = this.phases.advance(
+        'u_colorCyclePhase',
+        this.material.uniforms.u_colorCycle.value,
+        this.deltaSeconds,
+      );
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -233,6 +341,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   uniform float u_fillOpacity;
   uniform float u_scale;
   uniform float u_colorCycle;
+  uniform float u_colorCyclePhase;
   uniform float u_bass;
   uniform float u_mid;
   uniform float u_high;
@@ -314,7 +423,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     // --- Coloring ---
 
     // Tile fill color based on cell identity
-    float hue = fract(cellId * 0.618033 + u_time * u_colorCycle + u_spectralCentroid * 0.4);
+    float hue = fract(cellId * 0.618033 + u_colorCyclePhase + u_spectralCentroid * 0.4);
     float sat = 0.5 + tileType * 0.3;
     float val = u_fillOpacity * (0.15 + tileType * 0.1);
 

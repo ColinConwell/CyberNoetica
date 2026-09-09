@@ -1,7 +1,12 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -25,16 +30,97 @@ const truchetMetadata: VisualizerMetadata = {
   usesPerspective: false,
   params: [
     // Appearance
-    { key: 'gridScale', label: 'Grid Scale', min: 3.0, max: 20.0, step: 0.5, initial: 8.0, category: 'appearance', description: 'Number of tiles across the screen' },
-    { key: 'lineWidth', label: 'Line Width', min: 0.02, max: 0.2, step: 0.01, initial: 0.08, category: 'appearance', description: 'Thickness of the arc paths' },
-    { key: 'layers', label: 'Scale Layers', min: 1, max: 4, step: 1, initial: 2, category: 'appearance', description: 'Number of overlapping grids at different scales' },
-    { key: 'glowIntensity', label: 'Glow', min: 0.0, max: 1.0, step: 0.05, initial: 0.5, category: 'appearance', description: 'Soft glow around paths' },
-    { key: 'colorCycle', label: 'Color Cycle', min: 0.0, max: 1.0, step: 0.05, initial: 0.3, category: 'appearance', description: 'Speed of hue rotation along paths' },
+    {
+      key: 'gridScale',
+      label: 'Grid Scale',
+      min: 3.0,
+      max: 20.0,
+      step: 0.5,
+      initial: 8.0,
+      category: 'appearance',
+      description: 'Number of tiles across the screen',
+    },
+    {
+      key: 'lineWidth',
+      label: 'Line Width',
+      min: 0.02,
+      max: 0.2,
+      step: 0.01,
+      initial: 0.08,
+      category: 'appearance',
+      description: 'Thickness of the arc paths',
+    },
+    {
+      key: 'layers',
+      label: 'Scale Layers',
+      min: 1,
+      max: 4,
+      step: 1,
+      initial: 2,
+      category: 'appearance',
+      description: 'Number of overlapping grids at different scales',
+    },
+    {
+      key: 'glowIntensity',
+      label: 'Glow',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.5,
+      category: 'appearance',
+      description: 'Soft glow around paths',
+    },
+    {
+      key: 'colorCycle',
+      label: 'Color Cycle',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.3,
+      category: 'appearance',
+      description: 'Speed of hue rotation along paths',
+    },
     // Audio mapping
-    { key: 'bassToFlip', label: 'Bass → Tile Flip', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly bass rewires tile connections' },
-    { key: 'midToWidth', label: 'Mid → Width', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How mids modulate path thickness' },
-    { key: 'highToLayers', label: 'High → Detail', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How treble reveals fine-scale layers' },
-    { key: 'rmsToGlow', label: 'RMS → Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How volume drives glow intensity' },
+    {
+      key: 'bassToFlip',
+      label: 'Bass → Tile Flip',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How strongly bass rewires tile connections',
+    },
+    {
+      key: 'midToWidth',
+      label: 'Mid → Width',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How mids modulate path thickness',
+    },
+    {
+      key: 'highToLayers',
+      label: 'High → Detail',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How treble reveals fine-scale layers',
+    },
+    {
+      key: 'rmsToGlow',
+      label: 'RMS → Glow',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How volume drives glow intensity',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
@@ -45,11 +131,16 @@ const truchetMetadata: VisualizerMetadata = {
 };
 
 export class TruchetVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = truchetMetadata;
 
   private unsub: Unsubscribe;
   private latestFeatures: AudioFeatures | null = null;
   private time = 0;
+  private flipPrevious = 0.5;
+  private flipTarget = 0.5;
+  private flipAge = 1;
 
   private userParams: Record<string, number> = {
     gridScale: 8.0,
@@ -73,16 +164,19 @@ export class TruchetVisualizer implements Visualizer {
     high: new EMASmoothing(0.22),
     rms: new EMASmoothing(0.2),
     spectralCentroid: new EMASmoothing(0.1),
-    beatPulse: new EMASmoothing(0.5),
+    beatPulse: new EventEnvelope(),
   };
 
   private material: THREE.ShaderMaterial | null = null;
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
 
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
@@ -93,10 +187,14 @@ export class TruchetVisualizer implements Visualizer {
   }
 
   attach(scene: THREE.Scene): void {
-    this.material = new THREE.RawShaderMaterial({
+    this.material = new THREE.ShaderMaterial({
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
+        u_flipPrevious: { value: 0.5 },
+        u_flipTarget: { value: 0.5 },
+        u_flipMix: { value: 1 },
+        u_colorCyclePhase: { value: 0 },
         u_time: { value: 0.0 },
         u_resolution: { value: new THREE.Vector2(1920, 1080) },
         u_zoom: { value: 1.0 },
@@ -125,23 +223,39 @@ export class TruchetVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
+    this.flipAge += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      if (f.beatOnset) {
+        this.flipPrevious = this.flipTarget;
+        this.flipTarget = 0.5 + f.bass * 0.3 * this.userParams.bassToFlip;
+        this.flipAge = 0;
+      }
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     if (this.material) {
       const u = this.material.uniforms;
+      u.u_flipPrevious.value = this.flipPrevious;
+      u.u_flipTarget.value = this.flipTarget;
+      u.u_flipMix.value = Math.min(1, this.flipAge / 0.35);
       u.u_time.value = this.time;
       u.u_zoom.value = this._zoom;
       u.u_pan.value.set(this._panX, this._panY);
@@ -161,10 +275,17 @@ export class TruchetVisualizer implements Visualizer {
       u.u_highToLayers.value = this.userParams.highToLayers;
       u.u_rmsToGlow.value = this.userParams.rmsToGlow;
     }
+    if (this.material)
+      this.material.uniforms.u_colorCyclePhase.value = this.phases.advance(
+        'u_colorCyclePhase',
+        this.material.uniforms.u_colorCycle.value,
+        this.deltaSeconds,
+      );
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -176,9 +297,12 @@ export class TruchetVisualizer implements Visualizer {
   }
 
   setViewState(partial: Record<string, number>): void {
-    if ('zoom' in partial) this._zoom = Math.max(0.3, Math.min(5.0, partial.zoom));
-    if ('panX' in partial) this._panX = Math.max(-5.0, Math.min(5.0, partial.panX));
-    if ('panY' in partial) this._panY = Math.max(-5.0, Math.min(5.0, partial.panY));
+    if ('zoom' in partial)
+      this._zoom = Math.max(0.3, Math.min(5.0, partial.zoom));
+    if ('panX' in partial)
+      this._panX = Math.max(-5.0, Math.min(5.0, partial.panX));
+    if ('panY' in partial)
+      this._panY = Math.max(-5.0, Math.min(5.0, partial.panY));
   }
 
   dispose(): void {
@@ -194,8 +318,6 @@ registerVisualizer({
 });
 
 const VERTEX_SHADER = /* glsl */ `
-  attribute vec3 position;
-  attribute vec2 uv;
   varying vec2 vUv;
   void main() {
     vUv = uv;
@@ -210,6 +332,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   #define TAU 6.28318530718
   #define MAX_LAYERS 4
 
+  uniform float u_flipPrevious;uniform float u_flipTarget;uniform float u_flipMix;
   uniform float u_time;
   uniform vec2 u_resolution;
   uniform float u_zoom;
@@ -219,6 +342,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   uniform float u_layers;
   uniform float u_glowIntensity;
   uniform float u_colorCycle;
+  uniform float u_colorCyclePhase;
   uniform float u_bass;
   uniform float u_mid;
   uniform float u_high;
@@ -261,7 +385,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     float d = truchetArc(suv, cell, flipThreshold);
 
     // Sharp line
-    float line = smoothstep(lineW, lineW - 0.015, d);
+    float line = 1.0-smoothstep(lineW-fwidth(d),lineW+fwidth(d),d);
 
     // Soft glow around the line
     float glow = exp(-d * d * 80.0);
@@ -278,7 +402,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     int numLayers = int(clamp(u_layers, 1.0, float(MAX_LAYERS)));
 
     // Bass modulates flip threshold (rewires tile connections)
-    float flipBase = 0.5 + u_bass * 0.3 * u_bassToFlip;
+    float flipBase = u_flipTarget;
 
     // Mids modulate line width
     float lineW = u_lineWidth + u_mid * 0.04 * u_midToWidth;
@@ -298,9 +422,9 @@ const FRAGMENT_SHADER = /* glsl */ `
       float layerFlip = flipBase + float(i) * 0.12;
 
       // Time-varying flip for subtle animation
-      float animFlip = layerFlip + sin(u_time * 0.3 + float(i) * 1.5) * 0.08;
+      float animFlip = layerFlip;
 
-      vec2 result = truchetLayer(uv, scale, animFlip, lineW * weight);
+      vec2 result = mix(truchetLayer(uv,scale,u_flipPrevious+float(i)*.12,lineW*weight),truchetLayer(uv,scale,animFlip,lineW*weight),smoothstep(0.,1.,u_flipMix));
 
       // Color per layer — hue shifts with layer index and position
       vec2 suv = uv * scale;
@@ -309,7 +433,7 @@ const FRAGMENT_SHADER = /* glsl */ `
 
       float hue = fract(
         cellHash * 0.5
-        + u_time * u_colorCycle * 0.05
+        + u_colorCyclePhase * 0.05
         + u_spectralCentroid * 0.3
         + float(i) * 0.25
       );
@@ -319,13 +443,11 @@ const FRAGMENT_SHADER = /* glsl */ `
 
       vec3 layerColor = hsv2rgb(vec3(hue, sat, val));
 
-      color += layerColor * result.x * weight;
-      totalGlow += result.y * weight;
-
       // Higher-frequency treble reveals more fine layers
       float layerVisibility = float(i) <= 0.0 ? 1.0 :
         smoothstep(0.0, 0.5, u_high * u_highToLayers - float(i - 1) * 0.3);
-      color *= mix(1.0, layerVisibility, float(i > 0));
+      color += layerColor * result.x * weight * layerVisibility;
+      totalGlow += result.y * weight * layerVisibility;
 
       scale *= 2.0;
       weight *= 0.5;

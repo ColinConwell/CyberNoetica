@@ -1,7 +1,12 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -29,21 +34,187 @@ const quatJuliaMetadata: VisualizerMetadata = {
   description: '3D raymarched quaternion Julia fractal',
   usesPerspective: false,
   params: [
+    {
+      key: 'stableShape',
+      label: 'Stable shape preset',
+      min: 0,
+      max: 1,
+      step: 1,
+      initial: 1,
+      category: 'appearance',
+      description:
+        'Hold geometric parameters while sound changes light and camera',
+    },
+    {
+      key: 'stepSafety',
+      label: 'March safety factor',
+      min: 0.2,
+      max: 0.8,
+      step: 0.05,
+      initial: 0.5,
+      category: 'appearance',
+      description:
+        'Conservative multiplier for an approximate distance estimate',
+    },
+    {
+      key: 'hitTolerance',
+      label: 'Hit tolerance',
+      min: 0.0002,
+      max: 0.005,
+      step: 0.0002,
+      initial: 0.001,
+      category: 'appearance',
+    },
+    {
+      key: 'sliceW',
+      label: 'Fourth-coordinate slice',
+      min: -1,
+      max: 1,
+      step: 0.01,
+      initial: 0,
+      category: 'appearance',
+    },
+    {
+      key: 'sliceRotation',
+      label: '4D slice rotation',
+      min: -3.14159,
+      max: 3.14159,
+      step: 0.02,
+      initial: 0,
+      category: 'appearance',
+    },
     // Appearance
-    { key: 'seedX', label: 'Seed X', min: -1.5, max: 1.5, step: 0.01, initial: -0.45, category: 'appearance', description: 'Real component of seed quaternion c' },
-    { key: 'seedY', label: 'Seed Y', min: -1.5, max: 1.5, step: 0.01, initial: 0.35, category: 'appearance', description: 'Imaginary i component of c' },
-    { key: 'seedZ', label: 'Seed Z', min: -1.5, max: 1.5, step: 0.01, initial: 0.0, category: 'appearance', description: 'Imaginary j component of c' },
-    { key: 'seedW', label: 'Seed W', min: -1.5, max: 1.5, step: 0.01, initial: 0.2, category: 'appearance', description: 'Imaginary k component of c' },
-    { key: 'maxIter', label: 'Detail', min: 4, max: 16, step: 1, initial: 8, category: 'appearance', description: 'Fractal iteration count' },
-    { key: 'aoStrength', label: 'AO Strength', min: 0.0, max: 2.0, step: 0.1, initial: 0.8, category: 'appearance', description: 'Ambient occlusion darkness' },
-    { key: 'colorShift', label: 'Color Shift', min: 0.0, max: 1.0, step: 0.01, initial: 0.0, category: 'appearance', description: 'Palette hue rotation' },
-    { key: 'orbitSpeed', label: 'Orbit Speed', min: 0.0, max: 1.0, step: 0.05, initial: 0.2, category: 'appearance', description: 'Camera auto-orbit speed' },
+    {
+      key: 'seedX',
+      label: 'Seed X',
+      min: -1.5,
+      max: 1.5,
+      step: 0.01,
+      initial: -0.45,
+      category: 'appearance',
+      description: 'Real component of seed quaternion c',
+    },
+    {
+      key: 'seedY',
+      label: 'Seed Y',
+      min: -1.5,
+      max: 1.5,
+      step: 0.01,
+      initial: 0.35,
+      category: 'appearance',
+      description: 'Imaginary i component of c',
+    },
+    {
+      key: 'seedZ',
+      label: 'Seed Z',
+      min: -1.5,
+      max: 1.5,
+      step: 0.01,
+      initial: 0.0,
+      category: 'appearance',
+      description: 'Imaginary j component of c',
+    },
+    {
+      key: 'seedW',
+      label: 'Seed W',
+      min: -1.5,
+      max: 1.5,
+      step: 0.01,
+      initial: 0.2,
+      category: 'appearance',
+      description: 'Imaginary k component of c',
+    },
+    {
+      key: 'maxIter',
+      label: 'Detail',
+      min: 4,
+      max: 16,
+      step: 1,
+      initial: 8,
+      category: 'appearance',
+      description: 'Fractal iteration count',
+    },
+    {
+      key: 'aoStrength',
+      label: 'AO Strength',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 0.8,
+      category: 'appearance',
+      description: 'Ambient occlusion darkness',
+    },
+    {
+      key: 'colorShift',
+      label: 'Color Shift',
+      min: 0.0,
+      max: 1.0,
+      step: 0.01,
+      initial: 0.0,
+      category: 'appearance',
+      description: 'Palette hue rotation',
+    },
+    {
+      key: 'orbitSpeed',
+      label: 'Orbit Speed',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.2,
+      category: 'appearance',
+      description: 'Camera auto-orbit speed',
+    },
     // Audio mapping
-    { key: 'bassToSeedX', label: 'Bass → Seed X', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Bass modulates seed real part' },
-    { key: 'midToSeedY', label: 'Mid → Seed Y', min: 0.0, max: 2.0, step: 0.1, initial: 0.8, category: 'audio-mapping', description: 'Mids modulate seed imaginary part' },
-    { key: 'highToAO', label: 'High → AO', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Highs intensify ambient occlusion' },
-    { key: 'rmsToGlow', label: 'RMS → Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Volume drives surface brightness' },
-    { key: 'beatToPerturb', label: 'Beat → Perturb', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Beats jolt the seed quaternion' },
+    {
+      key: 'bassToSeedX',
+      label: 'Bass → Seed X',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Bass modulates seed real part',
+    },
+    {
+      key: 'midToSeedY',
+      label: 'Mid → Seed Y',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 0.8,
+      category: 'audio-mapping',
+      description: 'Mids modulate seed imaginary part',
+    },
+    {
+      key: 'highToAO',
+      label: 'High → AO',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Highs intensify ambient occlusion',
+    },
+    {
+      key: 'rmsToGlow',
+      label: 'RMS → Glow',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Volume drives surface brightness',
+    },
+    {
+      key: 'beatToPerturb',
+      label: 'Beat → Perturb',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Beats jolt the seed quaternion',
+    },
   ],
   viewport: { pan: false, zoom: true, orbit: false },
   viewStateFields: [
@@ -52,6 +223,8 @@ const quatJuliaMetadata: VisualizerMetadata = {
 };
 
 export class QuatJuliaVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = quatJuliaMetadata;
 
   private unsub: Unsubscribe;
@@ -60,6 +233,11 @@ export class QuatJuliaVisualizer implements Visualizer {
   private perturbDecay = 0;
 
   private userParams: Record<string, number> = {
+    stableShape: 1,
+    stepSafety: 0.5,
+    hitTolerance: 0.001,
+    sliceW: 0,
+    sliceRotation: 0,
     seedX: -0.45,
     seedY: 0.35,
     seedZ: 0.0,
@@ -83,16 +261,19 @@ export class QuatJuliaVisualizer implements Visualizer {
     mid: new EMASmoothing(0.15),
     high: new EMASmoothing(0.2),
     rms: new EMASmoothing(0.12),
-    beatPulse: new EMASmoothing(0.4),
+    beatPulse: new EventEnvelope(),
   };
 
   private material: THREE.ShaderMaterial | null = null;
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
     this.smoothers.high.reset(0);
@@ -105,6 +286,11 @@ export class QuatJuliaVisualizer implements Visualizer {
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
+        u_stepSafety: { value: 0.5 },
+        u_hitTolerance: { value: 0.001 },
+        u_workBudget: { value: 1 },
+        u_sliceW: { value: 0 },
+        u_sliceRotation: { value: 0 },
         u_time: { value: 0.0 },
         u_resolution: { value: new THREE.Vector2(1920, 1080) },
         u_zoom: { value: 1.0 },
@@ -127,51 +313,84 @@ export class QuatJuliaVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
 
       if (f.beatOnset && this.userParams.beatToPerturb > 0) {
         this.perturbDecay = 0.3 * this.userParams.beatToPerturb;
       }
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
-    this.perturbDecay *= 0.93;
+    this.perturbDecay *= Math.pow(0.93, this.deltaSeconds * 60);
 
     // Modulate seed quaternion with audio
-    const sx = this.userParams.seedX + (this.smoothers.bass.value - 0.3) * 0.2 * this.userParams.bassToSeedX;
-    const sy = this.userParams.seedY + (this.smoothers.mid.value - 0.3) * 0.15 * this.userParams.midToSeedY;
-    const sz = this.userParams.seedZ + this.perturbDecay * Math.sin(this.time * 7.0);
-    const sw = this.userParams.seedW + this.perturbDecay * Math.cos(this.time * 5.0);
+    const sx =
+      this.userParams.seedX +
+      (1 - this.userParams.stableShape) *
+        (this.smoothers.bass.value - 0.3) *
+        0.2 *
+        this.userParams.bassToSeedX;
+    const sy =
+      this.userParams.seedY +
+      (1 - this.userParams.stableShape) *
+        (this.smoothers.mid.value - 0.3) *
+        0.15 *
+        this.userParams.midToSeedY;
+    const sz =
+      this.userParams.seedZ +
+      (1 - this.userParams.stableShape) *
+        this.perturbDecay *
+        Math.sin(this.time * 7.0);
+    const sw =
+      this.userParams.seedW +
+      (1 - this.userParams.stableShape) *
+        this.perturbDecay *
+        Math.cos(this.time * 5.0);
 
     if (this.material) {
       const u = this.material.uniforms;
-      u.u_time.value = this.time * this.userParams.orbitSpeed;
+      u.u_stepSafety.value = this.userParams.stepSafety;
+      u.u_hitTolerance.value = this.userParams.hitTolerance;
+      u.u_time.value = this.phases.advance(
+        'animation',
+        this.userParams.orbitSpeed,
+        this.deltaSeconds,
+      );
+      u.u_sliceW.value = this.userParams.sliceW;
+      u.u_sliceRotation.value = this.userParams.sliceRotation;
       u.u_zoom.value = this._zoom;
       u.u_seed.value.set(sx, sy, sz, sw);
       u.u_maxIter.value = this.userParams.maxIter;
-      u.u_aoStrength.value = this.userParams.aoStrength * (1.0 + this.smoothers.high.value * this.userParams.highToAO * 0.5);
+      u.u_aoStrength.value =
+        this.userParams.aoStrength *
+        (1.0 + this.smoothers.high.value * this.userParams.highToAO * 0.5);
       u.u_colorShift.value = this.userParams.colorShift;
       u.u_bass.value = this.smoothers.bass.value;
       u.u_mid.value = this.smoothers.mid.value;
       u.u_high.value = this.smoothers.high.value;
-      u.u_rms.value = this.smoothers.rms.value;
+      u.u_rms.value = this.smoothers.rms.value * this.userParams.rmsToGlow;
       u.u_beatPulse.value = this.smoothers.beatPulse.value;
       u.u_perturb.value = this.perturbDecay;
     }
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -222,6 +441,10 @@ const FRAGMENT_SHADER = /* glsl */ `
   #define SURF_DIST 0.001
   #define MAX_ITER 16
 
+  uniform float u_workBudget;
+  uniform float u_sliceW;
+  uniform float u_sliceRotation;
+  uniform float u_stepSafety;uniform float u_hitTolerance;
   uniform float u_time;
   uniform vec2 u_resolution;
   uniform float u_zoom;
@@ -264,7 +487,9 @@ const FRAGMENT_SHADER = /* glsl */ `
   // Distance estimator for quaternion Julia set
   // Returns (distance, iteration_count) for coloring
   vec2 quatJuliaDE(vec3 pos, vec4 c) {
-    vec4 z = vec4(pos, 0.0);
+    vec4 z = vec4(pos, u_sliceW);
+    float cr = cos(u_sliceRotation), sr = sin(u_sliceRotation);
+    z.xw = mat2(cr, sr, -sr, cr) * z.xw;
     vec4 dz = vec4(1.0, 0.0, 0.0, 0.0);
 
     float md2 = 1.0;
@@ -290,7 +515,9 @@ const FRAGMENT_SHADER = /* glsl */ `
       }
     }
 
-    float dist = 0.25 * sqrt(mz2 / md2) * log(mz2);
+    float dist = mz2 > 256.0
+      ? 0.25 * sqrt(mz2 / max(md2, 1e-20)) * log(mz2)
+      : 0.0; // Interior points, including z=c=0, have no exterior estimate.
     float iterNorm = float(hitIter) / float(maxIter);
     return vec2(dist, iterNorm);
   }
@@ -345,18 +572,19 @@ const FRAGMENT_SHADER = /* glsl */ `
     bool hit = false;
 
     for (int i = 0; i < MAX_STEPS; i++) {
+      if (float(i) >= max(32.0, float(MAX_STEPS) * u_workBudget)) break;
       vec3 pos = ro + rd * t;
       vec2 de = quatJuliaDE(pos, u_seed);
       float d = de.x;
 
-      if (d < SURF_DIST) {
+      if (d < u_hitTolerance) {
         result = vec2(t, de.y);
         hit = true;
         break;
       }
       if (t > MAX_DIST) break;
 
-      t += d * 0.8; // Slight understep for safety
+      t += d * u_stepSafety; // Slight understep for safety
     }
 
     vec3 color = vec3(0.0);

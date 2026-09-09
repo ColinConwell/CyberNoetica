@@ -1,7 +1,12 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -31,19 +36,127 @@ const metaballsMetadata: VisualizerMetadata = {
   usesPerspective: false,
   params: [
     // Appearance
-    { key: 'ballCount', label: 'Ball Count', min: 3, max: 7, step: 1, initial: 6, category: 'appearance', description: 'Number of active metaballs' },
-    { key: 'radius', label: 'Radius', min: 0.1, max: 0.6, step: 0.01, initial: 0.28, category: 'appearance', description: 'Base metaball radius' },
-    { key: 'threshold', label: 'Threshold', min: 0.5, max: 2.5, step: 0.05, initial: 1.1, category: 'appearance', description: 'Isosurface level' },
-    { key: 'edgeSharpness', label: 'Edge Sharpness', min: 0.01, max: 0.3, step: 0.005, initial: 0.08, category: 'appearance', description: 'Smoothness of isoline' },
-    { key: 'orbitSpeed', label: 'Orbit Speed', min: 0.05, max: 2.0, step: 0.05, initial: 0.5, category: 'appearance', description: 'Ball drift speed' },
-    { key: 'hue', label: 'Hue', min: 0.0, max: 1.0, step: 0.01, initial: 0.55, category: 'appearance', description: 'Base palette hue' },
-    { key: 'colorSpread', label: 'Color Spread', min: 0.0, max: 1.0, step: 0.01, initial: 0.35, category: 'appearance', description: 'Hue variation across balls' },
+    {
+      key: 'ballCount',
+      label: 'Ball Count',
+      min: 3,
+      max: 7,
+      step: 1,
+      initial: 6,
+      category: 'appearance',
+      description: 'Number of active metaballs',
+    },
+    {
+      key: 'radius',
+      label: 'Radius',
+      min: 0.1,
+      max: 0.6,
+      step: 0.01,
+      initial: 0.28,
+      category: 'appearance',
+      description: 'Base metaball radius',
+    },
+    {
+      key: 'threshold',
+      label: 'Threshold',
+      min: 0.5,
+      max: 2.5,
+      step: 0.05,
+      initial: 1.1,
+      category: 'appearance',
+      description: 'Isosurface level',
+    },
+    {
+      key: 'edgeSharpness',
+      label: 'Edge Sharpness',
+      min: 0.01,
+      max: 0.3,
+      step: 0.005,
+      initial: 0.08,
+      category: 'appearance',
+      description: 'Smoothness of isoline',
+    },
+    {
+      key: 'orbitSpeed',
+      label: 'Orbit Speed',
+      min: 0.05,
+      max: 2.0,
+      step: 0.05,
+      initial: 0.5,
+      category: 'appearance',
+      description: 'Ball drift speed',
+    },
+    {
+      key: 'hue',
+      label: 'Hue',
+      min: 0.0,
+      max: 1.0,
+      step: 0.01,
+      initial: 0.55,
+      category: 'appearance',
+      description: 'Base palette hue',
+    },
+    {
+      key: 'colorSpread',
+      label: 'Color Spread',
+      min: 0.0,
+      max: 1.0,
+      step: 0.01,
+      initial: 0.35,
+      category: 'appearance',
+      description: 'Hue variation across balls',
+    },
     // Audio mapping
-    { key: 'bassToSize', label: 'Bass \u2192 Size', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Bass inflates balls' },
-    { key: 'midToSpeed', label: 'Mid \u2192 Speed', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Mids speed up orbits' },
-    { key: 'highToEdge', label: 'High \u2192 Edge', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Highs sharpen isoline' },
-    { key: 'rmsToGlow', label: 'RMS \u2192 Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Volume drives inner glow' },
-    { key: 'beatToPulse', label: 'Beat \u2192 Pulse', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Beats emit radial pulse' },
+    {
+      key: 'bassToSize',
+      label: 'Bass \u2192 Size',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Bass inflates balls',
+    },
+    {
+      key: 'midToSpeed',
+      label: 'Mid \u2192 Speed',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Mids speed up orbits',
+    },
+    {
+      key: 'highToEdge',
+      label: 'High \u2192 Edge',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Highs sharpen isoline',
+    },
+    {
+      key: 'rmsToGlow',
+      label: 'RMS \u2192 Glow',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Volume drives inner glow',
+    },
+    {
+      key: 'beatToPulse',
+      label: 'Beat \u2192 Pulse',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Beats emit radial pulse',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
@@ -54,6 +167,8 @@ const metaballsMetadata: VisualizerMetadata = {
 };
 
 export class MetaballsVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = metaballsMetadata;
 
   private unsub: Unsubscribe;
@@ -86,7 +201,7 @@ export class MetaballsVisualizer implements Visualizer {
     mid: new EMASmoothing(0.18),
     high: new EMASmoothing(0.25),
     rms: new EMASmoothing(0.15),
-    beatPulse: new EMASmoothing(0.35),
+    beatPulse: new EventEnvelope(),
   };
 
   private material: THREE.ShaderMaterial | null = null;
@@ -96,9 +211,12 @@ export class MetaballsVisualizer implements Visualizer {
   private readonly ballPhases = new Float32Array(NUM_BALLS * 4);
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
     this.smoothers.high.reset(0);
@@ -108,15 +226,15 @@ export class MetaballsVisualizer implements Visualizer {
     // Seed ball parameters: 4 floats per ball (fx, fy, px, py)
     for (let i = 0; i < NUM_BALLS; i++) {
       const t = i / NUM_BALLS;
-      this.ballPhases[i * 4 + 0] = 0.3 + 0.9 * Math.sin(i * 1.9);   // x freq
-      this.ballPhases[i * 4 + 1] = 0.4 + 0.8 * Math.cos(i * 2.3);   // y freq
-      this.ballPhases[i * 4 + 2] = t * Math.PI * 2.0;               // x phase
-      this.ballPhases[i * 4 + 3] = t * Math.PI * 2.0 + 1.2;         // y phase
+      this.ballPhases[i * 4 + 0] = 0.3 + 0.9 * Math.sin(i * 1.9); // x freq
+      this.ballPhases[i * 4 + 1] = 0.4 + 0.8 * Math.cos(i * 2.3); // y freq
+      this.ballPhases[i * 4 + 2] = t * Math.PI * 2.0; // x phase
+      this.ballPhases[i * 4 + 3] = t * Math.PI * 2.0 + 1.2; // y phase
     }
   }
 
   attach(scene: THREE.Scene): void {
-    this.material = new THREE.RawShaderMaterial({
+    this.material = new THREE.ShaderMaterial({
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
@@ -146,24 +264,29 @@ export class MetaballsVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     // Integrate orbit phase (mid-reactive speed)
-    const speedMult = this.userParams.orbitSpeed
-      * (1.0 + this.smoothers.mid.value * 0.7 * this.userParams.midToSpeed);
-    this.phaseAccum += (1 / 60) * speedMult;
+    const speedMult =
+      this.userParams.orbitSpeed *
+      (1.0 + this.smoothers.mid.value * 0.7 * this.userParams.midToSpeed);
+    this.phaseAccum += this.deltaSeconds * speedMult;
 
     if (this.material) {
       const u = this.material.uniforms;
@@ -171,14 +294,16 @@ export class MetaballsVisualizer implements Visualizer {
       u.u_zoom.value = this._zoom;
       u.u_center.value.set(this._centerX, this._centerY);
       u.u_ballCount.value = this.userParams.ballCount;
-      u.u_radius.value = this.userParams.radius
-        * (1.0 + this.smoothers.bass.value * 0.45 * this.userParams.bassToSize);
+      u.u_radius.value =
+        this.userParams.radius *
+        (1.0 + this.smoothers.bass.value * 0.45 * this.userParams.bassToSize);
       u.u_threshold.value = this.userParams.threshold;
       // Highs sharpen (reduce) the edge
       const edgeMin = 0.01;
       u.u_edgeSharpness.value = Math.max(
         edgeMin,
-        this.userParams.edgeSharpness * (1.0 - this.smoothers.high.value * 0.7 * this.userParams.highToEdge),
+        this.userParams.edgeSharpness *
+          (1.0 - this.smoothers.high.value * 0.7 * this.userParams.highToEdge),
       );
       u.u_hue.value = this.userParams.hue;
       u.u_colorSpread.value = this.userParams.colorSpread;
@@ -187,12 +312,14 @@ export class MetaballsVisualizer implements Visualizer {
       u.u_mid.value = this.smoothers.mid.value;
       u.u_high.value = this.smoothers.high.value;
       u.u_rms.value = this.smoothers.rms.value * this.userParams.rmsToGlow;
-      u.u_beatPulse.value = this.smoothers.beatPulse.value * this.userParams.beatToPulse;
+      u.u_beatPulse.value =
+        this.smoothers.beatPulse.value * this.userParams.beatToPulse;
     }
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -233,8 +360,6 @@ registerVisualizer({
 // ── Shaders ────────────────────────────────────────────
 
 const VERTEX_SHADER = /* glsl */ `
-  attribute vec3 position;
-  attribute vec2 uv;
   varying vec2 vUv;
   void main() {
     vUv = uv;
@@ -287,7 +412,8 @@ const FRAGMENT_SHADER = /* glsl */ `
 
     // Scalar field accumulation (r^2 / d^2)
     float field = 0.0;
-    float weightedHue = 0.0;
+    vec2 hueVector = vec2(0.0);
+    vec2 gradient = vec2(0.0);
     float totalW = 0.0;
     int count = int(u_ballCount);
     float r2 = u_radius * u_radius;
@@ -299,14 +425,15 @@ const FRAGMENT_SHADER = /* glsl */ `
       float d2 = max(dot(d, d), 0.0005);
       float contrib = r2 / d2;
       field += contrib;
+      if (dot(d,d) > 0.0005) gradient -= 2.0*r2*d/(d2*d2);
 
       // Hue accumulator weighted by contribution
       float ballHue = fract(u_hue + float(i) / float(NUM_BALLS) * u_colorSpread);
-      weightedHue += ballHue * contrib;
+      hueVector += vec2(cos(6.28318530718*ballHue),sin(6.28318530718*ballHue))*contrib;
       totalW += contrib;
     }
 
-    float ballHue = totalW > 0.0 ? weightedHue / totalW : u_hue;
+    float ballHue = length(hueVector)>1e-7 ? fract(atan(hueVector.y,hueVector.x)/6.28318530718+1.0) : u_hue;
 
     // Isosurface blend: smoothstep around threshold
     float edge = u_edgeSharpness;
@@ -325,6 +452,8 @@ const FRAGMENT_SHADER = /* glsl */ `
     vec3 rimColor = hsv2rgb(vec3(fract(ballHue + 0.5), 0.85, 1.0));
 
     vec3 bodyColor = hsv2rgb(vec3(ballHue, sat, clamp(val, 0.0, 1.0)));
+    vec3 normal = normalize(vec3(-gradient*.03,1.0));
+    bodyColor *= .65+.35*max(0.0,dot(normal,normalize(vec3(.5,.5,1.0))));
     vec3 color = bodyColor + rimColor * rim * 0.5 * (0.3 + u_high);
 
     // Beat pulse: radial ripple

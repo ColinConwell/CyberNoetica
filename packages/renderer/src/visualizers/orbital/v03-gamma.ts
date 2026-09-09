@@ -1,6 +1,17 @@
+import {
+  frameDelta,
+  takeAudioFrame,
+  PhaseClock,
+  FixedStepClock,
+  seededRandom,
+} from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
 import { EMASmoothing } from '../../smoothing.js';
 import type {
   Visualizer,
@@ -41,9 +52,15 @@ const MAX_FORCE_FIELDS = 12;
 
 const IDLE_FEATURES: AudioFeatures = {
   fftBins: new Float32Array(0),
-  bass: 0.25, mid: 0.3, high: 0.15,
-  spectralCentroid: 0.4, spectralFlux: 0.05,
-  rms: 0.2, beatOnset: false, beatConfidence: 0.0, degraded: false,
+  bass: 0.25,
+  mid: 0.3,
+  high: 0.15,
+  spectralCentroid: 0.4,
+  spectralFlux: 0.05,
+  rms: 0.2,
+  beatOnset: false,
+  beatConfidence: 0.0,
+  degraded: false,
 };
 
 interface Emitter {
@@ -65,15 +82,16 @@ interface ForceField {
 }
 
 function createEmitters(count: number): Emitter[] {
+  const random = seededRandom(731);
   const emitters: Emitter[] = [];
   for (let i = 0; i < count; i++) {
     const t = i / count;
     emitters.push({
-      baseRadius: 2.0 + Math.random() * 3.5,
-      speed: 0.25 + Math.random() * 0.5,
-      phase: t * Math.PI * 2 + (Math.random() - 0.5) * 0.6,
-      tilt: (Math.random() - 0.5) * Math.PI * 1.0,
-      tiltAxis: Math.random() * Math.PI * 2,
+      baseRadius: 2.0 + random() * 3.5,
+      speed: 0.25 + random() * 0.5,
+      phase: t * Math.PI * 2 + (random() - 0.5) * 0.6,
+      tilt: (random() - 0.5) * Math.PI * 1.0,
+      tiltAxis: random() * Math.PI * 2,
       position: [0, 0, 0],
     });
   }
@@ -81,24 +99,32 @@ function createEmitters(count: number): Emitter[] {
 }
 
 function updateEmitterPosition(
-  emitter: Emitter, time: number, speedMul: number, radiusBreath: number,
+  emitter: Emitter,
+  time: number,
+  speedMul: number,
+  radiusBreath: number,
   perturbation: number,
 ): void {
   const tiltDrift = Math.sin(time * 0.07 + emitter.phase) * perturbation * 0.25;
-  const radiusDrift = Math.sin(time * 0.11 + emitter.phase * 2.3) * perturbation * 0.4;
+  const radiusDrift =
+    Math.sin(time * 0.11 + emitter.phase * 2.3) * perturbation * 0.4;
   const tilt = emitter.tilt + tiltDrift;
   const tiltAxis = emitter.tiltAxis;
-  const angle = time * emitter.speed * speedMul + emitter.phase;
+  const angle = speedMul * emitter.speed + emitter.phase;
   const r = emitter.baseRadius * (1.0 + radiusBreath * 0.3) + radiusDrift;
 
   const x0 = r * Math.cos(angle);
   const y0 = r * Math.sin(angle);
 
-  const ct = Math.cos(tilt), st = Math.sin(tilt);
-  const ca = Math.cos(tiltAxis), sa = Math.sin(tiltAxis);
+  const ct = Math.cos(tilt),
+    st = Math.sin(tilt);
+  const ca = Math.cos(tiltAxis),
+    sa = Math.sin(tiltAxis);
 
-  emitter.position[0] = x0 * (ca * ca * (1 - ct) + ct) + y0 * (ca * sa * (1 - ct));
-  emitter.position[1] = x0 * (ca * sa * (1 - ct)) + y0 * (sa * sa * (1 - ct) + ct);
+  emitter.position[0] =
+    x0 * (ca * ca * (1 - ct) + ct) + y0 * (ca * sa * (1 - ct));
+  emitter.position[1] =
+    x0 * (ca * sa * (1 - ct)) + y0 * (sa * sa * (1 - ct) + ct);
   emitter.position[2] = x0 * (-sa * st) + y0 * (ca * st);
 }
 
@@ -106,14 +132,20 @@ function createAttractorMesh(): THREE.Object3D {
   const group = new THREE.Group();
   const outerGeo = new THREE.SphereGeometry(0.5, 16, 16);
   const outerMat = new THREE.MeshBasicMaterial({
-    color: 0x88aaff, transparent: true, opacity: 0.15,
-    blending: THREE.AdditiveBlending, depthWrite: false,
+    color: 0x88aaff,
+    transparent: true,
+    opacity: 0.15,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
   });
   group.add(new THREE.Mesh(outerGeo, outerMat));
   const coreGeo = new THREE.SphereGeometry(0.12, 12, 12);
   const coreMat = new THREE.MeshBasicMaterial({
-    color: 0xaaccff, transparent: true, opacity: 0.8,
-    blending: THREE.AdditiveBlending, depthWrite: false,
+    color: 0xaaccff,
+    transparent: true,
+    opacity: 0.8,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
   });
   group.add(new THREE.Mesh(coreGeo, coreMat));
   return group;
@@ -124,15 +156,22 @@ function createRepulsorMesh(): THREE.Object3D {
   for (let i = 0; i < 3; i++) {
     const ringGeo = new THREE.RingGeometry(0.35, 0.45, 24);
     const ringMat = new THREE.MeshBasicMaterial({
-      color: 0xff6644, side: THREE.DoubleSide, transparent: true, opacity: 0,
-      blending: THREE.AdditiveBlending, depthWrite: false,
+      color: 0xff6644,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
     });
     group.add(new THREE.Mesh(ringGeo, ringMat));
   }
   const coreGeo = new THREE.SphereGeometry(0.1, 12, 12);
   const coreMat = new THREE.MeshBasicMaterial({
-    color: 0xff4422, transparent: true, opacity: 0.8,
-    blending: THREE.AdditiveBlending, depthWrite: false,
+    color: 0xff4422,
+    transparent: true,
+    opacity: 0.8,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
   });
   group.add(new THREE.Mesh(coreGeo, coreMat));
   return group;
@@ -202,15 +241,98 @@ const orbitalGammaMetadata: VisualizerMetadata = {
   description: 'Interactive particle sculpting with force fields',
   usesPerspective: true,
   params: [
-    { key: 'sculptMode', label: 'Sculpt Mode', min: 0, max: 1, step: 1, initial: 0, category: 'appearance' },
-    { key: 'fieldLifetime', label: 'Field Lifetime', min: 3, max: 30, step: 1, initial: 10, category: 'appearance' },
-    { key: 'fieldStrength', label: 'Field Strength', min: 0.2, max: 5.0, step: 0.2, initial: 2.0, category: 'appearance' },
-    { key: 'glowMultiplier', label: 'Glow', min: 0.3, max: 2.5, step: 0.1, initial: 1.0, category: 'appearance' },
-    { key: 'gravityMultiplier', label: 'Gravity', min: 0.1, max: 2.0, step: 0.1, initial: 1.0, category: 'appearance' },
-    { key: 'noiseMultiplier', label: 'Turbulence', min: 0.0, max: 4.0, step: 0.1, initial: 1.0, category: 'appearance' },
-    { key: 'bassToGravity', label: 'Bass \u2192 Gravity', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping' },
-    { key: 'midToSpeed', label: 'Mid \u2192 Speed', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping' },
-    { key: 'rmsToGlow', label: 'RMS \u2192 Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping' },
+    {
+      key: 'influenceRadius',
+      label: 'Field falloff radius',
+      min: 1,
+      max: 6,
+      step: 0.1,
+      initial: 3,
+      category: 'appearance',
+      description:
+        'Wire sphere marks the Gaussian falloff scale; acceleration is capped at 120 units/s²',
+    },
+    {
+      key: 'sculptMode',
+      label: 'Sculpt Mode',
+      min: 0,
+      max: 1,
+      step: 1,
+      initial: 0,
+      category: 'appearance',
+    },
+    {
+      key: 'fieldLifetime',
+      label: 'Field Lifetime',
+      min: 3,
+      max: 30,
+      step: 1,
+      initial: 10,
+      category: 'appearance',
+    },
+    {
+      key: 'fieldStrength',
+      label: 'Field Strength',
+      min: 0.2,
+      max: 5.0,
+      step: 0.2,
+      initial: 2.0,
+      category: 'appearance',
+    },
+    {
+      key: 'glowMultiplier',
+      label: 'Glow',
+      min: 0.3,
+      max: 2.5,
+      step: 0.1,
+      initial: 1.0,
+      category: 'appearance',
+    },
+    {
+      key: 'gravityMultiplier',
+      label: 'Gravity',
+      min: 0.1,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'appearance',
+    },
+    {
+      key: 'noiseMultiplier',
+      label: 'Turbulence',
+      min: 0.0,
+      max: 4.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'appearance',
+    },
+    {
+      key: 'bassToGravity',
+      label: 'Bass \u2192 Gravity',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+    },
+    {
+      key: 'midToSpeed',
+      label: 'Mid \u2192 Speed',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+    },
+    {
+      key: 'rmsToGlow',
+      label: 'RMS \u2192 Glow',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+    },
   ],
   viewport: { pan: false, zoom: true, orbit: true },
   viewStateFields: [
@@ -225,10 +347,15 @@ const orbitalGammaMetadata: VisualizerMetadata = {
 };
 
 export class OrbitalGammaVisualizer implements Visualizer {
+  private clock = new FixedStepClock();
+  private random = seededRandom(1789);
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = orbitalGammaMetadata;
   readonly usesPerspective = true;
 
   userParams: Record<string, number> = {
+    influenceRadius: 3,
     sculptMode: 0,
     fieldLifetime: 10,
     fieldStrength: 2.0,
@@ -245,10 +372,10 @@ export class OrbitalGammaVisualizer implements Visualizer {
   private time = 0;
 
   private smoothBass = new EMASmoothing(0.18);
-  private smoothMid = new EMASmoothing(0.20);
+  private smoothMid = new EMASmoothing(0.2);
   private smoothHigh = new EMASmoothing(0.15);
-  private smoothRms = new EMASmoothing(0.20);
-  private smoothCentroid = new EMASmoothing(0.10);
+  private smoothRms = new EMASmoothing(0.2);
+  private smoothCentroid = new EMASmoothing(0.1);
 
   private positions: Float32Array;
   private velocities: Float32Array;
@@ -266,6 +393,8 @@ export class OrbitalGammaVisualizer implements Visualizer {
   private sceneRef: THREE.Scene | null = null;
   private emitters: Emitter[];
   private burstCooldown = 0;
+  private emissionRemainder = 0;
+  private emitterPhase = 0;
 
   private forceFields: ForceField[] = [];
   private raycaster = new THREE.Raycaster();
@@ -273,6 +402,10 @@ export class OrbitalGammaVisualizer implements Visualizer {
   private boundClickHandler: ((e: MouseEvent) => void) | null = null;
   private boundContextHandler: ((e: MouseEvent) => void) | null = null;
   private boundPointerDownHandler: ((e: PointerEvent) => void) | null = null;
+  private pointerIds = new Set<number>();
+  private multiPointerGesture = false;
+  private pointerEndHandler: ((e: PointerEvent) => void) | null = null;
+  private pointerCancelHandler: ((e: PointerEvent) => void) | null = null;
   private pointerDownPos: { x: number; y: number } | null = null;
   private sculptHint: HTMLElement | null = null;
   private interactionContext: VisualizerInteractionContext | null = null;
@@ -283,9 +416,21 @@ export class OrbitalGammaVisualizer implements Visualizer {
   private viewOverrides: Record<string, boolean> = {};
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = {
+          ...msg.payload,
+          beatOnset: msg.payload.beatOnset || !!this.latestFeatures?.beatOnset,
+          beatConfidence: Math.max(
+            msg.payload.beatConfidence,
+            this.latestFeatures?.beatOnset
+              ? this.latestFeatures.beatConfidence
+              : 0,
+          ),
+        };
+      },
+    );
 
     this.positions = new Float32Array(MAX_PARTICLES * 3);
     this.velocities = new Float32Array(MAX_PARTICLES * 3);
@@ -309,11 +454,26 @@ export class OrbitalGammaVisualizer implements Visualizer {
   attach(scene: THREE.Scene): void {
     this.sceneRef = scene;
     this.particleGeometry = new THREE.BufferGeometry();
-    this.particleGeometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
-    this.particleGeometry.setAttribute('a_age', new THREE.BufferAttribute(this.ages, 1));
-    this.particleGeometry.setAttribute('a_lifetime', new THREE.BufferAttribute(this.lifetimes, 1));
-    this.particleGeometry.setAttribute('a_size', new THREE.BufferAttribute(this.sizes, 1));
-    this.particleGeometry.setAttribute('a_speed', new THREE.BufferAttribute(this.speeds, 1));
+    this.particleGeometry.setAttribute(
+      'position',
+      new THREE.BufferAttribute(this.positions, 3),
+    );
+    this.particleGeometry.setAttribute(
+      'a_age',
+      new THREE.BufferAttribute(this.ages, 1),
+    );
+    this.particleGeometry.setAttribute(
+      'a_lifetime',
+      new THREE.BufferAttribute(this.lifetimes, 1),
+    );
+    this.particleGeometry.setAttribute(
+      'a_size',
+      new THREE.BufferAttribute(this.sizes, 1),
+    );
+    this.particleGeometry.setAttribute(
+      'a_speed',
+      new THREE.BufferAttribute(this.speeds, 1),
+    );
 
     this.particleMaterial = new THREE.ShaderMaterial({
       vertexShader: PARTICLE_VERTEX_SHADER,
@@ -328,7 +488,10 @@ export class OrbitalGammaVisualizer implements Visualizer {
       transparent: true,
     });
 
-    this.particlePoints = new THREE.Points(this.particleGeometry, this.particleMaterial);
+    this.particlePoints = new THREE.Points(
+      this.particleGeometry,
+      this.particleMaterial,
+    );
     this.particlePoints.frustumCulled = false;
     scene.add(this.particlePoints);
 
@@ -337,53 +500,88 @@ export class OrbitalGammaVisualizer implements Visualizer {
     // Sculpt mode hint overlay
     this.sculptHint = document.createElement('div');
     Object.assign(this.sculptHint.style, {
-      position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)',
-      padding: '6px 16px', borderRadius: '20px',
-      background: 'rgba(8, 8, 16, 0.7)', backdropFilter: 'blur(12px)',
+      position: 'fixed',
+      bottom: '80px',
+      left: '50%',
+      transform: 'translateX(-50%)',
+      padding: '6px 16px',
+      borderRadius: '20px',
+      background: 'rgba(8, 8, 16, 0.7)',
+      backdropFilter: 'blur(12px)',
       border: '1px solid rgba(255, 255, 255, 0.1)',
-      color: 'rgba(255, 255, 255, 0.4)', fontFamily: 'system-ui, sans-serif',
-      fontSize: '10px', letterSpacing: '0.08em', pointerEvents: 'none',
-      zIndex: '80', opacity: '0', transition: 'opacity 0.3s ease',
+      color: 'rgba(255, 255, 255, 0.4)',
+      fontFamily: 'system-ui, sans-serif',
+      fontSize: '10px',
+      letterSpacing: '0.08em',
+      pointerEvents: 'none',
+      zIndex: '80',
+      opacity: '0',
+      transition: 'opacity 0.3s ease',
       whiteSpace: 'nowrap',
     });
-    this.sculptHint.textContent = 'Click to place attractor \u00B7 Right-click for repulsor';
+    this.sculptHint.textContent =
+      'Click to place attractor \u00B7 Right-click for repulsor';
     document.body.appendChild(this.sculptHint);
   }
 
-  tick(): void {
-    const dt = 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.clock.advance(deltaSeconds, (dt) => this.simulate(dt));
+  }
+
+  private simulate(deltaSeconds: number): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    const dt = this.deltaSeconds;
     this.time += dt;
 
     // Update sculpt hint visibility
     if (this.sculptHint) {
-      this.sculptHint.style.opacity = this.userParams.sculptMode >= 0.5 ? '1' : '0';
+      this.sculptHint.style.opacity =
+        this.userParams.sculptMode >= 0.5 ? '1' : '0';
     }
 
-    const f = this.latestFeatures ?? IDLE_FEATURES;
-    const bass = this.smoothBass.update(f.bass);
-    const mid = this.smoothMid.update(f.mid);
-    const high = this.smoothHigh.update(f.high);
-    const rms = this.smoothRms.update(f.rms);
-    const centroid = this.smoothCentroid.update(f.spectralCentroid);
+    const f = takeAudioFrame(this.latestFeatures ?? IDLE_FEATURES);
+    const bass = this.smoothBass.update(f.bass, this.deltaSeconds);
+    const mid = this.smoothMid.update(f.mid, this.deltaSeconds);
+    const high = this.smoothHigh.update(f.high, this.deltaSeconds);
+    const rms = this.smoothRms.update(f.rms, this.deltaSeconds);
+    const centroid = this.smoothCentroid.update(
+      f.spectralCentroid,
+      this.deltaSeconds,
+    );
 
     const bToG = this.userParams.bassToGravity;
     const mToS = this.userParams.midToSpeed;
     const rToG = this.userParams.rmsToGlow;
-    const gravStrength = BASE_G * (0.4 + bass * 1.2 * bToG) * this.userParams.gravityMultiplier;
+    const gravStrength =
+      BASE_G * (0.4 + bass * 1.2 * bToG) * this.userParams.gravityMultiplier;
     const emitterSpeedMul = 0.4 + mid * 1.8 * mToS;
     const radiusBreath = (bass - 0.3) * 2.5 * bToG;
-    const noiseStrength = BASE_NOISE_STRENGTH * (0.5 + high * 2.5) * this.userParams.noiseMultiplier;
+    const noiseStrength =
+      BASE_NOISE_STRENGTH *
+      (0.5 + high * 2.5) *
+      this.userParams.noiseMultiplier;
     const spawnVelocityVariance = 0.3 + high * 1.5;
-    const glowIntensity = (0.75 + rms * 1.0 * rToG) * this.userParams.glowMultiplier;
+    const glowIntensity =
+      (0.75 + rms * 1.0 * rToG) * this.userParams.glowMultiplier;
     const hueShift = centroid;
-    const emissionRate = Math.floor(BASE_EMISSION_RATE + bass * 5);
+    this.emissionRemainder += (BASE_EMISSION_RATE + bass * 5) * dt * 60;
+    const emissionRate = Math.floor(this.emissionRemainder);
+    this.emissionRemainder -= emissionRate;
+    this.emitterPhase += emitterSpeedMul * dt;
 
-    if (this.burstCooldown > 0) this.burstCooldown--;
-    const doBurst = f.beatOnset && f.beatConfidence > 0.35 && this.burstCooldown === 0;
-    if (doBurst) this.burstCooldown = 5;
+    this.burstCooldown = Math.max(0, this.burstCooldown - dt);
+    const doBurst =
+      f.beatOnset && f.beatConfidence > 0.35 && this.burstCooldown === 0;
+    if (doBurst) this.burstCooldown = 5 / 60;
 
     for (let i = 0; i < this.emitters.length; i++) {
-      updateEmitterPosition(this.emitters[i], this.time, emitterSpeedMul, radiusBreath, 1.0);
+      updateEmitterPosition(
+        this.emitters[i],
+        this.time,
+        this.emitterPhase,
+        radiusBreath,
+        1.0,
+      );
     }
 
     const burstExtra = doBurst ? 15 : 0;
@@ -438,12 +636,15 @@ export class OrbitalGammaVisualizer implements Visualizer {
 
       // Curl noise
       const ns = NOISE_SCALE;
-      const nx = Math.sin(py * ns + t * 0.9) * Math.cos(pz * ns * 1.3 + t * 0.3)
-               + 0.3 * Math.sin(pz * ns * 2.1 + t * 1.7);
-      const ny = Math.sin(pz * ns + t * 0.7) * Math.cos(px * ns * 1.1 + t * 0.5)
-               + 0.3 * Math.sin(px * ns * 1.9 + t * 1.3);
-      const nz = Math.sin(px * ns + t * 1.1) * Math.cos(py * ns * 0.9 + t * 0.4)
-               + 0.3 * Math.sin(py * ns * 2.3 + t * 1.1);
+      const nx =
+        Math.sin(py * ns + t * 0.9) * Math.cos(pz * ns * 1.3 + t * 0.3) +
+        0.3 * Math.sin(pz * ns * 2.1 + t * 1.7);
+      const ny =
+        Math.sin(pz * ns + t * 0.7) * Math.cos(px * ns * 1.1 + t * 0.5) +
+        0.3 * Math.sin(px * ns * 1.9 + t * 1.3);
+      const nz =
+        Math.sin(px * ns + t * 1.1) * Math.cos(py * ns * 0.9 + t * 0.4) +
+        0.3 * Math.sin(py * ns * 2.3 + t * 1.1);
       vx += nx * noiseStrength * dt;
       vy += ny * noiseStrength * dt;
       vz += nz * noiseStrength * dt;
@@ -452,13 +653,15 @@ export class OrbitalGammaVisualizer implements Visualizer {
       const eIdx = this.emitterIndex[i];
       if (eIdx < this.emitters.length) {
         const ep = this.emitters[eIdx].position;
-        const edx = ep[0] - px, edy = ep[1] - py, edz = ep[2] - pz;
+        const edx = ep[0] - px,
+          edy = ep[1] - py,
+          edz = ep[2] - pz;
         const eDist = Math.sqrt(edx * edx + edy * edy + edz * edz + 0.1);
         if (eDist < 5.0) {
           const ePull = 0.08 / (eDist + 0.8);
-          vx += edx / eDist * ePull * dt;
-          vy += edy / eDist * ePull * dt;
-          vz += edz / eDist * ePull * dt;
+          vx += (edx / eDist) * ePull * dt;
+          vy += (edy / eDist) * ePull * dt;
+          vz += (edz / eDist) * ePull * dt;
         }
       }
 
@@ -467,11 +670,24 @@ export class OrbitalGammaVisualizer implements Visualizer {
         const lifeRatio = 1.0 - ff.age / ff.lifetime;
         if (lifeRatio <= 0) continue;
         const fPos = ff.position;
-        const fdx = fPos.x - px, fdy = fPos.y - py, fdz = fPos.z - pz;
+        const fdx = fPos.x - px,
+          fdy = fPos.y - py,
+          fdz = fPos.z - pz;
         const fDistSq = fdx * fdx + fdy * fdy + fdz * fdz;
-        if (fDistSq > 400 || fDistSq < 0.1) continue;
+        if (
+          fDistSq > 9 * this.userParams.influenceRadius ** 2 ||
+          fDistSq < 1e-8
+        )
+          continue;
         const fDist = Math.sqrt(fDistSq);
-        const strength = (fieldStrength * ff.strength * lifeRatio * 60.0) / fDistSq;
+        const falloff = Math.exp(
+          (-0.5 * fDistSq) / this.userParams.influenceRadius ** 2,
+        );
+        const strength = Math.min(
+          120,
+          (fieldStrength * ff.strength * lifeRatio * 60 * falloff) /
+            Math.max(0.25, fDistSq),
+        );
         const sign = ff.type === 'attractor' ? 1 : -1;
         vx += sign * (fdx / fDist) * strength * dt;
         vy += sign * (fdy / fDist) * strength * dt;
@@ -479,7 +695,18 @@ export class OrbitalGammaVisualizer implements Visualizer {
       }
 
       const damp = Math.pow(DAMPING, dt * 60);
-      vx *= damp; vy *= damp; vz *= damp;
+      vx *= damp;
+      vy *= damp;
+      vz *= damp;
+
+      const speedLimit = 30;
+      const speedScale = Math.min(
+        1,
+        speedLimit / Math.max(1e-6, Math.hypot(vx, vy, vz)),
+      );
+      vx *= speedScale;
+      vy *= speedScale;
+      vz *= speedScale;
 
       this.velocities[idx] = vx;
       this.velocities[idx + 1] = vy;
@@ -493,16 +720,32 @@ export class OrbitalGammaVisualizer implements Visualizer {
 
       const life = this.ages[i] / this.lifetimes[i];
       const shimmer = 1.0 + high * 0.5 * Math.sin(t * 15 + i * 1.7);
-      const sizeFade = life < 0.1 ? life / 0.1 : 1.0 - Math.pow(Math.max(0, life - 0.55) * 2.2, 2);
-      this.sizes[i] = Math.max(0.4, (1.4 + rms * 1.6) * shimmer * Math.max(0, sizeFade));
+      const sizeFade =
+        life < 0.1
+          ? life / 0.1
+          : 1.0 - Math.pow(Math.max(0, life - 0.55) * 2.2, 2);
+      this.sizes[i] = Math.max(
+        0.4,
+        (1.4 + rms * 1.6) * shimmer * Math.max(0, sizeFade),
+      );
     }
 
     if (this.particleGeometry) {
-      (this.particleGeometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
-      (this.particleGeometry.attributes.a_age as THREE.BufferAttribute).needsUpdate = true;
-      (this.particleGeometry.attributes.a_lifetime as THREE.BufferAttribute).needsUpdate = true;
-      (this.particleGeometry.attributes.a_size as THREE.BufferAttribute).needsUpdate = true;
-      (this.particleGeometry.attributes.a_speed as THREE.BufferAttribute).needsUpdate = true;
+      (
+        this.particleGeometry.attributes.position as THREE.BufferAttribute
+      ).needsUpdate = true;
+      (
+        this.particleGeometry.attributes.a_age as THREE.BufferAttribute
+      ).needsUpdate = true;
+      (
+        this.particleGeometry.attributes.a_lifetime as THREE.BufferAttribute
+      ).needsUpdate = true;
+      (
+        this.particleGeometry.attributes.a_size as THREE.BufferAttribute
+      ).needsUpdate = true;
+      (
+        this.particleGeometry.attributes.a_speed as THREE.BufferAttribute
+      ).needsUpdate = true;
     }
 
     if (this.particleMaterial) {
@@ -529,13 +772,24 @@ export class OrbitalGammaVisualizer implements Visualizer {
   }
 
   getViewState(): Record<string, number> {
-    return { orbitAngle: this._orbitAngle, elevation: this._elevation, distance: this._distance };
+    return {
+      orbitAngle: this._orbitAngle,
+      elevation: this._elevation,
+      distance: this._distance,
+    };
   }
 
   setViewState(partial: Record<string, number>): void {
-    if ('orbitAngle' in partial) { this._orbitAngle = partial.orbitAngle; this.viewOverrides.orbit = true; }
-    if ('elevation' in partial) { this._elevation = Math.max(-1.5, Math.min(1.5, partial.elevation)); }
-    if ('distance' in partial) { this._distance = Math.max(4, Math.min(30, partial.distance)); }
+    if ('orbitAngle' in partial) {
+      this._orbitAngle = partial.orbitAngle;
+      this.viewOverrides.orbit = true;
+    }
+    if ('elevation' in partial) {
+      this._elevation = Math.max(-1.5, Math.min(1.5, partial.elevation));
+    }
+    if ('distance' in partial) {
+      this._distance = Math.max(4, Math.min(30, partial.distance));
+    }
   }
 
   getCameraPosition(): { x: number; y: number; z: number } {
@@ -568,8 +822,12 @@ export class OrbitalGammaVisualizer implements Visualizer {
 
   // --- Force field management ---
 
-  private _handleSculptClick(e: MouseEvent, canvas: HTMLCanvasElement, fieldType: 'attractor' | 'repulsor'): void {
-    if (this.userParams.sculptMode < 0.5) return;
+  private _handleSculptClick(
+    e: MouseEvent,
+    canvas: HTMLCanvasElement,
+    fieldType: 'attractor' | 'repulsor',
+  ): void {
+    if (this.userParams.sculptMode < 0.5 || this.multiPointerGesture) return;
     if (e.target !== canvas) return;
 
     // Suppress placement if the pointer moved (was a drag, not a click)
@@ -588,6 +846,7 @@ export class OrbitalGammaVisualizer implements Visualizer {
     const perspCamera = this.interactionContext?.getPerspectiveCamera();
     if (!perspCamera) return;
 
+    perspCamera.updateMatrixWorld();
     this.raycaster.setFromCamera(mouse, perspCamera);
     const cameraDir = new THREE.Vector3();
     perspCamera.getWorldDirection(cameraDir);
@@ -595,26 +854,43 @@ export class OrbitalGammaVisualizer implements Visualizer {
     this.clickPlane.constant = 0;
 
     const intersection = new THREE.Vector3();
-    if (!this.raycaster.ray.intersectPlane(this.clickPlane, intersection)) return;
+    if (!this.raycaster.ray.intersectPlane(this.clickPlane, intersection))
+      return;
 
     this._addForceField(intersection, fieldType);
   }
 
   private _installInteractionHandlers(): void {
     const canvas = this.interactionContext?.canvas;
-    if (!canvas || this.boundClickHandler || this.boundContextHandler || this.boundPointerDownHandler) {
+    if (
+      !canvas ||
+      this.boundClickHandler ||
+      this.boundContextHandler ||
+      this.boundPointerDownHandler
+    ) {
       return;
     }
 
     this.boundPointerDownHandler = (e: PointerEvent) => {
+      if (!this.pointerIds.size) this.multiPointerGesture = false;
+      this.pointerIds.add(e.pointerId);
+      if (this.pointerIds.size > 1) this.multiPointerGesture = true;
       this.pointerDownPos = { x: e.clientX, y: e.clientY };
     };
-    this.boundClickHandler = (e: MouseEvent) => this._handleSculptClick(e, canvas, 'attractor');
+    this.boundClickHandler = (e: MouseEvent) =>
+      this._handleSculptClick(e, canvas, 'attractor');
     this.boundContextHandler = (e: MouseEvent) => {
       e.preventDefault();
       this._handleSculptClick(e, canvas, 'repulsor');
     };
 
+    this.pointerEndHandler = (e) => this.pointerIds.delete(e.pointerId);
+    this.pointerCancelHandler = (e) => {
+      this.pointerIds.delete(e.pointerId);
+      this.multiPointerGesture = true;
+    };
+    canvas.addEventListener('pointerup', this.pointerEndHandler);
+    canvas.addEventListener('pointercancel', this.pointerCancelHandler);
     canvas.addEventListener('pointerdown', this.boundPointerDownHandler);
     canvas.addEventListener('click', this.boundClickHandler);
     canvas.addEventListener('contextmenu', this.boundContextHandler);
@@ -624,17 +900,30 @@ export class OrbitalGammaVisualizer implements Visualizer {
     const canvas = this.interactionContext?.canvas;
     if (!canvas) return;
 
-    if (this.boundClickHandler) canvas.removeEventListener('click', this.boundClickHandler);
-    if (this.boundContextHandler) canvas.removeEventListener('contextmenu', this.boundContextHandler);
-    if (this.boundPointerDownHandler) canvas.removeEventListener('pointerdown', this.boundPointerDownHandler);
+    if (this.boundClickHandler)
+      canvas.removeEventListener('click', this.boundClickHandler);
+    if (this.boundContextHandler)
+      canvas.removeEventListener('contextmenu', this.boundContextHandler);
+    if (this.boundPointerDownHandler)
+      canvas.removeEventListener('pointerdown', this.boundPointerDownHandler);
 
+    if (this.pointerEndHandler)
+      canvas.removeEventListener('pointerup', this.pointerEndHandler);
+    if (this.pointerCancelHandler)
+      canvas.removeEventListener('pointercancel', this.pointerCancelHandler);
+    this.pointerEndHandler = null;
+    this.pointerCancelHandler = null;
+    this.pointerIds.clear();
     this.boundClickHandler = null;
     this.boundContextHandler = null;
     this.boundPointerDownHandler = null;
     this.pointerDownPos = null;
   }
 
-  private _addForceField(position: THREE.Vector3, type: 'attractor' | 'repulsor'): void {
+  private _addForceField(
+    position: THREE.Vector3,
+    type: 'attractor' | 'repulsor',
+  ): void {
     if (!this.sceneRef) return;
 
     // Evict oldest if at capacity
@@ -644,7 +933,20 @@ export class OrbitalGammaVisualizer implements Visualizer {
       disposeFieldMesh(oldest.mesh);
     }
 
-    const mesh = type === 'attractor' ? createAttractorMesh() : createRepulsorMesh();
+    const mesh =
+      type === 'attractor' ? createAttractorMesh() : createRepulsorMesh();
+    const falloffMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(1, 20, 12),
+      new THREE.MeshBasicMaterial({
+        color: type === 'attractor' ? 0x6699ff : 0xff8866,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.08,
+        depthWrite: false,
+      }),
+    );
+    falloffMesh.userData.falloff = true;
+    mesh.add(falloffMesh);
     mesh.position.copy(position);
     this.sceneRef.add(mesh);
 
@@ -670,6 +972,10 @@ export class OrbitalGammaVisualizer implements Visualizer {
         continue;
       }
 
+      const falloffMesh = ff.mesh.children.find(
+        (child) => child.userData.falloff,
+      ) as THREE.Mesh;
+
       const lifeRatio = 1.0 - ff.age / ff.lifetime;
       const fadeIn = Math.min(1.0, ff.age / 0.5);
       const fadeOut = lifeRatio;
@@ -678,12 +984,16 @@ export class OrbitalGammaVisualizer implements Visualizer {
       if (ff.type === 'attractor') {
         const pulse = 1 + Math.sin(this.time * 5) * 0.1;
         ff.mesh.scale.setScalar(pulse * opacity);
-        ff.mesh.children.forEach(child => {
+        ff.mesh.children.forEach((child) => {
+          if (child.userData.falloff) return;
           const mat = (child as THREE.Mesh).material as THREE.MeshBasicMaterial;
-          if (mat) mat.opacity = opacity * (child === ff.mesh.children[0] ? 0.15 : 0.8);
+          if (mat)
+            mat.opacity =
+              opacity * (child === ff.mesh.children[0] ? 0.15 : 0.8);
         });
       } else {
         ff.mesh.children.forEach((child, j) => {
+          if (child.userData.falloff) return;
           if (j === 3) {
             child.scale.setScalar(opacity);
             return;
@@ -695,6 +1005,10 @@ export class OrbitalGammaVisualizer implements Visualizer {
           if (mat) mat.opacity = Math.sin(phase * Math.PI) * 0.4 * opacity;
         });
       }
+      if (falloffMesh)
+        falloffMesh.scale.setScalar(
+          this.userParams.influenceRadius / Math.max(0.001, ff.mesh.scale.x),
+        );
     }
   }
 
@@ -702,57 +1016,71 @@ export class OrbitalGammaVisualizer implements Visualizer {
 
   private _seedParticles(count: number): void {
     for (let i = 0; i < this.emitters.length; i++) {
-      updateEmitterPosition(this.emitters[i], 0, 1.0, 0, 0);
+      updateEmitterPosition(this.emitters[i], 0, 0, 0, 0);
     }
     for (let i = 0; i < count && i < MAX_PARTICLES; i++) {
       const eIdx = i % this.emitters.length;
       this._emitParticle(i, eIdx, 0.5, false);
-      this.ages[i] = Math.random() * this.lifetimes[i] * 0.4;
-      const angle = Math.random() * Math.PI * 2;
-      const phi = (Math.random() - 0.5) * Math.PI;
-      const radius = 1.5 + Math.random() * 3.5;
+      this.ages[i] = this.random() * this.lifetimes[i] * 0.4;
+      const angle = this.random() * Math.PI * 2;
+      const phi = (this.random() - 0.5) * Math.PI;
+      const radius = 1.5 + this.random() * 3.5;
       const idx = i * 3;
       this.positions[idx] = Math.cos(angle) * Math.cos(phi) * radius;
       this.positions[idx + 1] = Math.sin(phi) * radius;
       this.positions[idx + 2] = Math.sin(angle) * Math.cos(phi) * radius;
-      const speed = 0.2 + Math.random() * 0.4;
+      const speed = 0.2 + this.random() * 0.4;
       this.velocities[idx] = -Math.sin(angle) * speed;
-      this.velocities[idx + 1] = (Math.random() - 0.5) * speed * 0.5;
+      this.velocities[idx + 1] = (this.random() - 0.5) * speed * 0.5;
       this.velocities[idx + 2] = Math.cos(angle) * speed;
     }
     this.activeCount = count;
   }
 
-  private _emitParticle(i: number, emitterIdx: number, velocityVariance: number, burst: boolean): void {
+  private _emitParticle(
+    i: number,
+    emitterIdx: number,
+    velocityVariance: number,
+    burst: boolean,
+  ): void {
     const idx = i * 3;
     const emitter = this.emitters[emitterIdx];
     const [ex, ey, ez] = emitter.position;
 
     const spread = burst ? 0.5 : 0.2;
-    this.positions[idx] = ex + (Math.random() - 0.5) * spread;
-    this.positions[idx + 1] = ey + (Math.random() - 0.5) * spread;
-    this.positions[idx + 2] = ez + (Math.random() - 0.5) * spread;
+    this.positions[idx] = ex + (this.random() - 0.5) * spread;
+    this.positions[idx + 1] = ey + (this.random() - 0.5) * spread;
+    this.positions[idx + 2] = ez + (this.random() - 0.5) * spread;
 
     const radial = Math.sqrt(ex * ex + ey * ey + ez * ez) + 0.01;
-    const rx = ex / radial, ry = ey / radial, rz = ez / radial;
-    let ux = 0, uy = 1, uz = 0;
-    if (Math.abs(ry) > 0.9) { ux = 1; uy = 0; uz = 0; }
+    const rx = ex / radial,
+      ry = ey / radial,
+      rz = ez / radial;
+    let ux = 0,
+      uy = 1,
+      uz = 0;
+    if (Math.abs(ry) > 0.9) {
+      ux = 1;
+      uy = 0;
+      uz = 0;
+    }
     const tangX = ry * uz - rz * uy;
     const tangY = rz * ux - rx * uz;
     const tangZ = rx * uy - ry * ux;
-    const tangLen = Math.sqrt(tangX * tangX + tangY * tangY + tangZ * tangZ) + 0.001;
+    const tangLen =
+      Math.sqrt(tangX * tangX + tangY * tangY + tangZ * tangZ) + 0.001;
 
     const baseSpeed = burst ? 0.7 : 0.25;
-    const speedNoise = Math.random() * velocityVariance;
+    const speedNoise = this.random() * velocityVariance;
     const s = (baseSpeed + speedNoise) / tangLen;
 
-    this.velocities[idx] = tangX * s + (Math.random() - 0.5) * 0.2;
-    this.velocities[idx + 1] = tangY * s + (Math.random() - 0.5) * 0.2;
-    this.velocities[idx + 2] = tangZ * s + (Math.random() - 0.5) * 0.2;
+    this.velocities[idx] = tangX * s + (this.random() - 0.5) * 0.2;
+    this.velocities[idx + 1] = tangY * s + (this.random() - 0.5) * 0.2;
+    this.velocities[idx + 2] = tangZ * s + (this.random() - 0.5) * 0.2;
 
-    this.lifetimes[i] = MAX_LIFETIME * (0.35 + Math.random() * 0.65);
+    this.lifetimes[i] = MAX_LIFETIME * (0.35 + this.random() * 0.65);
     this.ages[i] = 0;
-    this.sizes[i] = 1.4 + Math.random() * 2.0;
+    this.sizes[i] = 1.4 + this.random() * 2.0;
     this.speeds[i] = baseSpeed + speedNoise;
     this.alive[i] = 1;
     this.emitterIndex[i] = emitterIdx;

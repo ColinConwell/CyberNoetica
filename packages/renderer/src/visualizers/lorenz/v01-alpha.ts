@@ -25,16 +25,43 @@ const metadata: VisualizerMetadata = {
   description: 'Classic 1963 butterfly attractor',
   usesPerspective: true,
   params: [
-    { key: 'sigma', label: 'Sigma (σ)', min: 4.0, max: 18.0, step: 0.1, initial: 10.0, category: 'appearance', description: 'Prandtl number — contraction rate' },
-    { key: 'rho', label: 'Rho (ρ)', min: 18.0, max: 40.0, step: 0.1, initial: 28.0, category: 'appearance', description: 'Rayleigh number — chaos for ρ > 24.74' },
-    { key: 'beta', label: 'Beta (β)', min: 1.0, max: 4.5, step: 0.05, initial: 8 / 3, category: 'appearance', description: 'Geometric aspect ratio' },
+    {
+      key: 'sigma',
+      label: 'Sigma (σ)',
+      min: 9.5,
+      max: 10.5,
+      step: 0.1,
+      initial: 10.0,
+      category: 'appearance',
+      description: 'Prandtl number — contraction rate',
+    },
+    {
+      key: 'rho',
+      label: 'Rho (ρ)',
+      min: 26.0,
+      max: 30.0,
+      step: 0.1,
+      initial: 28.0,
+      category: 'appearance',
+      description: 'Rayleigh number within the curated butterfly range',
+    },
+    {
+      key: 'beta',
+      label: 'Beta (β)',
+      min: 2.6,
+      max: 2.75,
+      step: 0.05,
+      initial: 8 / 3,
+      category: 'appearance',
+      description: 'Geometric aspect ratio',
+    },
     ...FLOW_SHARED_PARAMS,
   ],
   viewport: { ...FLOW_VIEWPORT },
   viewStateFields: FLOW_VIEW_FIELDS,
 };
 
-function lorenzDerivs(p: Vec3, params: Record<string, number>): Vec3 {
+export function lorenzDerivs(p: Vec3, params: Record<string, number>): Vec3 {
   const sigma = params.sigma;
   const rho = params.rho;
   const beta = params.beta;
@@ -52,7 +79,7 @@ const config: FlowConfig = {
   scale: 0.12,
   dt: 0.008,
   driveParam: 'rho',
-  driveScale: 8,
+  driveScale: 2,
   seed: { x: 0.1, y: 0, z: 20 },
   hueOffset: 0.55,
   orbitAngle: 0.4,

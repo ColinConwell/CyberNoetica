@@ -19,31 +19,52 @@ export type PlaybackAction =
   | { type: 'RESUME' }
   | { type: 'NEXT_TRACK' }
   | { type: 'SELECT_TRACK' }
-  | { type: 'SWITCH_SOURCE'; source: 'file' | 'mic' | 'system' | 'soundscape' }
+  | {
+      type: 'SWITCH_SOURCE';
+      source: 'none' | 'file' | 'mic' | 'system' | 'soundscape';
+    }
   | { type: 'SOURCE_READY' };
 
 const VALID_TRANSITIONS: Record<PlaybackState, Set<PlaybackAction['type']>> = {
-  'idle':             new Set(['START']),
-  'loading':          new Set(['LOADED', 'ERROR', 'SELECT_TRACK']),
-  'playing':          new Set(['PAUSE', 'NEXT_TRACK', 'SELECT_TRACK', 'SWITCH_SOURCE']),
-  'paused':           new Set(['RESUME', 'SELECT_TRACK', 'SWITCH_SOURCE']),
-  'switching-source': new Set(['SOURCE_READY', 'ERROR']),
+  idle: new Set(['START']),
+  loading: new Set(['LOADED', 'ERROR', 'SELECT_TRACK', 'SWITCH_SOURCE']),
+  playing: new Set(['PAUSE', 'NEXT_TRACK', 'SELECT_TRACK', 'SWITCH_SOURCE']),
+  paused: new Set(['RESUME', 'SELECT_TRACK', 'SWITCH_SOURCE']),
+  'switching-source': new Set([
+    'SOURCE_READY',
+    'ERROR',
+    'SWITCH_SOURCE',
+    'SELECT_TRACK',
+  ]),
 };
 
-function nextState(current: PlaybackState, action: PlaybackAction): PlaybackState | null {
+function nextState(
+  current: PlaybackState,
+  action: PlaybackAction,
+): PlaybackState | null {
   if (!VALID_TRANSITIONS[current].has(action.type)) return null;
 
   switch (action.type) {
-    case 'START':         return 'loading';
-    case 'LOADED':        return 'playing';
-    case 'ERROR':         return current === 'switching-source' ? 'idle' : 'idle';
-    case 'PAUSE':         return 'paused';
-    case 'RESUME':        return 'playing';
-    case 'NEXT_TRACK':    return 'loading';
-    case 'SELECT_TRACK':  return 'loading';
-    case 'SWITCH_SOURCE': return 'switching-source';
-    case 'SOURCE_READY':  return 'playing';
-    default:              return null;
+    case 'START':
+      return 'loading';
+    case 'LOADED':
+      return 'playing';
+    case 'ERROR':
+      return current === 'switching-source' ? 'idle' : 'idle';
+    case 'PAUSE':
+      return 'paused';
+    case 'RESUME':
+      return 'playing';
+    case 'NEXT_TRACK':
+      return 'loading';
+    case 'SELECT_TRACK':
+      return 'loading';
+    case 'SWITCH_SOURCE':
+      return 'switching-source';
+    case 'SOURCE_READY':
+      return 'playing';
+    default:
+      return null;
   }
 }
 
@@ -99,7 +120,11 @@ export class PlaybackStateMachine {
     this._state = next;
 
     for (const listener of this._listeners) {
-      try { listener(next, prev, action); } catch { /* swallow */ }
+      try {
+        listener(next, prev, action);
+      } catch {
+        /* swallow */
+      }
     }
 
     if (this._bus) {
@@ -120,7 +145,7 @@ export class PlaybackStateMachine {
   onChange(handler: PlaybackStateChangeHandler): () => void {
     this._listeners.push(handler);
     return () => {
-      this._listeners = this._listeners.filter(h => h !== handler);
+      this._listeners = this._listeners.filter((h) => h !== handler);
     };
   }
 

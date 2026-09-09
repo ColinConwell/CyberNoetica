@@ -3,15 +3,21 @@ import type { QualityTier } from '@cybernoetica/renderer';
 
 export type QualityMode = 'auto' | QualityTier;
 
-const TIER_ORDER: QualityTier[] = ['sub-performance', 'performance', 'balanced', 'high', 'ultra'];
+const TIER_ORDER: QualityTier[] = [
+  'sub-performance',
+  'performance',
+  'balanced',
+  'high',
+  'ultra',
+];
 
-const GOVERNOR_WINDOW = 60;           // frames
-const GOVERNOR_STEP_DOWN_MS = 20;     // >20ms avg (below 50 FPS) → step down
-const GOVERNOR_STEP_UP_MS = 14;       // <14ms avg (above ~71 FPS) → step up
+const GOVERNOR_WINDOW = 60; // frames
+const GOVERNOR_STEP_DOWN_MS = 20; // >20ms avg (below 50 FPS) → step down
+const GOVERNOR_STEP_UP_MS = 18; // Sustained ~60 Hz permits a trial of the next tier.
 const GOVERNOR_STEP_DOWN_HOLD_MS = 2000;
 const GOVERNOR_STEP_UP_HOLD_MS = 5000;
-const GOVERNOR_COOLDOWN_MS = 3000;    // ignore signals right after a change
-const TARGET_FRAME_MS = 1000 / 60;    // cap rAF work rate at 60 Hz
+const GOVERNOR_COOLDOWN_MS = 3000; // ignore signals right after a change
+const TARGET_FRAME_MS = 1000 / 60; // cap rAF work rate at 60 Hz
 
 export interface QualityManagerOptions {
   bus: MessageBus;
@@ -27,7 +33,11 @@ export interface QualityManagerOptions {
  */
 export function detectInitialTier(
   rendererString: string | null,
-  opts: { deviceMemory?: number; hwConcurrency?: number; touchOnly?: boolean } = {},
+  opts: {
+    deviceMemory?: number;
+    hwConcurrency?: number;
+    touchOnly?: boolean;
+  } = {},
 ): QualityTier {
   const s = (rendererString ?? '').toLowerCase();
 
@@ -58,6 +68,22 @@ export function detectInitialTier(
 }
 
 export class QualityManager {
+  private targetFps = 60;
+  private workMs: number | null = null;
+  setPowerSaver(enabled: boolean): void {
+    this.targetFps = enabled ? 30 : 60;
+    this.resetGovernor();
+  }
+  getTargetFps(): number {
+    return this.targetFps;
+  }
+  sampleWork(cpuMs: number, gpuMs: number | null): void {
+    this.workMs = Math.max(
+      Number.isFinite(cpuMs) ? cpuMs : 0,
+      gpuMs !== null && Number.isFinite(gpuMs) ? gpuMs : 0,
+    );
+  }
+
   private mode: QualityMode = 'auto';
   private currentTier: QualityTier = 'balanced';
   private autoTier: QualityTier = 'balanced';
@@ -73,9 +99,10 @@ export class QualityManager {
 
   initialize(): void {
     const info = this.opts.getDebugInfo?.() ?? null;
-    const touchOnly = typeof window !== 'undefined'
-      && 'ontouchstart' in window
-      && !window.matchMedia('(hover: hover)').matches;
+    const touchOnly =
+      typeof window !== 'undefined' &&
+      'ontouchstart' in window &&
+      !window.matchMedia('(hover: hover)').matches;
     this.autoTier = detectInitialTier(info?.renderer ?? null, {
       deviceMemory: (navigator as { deviceMemory?: number }).deviceMemory,
       hwConcurrency: navigator.hardwareConcurrency,
@@ -95,9 +122,15 @@ export class QualityManager {
     this._applyResolved();
   }
 
-  getMode(): QualityMode { return this.mode; }
-  getTier(): QualityTier { return this.currentTier; }
-  getAutoTier(): QualityTier { return this.autoTier; }
+  getMode(): QualityMode {
+    return this.mode;
+  }
+  getTier(): QualityTier {
+    return this.currentTier;
+  }
+  getAutoTier(): QualityTier {
+    return this.autoTier;
+  }
 
   /**
    * Drop rolling frame-time samples after a visualizer switch so a heavy viz
@@ -123,7 +156,10 @@ export class QualityManager {
     }
 
     // Cap effective frame rate at ~60 Hz. On 120 Hz displays this halves work.
-    if (this.lastRenderedAt !== 0 && now - this.lastRenderedAt < TARGET_FRAME_MS - 1) {
+    if (
+      this.lastRenderedAt !== 0 &&
+      now - this.lastRenderedAt < 1000 / this.targetFps - 1
+    ) {
       return false;
     }
 
@@ -132,7 +168,9 @@ export class QualityManager {
     this.lastRenderedAt = now;
 
     if (dt > 0 && dt < 500) {
-      this.frameTimes.push(dt);
+      this.frameTimes.push(
+        (Math.max(dt, this.workMs ?? 0) * this.targetFps) / 60,
+      );
       if (this.frameTimes.length > GOVERNOR_WINDOW) this.frameTimes.shift();
     }
 
@@ -144,7 +182,8 @@ export class QualityManager {
     if (this.frameTimes.length < GOVERNOR_WINDOW) return;
     if (now < this.cooldownUntilMs) return;
 
-    const avg = this.frameTimes.reduce((a, b) => a + b, 0) / this.frameTimes.length;
+    const avg =
+      this.frameTimes.reduce((a, b) => a + b, 0) / this.frameTimes.length;
 
     if (avg > GOVERNOR_STEP_DOWN_MS) {
       if (this.slowSinceMs === 0) this.slowSinceMs = now;
@@ -166,7 +205,10 @@ export class QualityManager {
 
   private _stepAutoTier(direction: -1 | 1, now: number): void {
     const idx = TIER_ORDER.indexOf(this.autoTier);
-    const nextIdx = Math.max(0, Math.min(TIER_ORDER.length - 1, idx + direction));
+    const nextIdx = Math.max(
+      0,
+      Math.min(TIER_ORDER.length - 1, idx + direction),
+    );
     if (nextIdx === idx) {
       this.slowSinceMs = 0;
       this.fastSinceMs = 0;
@@ -196,9 +238,19 @@ export class QualityManager {
     }
   }
 
-  getDebugSnapshot(): { mode: QualityMode; tier: QualityTier; autoTier: QualityTier; avgFrameMs: number } {
+  getDebugSnapshot(): {
+    mode: QualityMode;
+    tier: QualityTier;
+    autoTier: QualityTier;
+    avgFrameMs: number;
+  } {
     const n = this.frameTimes.length;
     const avg = n > 0 ? this.frameTimes.reduce((a, b) => a + b, 0) / n : 0;
-    return { mode: this.mode, tier: this.currentTier, autoTier: this.autoTier, avgFrameMs: Math.round(avg * 10) / 10 };
+    return {
+      mode: this.mode,
+      tier: this.currentTier,
+      autoTier: this.autoTier,
+      avgFrameMs: Math.round(avg * 10) / 10,
+    };
   }
 }

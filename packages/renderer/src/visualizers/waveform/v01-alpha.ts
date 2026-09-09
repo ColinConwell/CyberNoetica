@@ -1,7 +1,13 @@
+import { spectrumAt } from '../../audio-mapping.js';
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -23,20 +29,73 @@ const waveformMetadata: VisualizerMetadata = {
   description: 'Neon soundwaves flowing through space',
   usesPerspective: false,
   params: [
+    {
+      key: 'displayMode',
+      label: 'Display (0 artistic / 1 scope / 2 spectrum)',
+      min: 0,
+      max: 2,
+      step: 1,
+      initial: 2,
+      category: 'appearance',
+      description:
+        'Scope shows signed samples; spectrum uses a fixed linear amplitude scale and a logarithmic 20 Hz–20 kHz axis.',
+    },
     // Appearance
-    { key: 'bassBoost', label: 'Bass Boost', min: 0.0, max: 1.0, step: 0.05, initial: 0.0, category: 'appearance' },
-    { key: 'brightness', label: 'Brightness', min: 0.2, max: 2.0, step: 0.1, initial: 1.0, category: 'appearance' },
+    {
+      key: 'bassBoost',
+      label: 'Bass Boost',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.0,
+      category: 'appearance',
+    },
+    {
+      key: 'brightness',
+      label: 'Brightness',
+      min: 0.2,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'appearance',
+    },
     // Audio mapping strengths
-    { key: 'bassToAmplitude', label: 'Bass \u2192 Amplitude', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly bass affects wave amplitude' },
-    { key: 'rmsToGlow', label: 'RMS \u2192 Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly volume affects glow intensity' },
+    {
+      key: 'bassToAmplitude',
+      label: 'Bass \u2192 Amplitude',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How strongly bass affects wave amplitude',
+    },
+    {
+      key: 'rmsToGlow',
+      label: 'RMS \u2192 Glow',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How strongly volume affects glow intensity',
+    },
   ],
   viewport: { pan: false, zoom: false, orbit: false },
   viewStateFields: [
-    { key: 'verticalShift', label: 'Vertical Shift', min: -0.5, max: 0.5, step: 0.01 },
+    {
+      key: 'verticalShift',
+      label: 'Vertical Shift',
+      min: -0.5,
+      max: 0.5,
+      step: 0.01,
+    },
   ],
 };
 
 export class WaveformVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = waveformMetadata;
 
   private unsub: Unsubscribe;
@@ -44,6 +103,7 @@ export class WaveformVisualizer implements Visualizer {
   private time = 0;
 
   userParams: Record<string, number> = {
+    displayMode: 2,
     bassBoost: 0.0,
     brightness: 1.0,
     bassToAmplitude: 1.0,
@@ -58,7 +118,7 @@ export class WaveformVisualizer implements Visualizer {
     high: new EMASmoothing(0.25),
     rms: new EMASmoothing(0.2),
     spectralCentroid: new EMASmoothing(0.1),
-    beatPulse: new EMASmoothing(0.4),
+    beatPulse: new EventEnvelope(),
   };
 
   private material: THREE.ShaderMaterial | null = null;
@@ -69,9 +129,12 @@ export class WaveformVisualizer implements Visualizer {
   constructor(private bus: MessageBus) {
     this.fftData = new Float32Array(FFT_SIZE);
 
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
 
     this.smoothers.bass.reset(0.0);
     this.smoothers.mid.reset(0.0);
@@ -91,16 +154,18 @@ export class WaveformVisualizer implements Visualizer {
     );
     this.fftTexture.needsUpdate = true;
 
-    this.material = new THREE.RawShaderMaterial({
+    this.material = new THREE.ShaderMaterial({
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
+        u_displayMode: { value: 2 },
         u_time: { value: 0.0 },
         u_resolution: { value: new THREE.Vector2(1920, 1080) },
         u_fftTexture: { value: this.fftTexture },
         u_bass: { value: 0.0 },
         u_mid: { value: 0.0 },
         u_high: { value: 0.0 },
+        u_activityRms: { value: 0.2 },
         u_rms: { value: 0.2 },
         u_spectralCentroid: { value: 0.5 },
         u_beatPulse: { value: 0.0 },
@@ -114,44 +179,85 @@ export class WaveformVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
 
-      // Update FFT texture data
-      if (f.fftBins.length > 0) {
-        this.fftData.fill(0);
-        this.fftData.set(f.fftBins.subarray(0, Math.min(f.fftBins.length, FFT_SIZE)));
+      const mode = Math.round(this.userParams.displayMode);
+      this.fftData.fill(0);
+      if (mode === 1 && f.waveform?.length) {
+        const samples = f.waveform;
+        let mean = 0;
+        for (const sample of samples) mean += sample / samples.length;
+        const span = Math.min(
+          samples.length / 2,
+          Math.round((f.sampleRate ?? 48000) * 0.02),
+        );
+        let start = 0;
+        for (let i = 1; i < samples.length - span; i++) {
+          if (samples[i - 1] < mean && samples[i] >= mean) {
+            start = i;
+            break;
+          }
+        }
+        for (let i = 0; i < FFT_SIZE; i++) {
+          const index = start + (i / (FFT_SIZE - 1)) * (span - 1);
+          const lower = Math.floor(index);
+          const fraction = index - lower;
+          this.fftData[i] =
+            samples[lower] * (1 - fraction) +
+            samples[lower + 1] * fraction -
+            mean;
+        }
+      } else if (mode === 2) {
+        for (let i = 0; i < FFT_SIZE; i++)
+          this.fftData[i] = spectrumAt(f, 20 * 1000 ** (i / (FFT_SIZE - 1)));
       } else {
-        this.fftData.fill(0);
+        this.fftData.set(f.fftBins.subarray(0, FFT_SIZE));
       }
       if (this.fftTexture) {
         this.fftTexture.needsUpdate = true;
       }
     } else {
       // Decay beat pulse when idle
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
       this.fftData.fill(0);
       if (this.fftTexture) this.fftTexture.needsUpdate = true;
     }
 
     if (this.material) {
+      this.material.uniforms.u_displayMode.value = Math.round(
+        this.userParams.displayMode,
+      );
       this.material.uniforms.u_time.value = this.time;
       const bToA = this.userParams.bassToAmplitude;
       const rToG = this.userParams.rmsToGlow;
-      this.material.uniforms.u_bass.value = Math.min(this.smoothers.bass.value * bToA + this.userParams.bassBoost, 1.0);
+      this.material.uniforms.u_activityRms.value = this.smoothers.rms.value;
+      this.material.uniforms.u_bass.value = Math.min(
+        this.smoothers.bass.value * bToA + this.userParams.bassBoost,
+        1.0,
+      );
       this.material.uniforms.u_mid.value = this.smoothers.mid.value;
       this.material.uniforms.u_high.value = this.smoothers.high.value;
-      this.material.uniforms.u_rms.value = this.smoothers.rms.value * this.userParams.brightness * rToG;
-      this.material.uniforms.u_spectralCentroid.value = this.smoothers.spectralCentroid.value;
+      this.material.uniforms.u_rms.value =
+        this.smoothers.rms.value * this.userParams.brightness * rToG;
+      this.material.uniforms.u_spectralCentroid.value =
+        this.smoothers.spectralCentroid.value;
       this.material.uniforms.u_beatPulse.value = this.smoothers.beatPulse.value;
       this.material.uniforms.u_verticalShift.value = this._verticalShift;
     }
@@ -179,7 +285,10 @@ export class WaveformVisualizer implements Visualizer {
 
   setViewState(partial: Record<string, number>): void {
     if ('verticalShift' in partial) {
-      this._verticalShift = Math.max(-0.5, Math.min(0.5, partial.verticalShift));
+      this._verticalShift = Math.max(
+        -0.5,
+        Math.min(0.5, partial.verticalShift),
+      );
     }
   }
 
@@ -197,8 +306,6 @@ registerVisualizer({
 });
 
 const VERTEX_SHADER = /* glsl */ `
-  attribute vec3 position;
-  attribute vec2 uv;
   varying vec2 vUv;
   void main() {
     vUv = uv;
@@ -209,12 +316,14 @@ const VERTEX_SHADER = /* glsl */ `
 const FRAGMENT_SHADER = /* glsl */ `
   precision highp float;
 
+  uniform float u_displayMode;
   uniform float u_time;
   uniform vec2 u_resolution;
   uniform sampler2D u_fftTexture;
   uniform float u_bass;
   uniform float u_mid;
   uniform float u_high;
+  uniform float u_activityRms;
   uniform float u_rms;
   uniform float u_spectralCentroid;
   uniform float u_beatPulse;
@@ -259,12 +368,27 @@ const FRAGMENT_SHADER = /* glsl */ `
     vec2 uv = gl_FragCoord.xy / u_resolution;
     float y = uv.y - 0.5 - u_verticalShift;
     float x = uv.x;
+    if (u_displayMode > 0.5) {
+      float baseline = u_displayMode < 1.5 ? 0.0 : -0.3;
+      float measured = sampleFFT(x) * 0.6;
+      float distanceToLine = abs(y - baseline - measured);
+      float width = max(fwidth(y - measured), 1.0 / u_resolution.y);
+      vec3 color = vec3(0.25, 0.7, 1.0) * exp(-distanceToLine / (width * 1.6));
+      color += vec3(0.025) * (1.0 - smoothstep(width, width * 2.0, abs(y - baseline)));
+      if (u_displayMode > 1.5) {
+        float decades = log(20.0) / log(10.0) + x * 3.0;
+        float grid = abs(fract(decades + 0.5) - 0.5);
+        color += vec3(0.02) * (1.0 - smoothstep(0.0, fwidth(decades) * 1.5, grid));
+      }
+      gl_FragColor = vec4(color * (0.7 + u_rms), 1.0);
+      return;
+    }
 
     // Aspect ratio correction for glow calculations
     float aspect = u_resolution.x / u_resolution.y;
 
     // Detect if audio is active (rms > small threshold)
-    float audioMix = smoothstep(0.02, 0.15, u_rms);
+    float audioMix = smoothstep(0.02, 0.15, u_activityRms);
 
     // Hue shift driven by spectral centroid
     float baseHue = u_spectralCentroid * 0.3 + u_time * 0.02;

@@ -1,6 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { PlaybackStateMachine } from '../managers/playback-state.js';
-import type { PlaybackState, PlaybackAction } from '../managers/playback-state.js';
+import type {
+  PlaybackState,
+  PlaybackAction,
+} from '../managers/playback-state.js';
 
 describe('PlaybackStateMachine', () => {
   // ─── Basic transitions ──────────────────────────────────────────
@@ -82,7 +85,9 @@ describe('PlaybackStateMachine', () => {
     const sm = new PlaybackStateMachine();
     sm.dispatch({ type: 'START' });
     sm.dispatch({ type: 'LOADED' });
-    expect(sm.dispatch({ type: 'SWITCH_SOURCE', source: 'soundscape' })).toBe(true);
+    expect(sm.dispatch({ type: 'SWITCH_SOURCE', source: 'soundscape' })).toBe(
+      true,
+    );
     expect(sm.state).toBe('switching-source');
   });
 
@@ -105,7 +110,9 @@ describe('PlaybackStateMachine', () => {
     sm.dispatch({ type: 'LOADED' });
     sm.dispatch({ type: 'SWITCH_SOURCE', source: 'mic' });
 
-    expect(sm.dispatch({ type: 'ERROR', error: 'Permission denied' })).toBe(true);
+    expect(sm.dispatch({ type: 'ERROR', error: 'Permission denied' })).toBe(
+      true,
+    );
     expect(sm.state).toBe('idle');
   });
 
@@ -191,7 +198,9 @@ describe('PlaybackStateMachine', () => {
     expect(listener).toHaveBeenCalledWith('loading', 'idle', { type: 'START' });
 
     sm.dispatch({ type: 'LOADED' });
-    expect(listener).toHaveBeenCalledWith('playing', 'loading', { type: 'LOADED' });
+    expect(listener).toHaveBeenCalledWith('playing', 'loading', {
+      type: 'LOADED',
+    });
   });
 
   it('does not notify listeners on rejected transitions', () => {
@@ -218,7 +227,9 @@ describe('PlaybackStateMachine', () => {
 
   it('swallows listener errors', () => {
     const sm = new PlaybackStateMachine();
-    sm.onChange(() => { throw new Error('boom'); });
+    sm.onChange(() => {
+      throw new Error('boom');
+    });
     const second = vi.fn();
     sm.onChange(second);
 
@@ -321,11 +332,11 @@ describe('PlaybackStateMachine', () => {
     expect(sm.state).toBe('idle');
   });
 
-  it('rejects SWITCH_SOURCE from loading', () => {
+  it('allows a new source to supersede a pending load', () => {
     const sm = new PlaybackStateMachine();
     sm.dispatch({ type: 'START' });
-    expect(sm.dispatch({ type: 'SWITCH_SOURCE', source: 'mic' })).toBe(false);
-    expect(sm.state).toBe('loading');
+    expect(sm.dispatch({ type: 'SWITCH_SOURCE', source: 'mic' })).toBe(true);
+    expect(sm.state).toBe('switching-source');
   });
 
   // ─── canDispatch comprehensive ─────────────────────────────────
@@ -367,7 +378,7 @@ describe('PlaybackStateMachine', () => {
     expect(sm.canDispatch('SOURCE_READY')).toBe(true);
     expect(sm.canDispatch('ERROR')).toBe(true);
     expect(sm.canDispatch('PAUSE')).toBe(false);
-    expect(sm.canDispatch('SELECT_TRACK')).toBe(false);
+    expect(sm.canDispatch('SELECT_TRACK')).toBe(true);
   });
 
   // ─── Reset does not notify ─────────────────────────────────────

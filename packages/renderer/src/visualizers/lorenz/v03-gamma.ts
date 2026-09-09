@@ -25,16 +25,43 @@ const metadata: VisualizerMetadata = {
   description: 'Chen dual-wing attractor',
   usesPerspective: true,
   params: [
-    { key: 'paramA', label: 'Param a', min: 20.0, max: 45.0, step: 0.5, initial: 35.0, category: 'appearance', description: 'Linear contraction' },
-    { key: 'paramB', label: 'Param b', min: 1.0, max: 6.0, step: 0.1, initial: 3.0, category: 'appearance', description: 'z-damping' },
-    { key: 'paramC', label: 'Param c', min: 18.0, max: 36.0, step: 0.1, initial: 28.0, category: 'appearance', description: 'Quadratic coupling' },
+    {
+      key: 'paramA',
+      label: 'Param a',
+      min: 34.8,
+      max: 35.2,
+      step: 0.1,
+      initial: 35.0,
+      category: 'appearance',
+      description: 'Linear contraction',
+    },
+    {
+      key: 'paramB',
+      label: 'Param b',
+      min: 2.9,
+      max: 3.1,
+      step: 0.1,
+      initial: 3.0,
+      category: 'appearance',
+      description: 'z-damping',
+    },
+    {
+      key: 'paramC',
+      label: 'Param c',
+      min: 27.7,
+      max: 28.3,
+      step: 0.1,
+      initial: 28.0,
+      category: 'appearance',
+      description: 'Quadratic coupling',
+    },
     ...FLOW_SHARED_PARAMS,
   ],
   viewport: { ...FLOW_VIEWPORT },
   viewStateFields: FLOW_VIEW_FIELDS,
 };
 
-function chenDerivs(p: Vec3, params: Record<string, number>): Vec3 {
+export function chenDerivs(p: Vec3, params: Record<string, number>): Vec3 {
   const a = params.paramA;
   const b = params.paramB;
   const c = params.paramC;
@@ -52,7 +79,7 @@ const config: FlowConfig = {
   scale: 0.1,
   dt: 0.0025,
   driveParam: 'paramC',
-  driveScale: 6,
+  driveScale: 0.3,
   seed: { x: -0.1, y: 0.5, z: 20 },
   hueOffset: 0.78,
   bound: 400,

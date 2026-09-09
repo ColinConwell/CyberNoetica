@@ -6,9 +6,15 @@ import type { AudioFeatures } from '@cybernoetica/core';
 describe('BurningShipVisualizer', () => {
   const features: AudioFeatures = {
     fftBins: new Float32Array(1024).fill(0.3),
-    bass: 0.7, mid: 0.5, high: 0.3,
-    spectralCentroid: 0.4, spectralFlux: 0.2, rms: 0.55,
-    beatOnset: true, beatConfidence: 0.7, degraded: false,
+    bass: 0.7,
+    mid: 0.5,
+    high: 0.3,
+    spectralCentroid: 0.4,
+    spectralFlux: 0.2,
+    rms: 0.55,
+    beatOnset: true,
+    beatConfidence: 0.7,
+    degraded: false,
   };
 
   it('can be constructed', () => {
@@ -30,7 +36,9 @@ describe('BurningShipVisualizer', () => {
   it('has audio-mapping params', () => {
     const bus = new MessageBus();
     const viz = new BurningShipVisualizer(bus);
-    const audioParams = viz.metadata.params.filter(p => p.category === 'audio-mapping');
+    const audioParams = viz.metadata.params.filter(
+      (p) => p.category === 'audio-mapping',
+    );
     expect(audioParams.length).toBeGreaterThanOrEqual(4);
   });
 
@@ -63,11 +71,16 @@ describe('BurningShipVisualizer', () => {
   it('setViewState clamps values', () => {
     const bus = new MessageBus();
     const viz = new BurningShipVisualizer(bus);
-    viz.setViewState({ centerReal: 10, centerImaginary: -10, zoom: 99999, rotation: 1.5 });
+    viz.setViewState({
+      centerReal: 10,
+      centerImaginary: -10,
+      zoom: 99999,
+      rotation: 1.5,
+    });
     const vs = viz.getViewState();
     expect(vs.centerReal).toBe(1.0);
     expect(vs.centerImaginary).toBe(-2.0);
-    expect(vs.zoom).toBe(10000);
+    expect(vs.zoom).toBe(1000);
     expect(vs.rotation).toBe(1.5);
   });
 

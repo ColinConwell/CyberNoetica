@@ -33,6 +33,9 @@ export interface VisualizerInteractivity {
 
 export type VisualizerCursorMode = 'pan' | 'orbit' | 'sculpt' | 'default';
 export type VisualizerAudioInput =
+  | 'waveform'
+  | 'pitch'
+  | 'stereo'
   | 'fft'
   | 'bands'
   | 'rms'
@@ -47,6 +50,7 @@ export interface VisualizerReference {
 }
 
 export interface VisualizerDocumentation {
+  modelClass?: 'mathematical' | 'simulation' | 'artistic';
   summary: string;
   math?: string;
   references: VisualizerReference[];
@@ -75,7 +79,8 @@ export interface VisualizerMetadata {
 export interface Visualizer {
   readonly metadata: VisualizerMetadata;
   attach(scene: Scene): void;
-  tick(): void;
+  /** Elapsed presentation time in seconds; default supports deterministic probes. */
+  tick(deltaSeconds?: number): void;
   setResolution(w: number, h: number): void;
   dispose(): void;
   setUserParam(key: string, value: number): void;

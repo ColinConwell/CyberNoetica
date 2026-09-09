@@ -2,7 +2,13 @@
 
 ## Overview
 
-**Cybernoetica** is a high-aesthetic, GPU-accelerated audio-reactive visualizer and knowledge portal. It delivers 7 visualizer families (some with versioned subvariants) driven by real-time audio analysis, with a glass-morphism control interface, energy monitoring, and formal playback state management.
+**Cybernoetica** is a high-aesthetic, GPU-accelerated audio-reactive visualizer and knowledge portal. It delivers 71 registered visualizers across versioned families driven by real-time audio analysis, with a glass-morphism control interface, measured CPU/GPU performance monitoring, and formal playback state management.
+
+## Review implementation (September 2026)
+
+See `IMPLEMENTATION.md`, `docs/audio-features.md` and `docs/runtime-validation.md` for the current formulation and validation contracts. Nine faithful variants supplement the original catalog. Sampled curves, density textures, shared RK4 ribbons, an explicit terrain height mesh and GPU Hopf fibers replace repeated per-pixel geometry construction. Voronoi foam runs in a bounded worker queue with stable seed IDs. Metadata distinguishes mathematical constructions, numerical simulations and artistic patterns.
+
+Audio production uses a complete stereo TypeScript DSP in an AudioWorklet, with the same DSP in its compatibility path. Rust remains a reference implementation only. Source transactions own generation checks and fetch cancellation at commit time. Microphone/system monitoring is disabled to avoid feedback. The performance panel reports measured CPU/GPU work and percentiles; it does not estimate electrical power.
 
 ## Directory Structure
 
@@ -170,7 +176,7 @@ CyberNoetica/
 
 **Data flow:**
 1. `AudioSource` captures audio (file, microphone, system audio via getDisplayMedia, or the parametric Soundscape Loop)
-2. `AudioPipeline` extracts features (via Rust/WASM FFT or JS fallback) and publishes via `AudioProcessor` on `audio:features`
+2. `AudioPipeline` extracts features (via the shared 4096-sample/512-hop stereo AudioWorklet DSP or its complete main-thread fallback) and publishes via `AudioProcessor` on `audio:features`
 3. Visualizers subscribe to audio features and modulate their parameters
 4. `SceneManager` drives the Three.js render loop with pointer/touch viewport interaction
 
@@ -383,8 +389,8 @@ just reupload-tracks     # Re-upload all local audio (data/sample-music/)
 
 ## Known Issues
 
-- **No integration tests** or visual regression tests yet
-- **Waveform vertical positioning** -- bass layer creates visual weight imbalance
+- **Cross-device validation** — HTTP integration tests and an in-app browser shader/resource matrix exist; physical mobile devices and other browser engines still need coverage
+- **Waveform modes** — artistic layers, a triggered DC-removed oscilloscope, and calibrated log-frequency spectrum are separately selectable
 - **Knowledge portal** (GOAL.md Purpose 3) is entirely future work
 - **Cross-modal inputs** (webcam, wearables, gestures) not yet implemented
 - **Custom domain DNS** -- `app.imbasso.com` CNAME must point to the current Railway service URL (`cybernoetica-web-demo.up.railway.app`); if stale, it routes to an old deployment

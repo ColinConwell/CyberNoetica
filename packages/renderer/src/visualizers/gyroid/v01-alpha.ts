@@ -1,26 +1,121 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
 const gyroidMetadata: VisualizerMetadata = {
   type: 'gyroid',
   label: 'Gyroid',
-  description: 'Triply periodic minimal surface with iridescent lighting',
+  description: 'Gyroid nodal-surface approximation with iridescent lighting',
   usesPerspective: false,
   params: [
-    { key: 'threshold', label: 'Threshold', min: -1.5, max: 1.5, step: 0.05, initial: 0.0, category: 'appearance', description: 'Surface iso-value (controls topology)' },
-    { key: 'period', label: 'Period', min: 1.0, max: 6.0, step: 0.1, initial: 3.0, category: 'appearance', description: 'Spatial repetition frequency' },
-    { key: 'rotSpeed', label: 'Rotation Speed', min: 0.0, max: 1.0, step: 0.05, initial: 0.3, category: 'appearance', description: 'Auto-rotation speed' },
-    { key: 'iridescence', label: 'Iridescence', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'appearance', description: 'Rainbow sheen intensity' },
-    { key: 'smoothness', label: 'Smoothness', min: 0.5, max: 3.0, step: 0.1, initial: 1.5, category: 'appearance', description: 'Surface smoothing factor' },
-    { key: 'bassToThreshold', label: 'Bass -> Threshold', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Bass morphs surface topology' },
-    { key: 'midToPeriod', label: 'Mid -> Period', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Mids modulate spatial period' },
-    { key: 'highToIridescence', label: 'High -> Iridescence', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Highs drive rainbow coloring' },
-    { key: 'rmsToGlow', label: 'RMS -> Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Volume boosts emission' },
-    { key: 'beatToPulse', label: 'Beat -> Pulse', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Beats trigger surface pulse' },
+    {
+      key: 'threshold',
+      label: 'Threshold',
+      min: -1.5,
+      max: 1.5,
+      step: 0.05,
+      initial: 0.0,
+      category: 'appearance',
+      description: 'Surface iso-value (controls topology)',
+    },
+    {
+      key: 'period',
+      label: 'Period',
+      min: 1.0,
+      max: 6.0,
+      step: 0.1,
+      initial: 3.0,
+      category: 'appearance',
+      description: 'Spatial repetition frequency',
+    },
+    {
+      key: 'rotSpeed',
+      label: 'Rotation Speed',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.3,
+      category: 'appearance',
+      description: 'Auto-rotation speed',
+    },
+    {
+      key: 'iridescence',
+      label: 'Iridescence',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'appearance',
+      description: 'Rainbow sheen intensity',
+    },
+    {
+      key: 'smoothness',
+      label: 'Smoothness',
+      min: 0.5,
+      max: 3.0,
+      step: 0.1,
+      initial: 1.5,
+      category: 'appearance',
+      description: 'Surface smoothing factor',
+    },
+    {
+      key: 'bassToThreshold',
+      label: 'Bass -> Threshold',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Bass morphs surface topology',
+    },
+    {
+      key: 'midToPeriod',
+      label: 'Mid -> Period',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Mids modulate spatial period',
+    },
+    {
+      key: 'highToIridescence',
+      label: 'High -> Iridescence',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Highs drive rainbow coloring',
+    },
+    {
+      key: 'rmsToGlow',
+      label: 'RMS -> Glow',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Volume boosts emission',
+    },
+    {
+      key: 'beatToPulse',
+      label: 'Beat -> Pulse',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Beats trigger surface pulse',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
@@ -31,6 +126,8 @@ const gyroidMetadata: VisualizerMetadata = {
 };
 
 export class GyroidVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = gyroidMetadata;
 
   private unsub: Unsubscribe;
@@ -59,7 +156,7 @@ export class GyroidVisualizer implements Visualizer {
     mid: new EMASmoothing(0.18),
     high: new EMASmoothing(0.25),
     rms: new EMASmoothing(0.15),
-    beatPulse: new EMASmoothing(0.4),
+    beatPulse: new EventEnvelope(),
     spectralCentroid: new EMASmoothing(0.08),
   };
 
@@ -67,9 +164,12 @@ export class GyroidVisualizer implements Visualizer {
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
     this.smoothers.high.reset(0);
@@ -83,6 +183,8 @@ export class GyroidVisualizer implements Visualizer {
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
+        u_rotSpeedPhase: { value: 0 },
+        u_workBudget: { value: 1 },
         u_time: { value: 0.0 },
         u_resolution: { value: new THREE.Vector2(1920, 1080) },
         u_zoom: { value: 1.0 },
@@ -107,19 +209,26 @@ export class GyroidVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     if (this.material) {
@@ -127,25 +236,37 @@ export class GyroidVisualizer implements Visualizer {
       u.u_time.value = this.time;
       u.u_zoom.value = this._zoom;
       u.u_center.value.set(this._centerX, this._centerY);
-      u.u_threshold.value = this.userParams.threshold
-        + (this.smoothers.bass.value - 0.3) * 0.8 * this.userParams.bassToThreshold;
-      u.u_period.value = this.userParams.period
-        + this.smoothers.mid.value * 1.0 * this.userParams.midToPeriod;
+      u.u_threshold.value =
+        this.userParams.threshold +
+        (this.smoothers.bass.value - 0.3) *
+          0.8 *
+          this.userParams.bassToThreshold;
+      u.u_period.value =
+        this.userParams.period +
+        this.smoothers.mid.value * 1.0 * this.userParams.midToPeriod;
       u.u_rotSpeed.value = this.userParams.rotSpeed;
-      u.u_iridescence.value = this.userParams.iridescence
-        + this.smoothers.high.value * 0.8 * this.userParams.highToIridescence;
+      u.u_rotSpeedPhase.value = this.phases.advance(
+        'u_rotSpeed',
+        u.u_rotSpeed.value,
+        this.deltaSeconds,
+      );
+      u.u_iridescence.value =
+        this.userParams.iridescence +
+        this.smoothers.high.value * 0.8 * this.userParams.highToIridescence;
       u.u_smoothness.value = this.userParams.smoothness;
       u.u_bass.value = this.smoothers.bass.value;
       u.u_mid.value = this.smoothers.mid.value;
       u.u_high.value = this.smoothers.high.value;
-      u.u_rms.value = this.smoothers.rms.value;
-      u.u_beatPulse.value = this.smoothers.beatPulse.value * this.userParams.beatToPulse;
+      u.u_rms.value = this.smoothers.rms.value * this.userParams.rmsToGlow;
+      u.u_beatPulse.value =
+        this.smoothers.beatPulse.value * this.userParams.beatToPulse;
       u.u_spectralCentroid.value = this.smoothers.spectralCentroid.value;
     }
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -157,9 +278,12 @@ export class GyroidVisualizer implements Visualizer {
   }
 
   setViewState(partial: Record<string, number>): void {
-    if ('centerX' in partial) this._centerX = Math.max(-3, Math.min(3, partial.centerX));
-    if ('centerY' in partial) this._centerY = Math.max(-3, Math.min(3, partial.centerY));
-    if ('zoom' in partial) this._zoom = Math.max(0.2, Math.min(4.0, partial.zoom));
+    if ('centerX' in partial)
+      this._centerX = Math.max(-3, Math.min(3, partial.centerX));
+    if ('centerY' in partial)
+      this._centerY = Math.max(-3, Math.min(3, partial.centerY));
+    if ('zoom' in partial)
+      this._zoom = Math.max(0.2, Math.min(4.0, partial.zoom));
   }
 
   dispose(): void {
@@ -193,6 +317,8 @@ const FRAGMENT_SHADER = /* glsl */ `
   #define MAX_DIST 20.0
   #define SURF_DIST 0.001
 
+  uniform float u_rotSpeedPhase;
+  uniform float u_workBudget;
   uniform float u_time;
   uniform vec2 u_resolution;
   uniform float u_zoom;
@@ -223,7 +349,8 @@ const FRAGMENT_SHADER = /* glsl */ `
   float gyroidSDF(vec3 p, float scale, float threshold, float smooth_f) {
     p *= scale;
     float g = sin(p.x) * cos(p.y) + sin(p.y) * cos(p.z) + sin(p.z) * cos(p.x);
-    float d = (g - threshold) / (scale * smooth_f);
+     // Each gradient component is bounded by 2; use a Lipschitz distance bound.
+    float d = (g - threshold) / (scale * 3.46410161514 * max(1.0, smooth_f));
     return d;
   }
 
@@ -234,17 +361,19 @@ const FRAGMENT_SHADER = /* glsl */ `
   }
 
   vec3 calcNormal(vec3 p) {
-    vec2 e = vec2(0.001, 0.0);
-    return normalize(vec3(
-      sceneSDF(p + e.xyy) - sceneSDF(p - e.xyy),
-      sceneSDF(p + e.yxy) - sceneSDF(p - e.yxy),
-      sceneSDF(p + e.yyx) - sceneSDF(p - e.yyx)
-    ));
+    float g = gyroidSDF(p, u_period, u_threshold, u_smoothness);
+    if (length(p) - 2.8 > g) return normalize(p);
+    vec3 q = p * u_period;
+    vec3 gradient = vec3(cos(q.x) * cos(q.y) - sin(q.z) * sin(q.x),
+      cos(q.y) * cos(q.z) - sin(q.x) * sin(q.y),
+      cos(q.z) * cos(q.x) - sin(q.y) * sin(q.z));
+    return gradient / max(length(gradient), 1e-6);
   }
 
   float raymarch(vec3 ro, vec3 rd) {
     float t = 0.0;
     for (int i = 0; i < MAX_STEPS; i++) {
+      if (float(i) >= max(32.0, float(MAX_STEPS) * u_workBudget)) break;
       vec3 p = ro + rd * t;
       float d = sceneSDF(p);
       if (abs(d) < SURF_DIST) return t;
@@ -280,7 +409,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution) / min(u_resolution.x, u_resolution.y);
     uv = uv / u_zoom + u_center;
 
-    float rotAngle = u_time * u_rotSpeed;
+    float rotAngle = u_rotSpeedPhase;
     mat3 rot = rotateY(rotAngle) * rotateX(rotAngle * 0.7 + sin(u_time * 0.2) * 0.3);
 
     vec3 ro = rot * vec3(0.0, 0.0, 5.5);

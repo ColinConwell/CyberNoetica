@@ -1,7 +1,12 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -32,19 +37,136 @@ const magneticMetadata: VisualizerMetadata = {
   description: 'Electromagnetic dipole/multipole field lines',
   usesPerspective: false,
   params: [
-    { key: 'poleCount', label: 'Pole Count', min: 2, max: 6, step: 1, initial: 2, category: 'appearance', description: 'Number of magnetic poles' },
-    { key: 'poleSeparation', label: 'Separation', min: 0.1, max: 1.5, step: 0.05, initial: 0.5, category: 'appearance', description: 'Distance between poles' },
-    { key: 'streakLength', label: 'Streak Length', min: 4, max: 32, step: 2, initial: 16, category: 'appearance', description: 'Field line trace steps' },
-    { key: 'fieldIntensity', label: 'Intensity', min: 0.5, max: 3.0, step: 0.1, initial: 1.5, category: 'appearance', description: 'Field strength multiplier' },
-    { key: 'rotationSpeed', label: 'Rotation', min: 0.0, max: 1.0, step: 0.05, initial: 0.15, category: 'appearance', description: 'Pole orbit speed' },
-    { key: 'colorWarmth', label: 'Warmth', min: 0.0, max: 1.0, step: 0.05, initial: 0.5, category: 'appearance', description: 'Color temperature' },
-    { key: 'brightness', label: 'Brightness', min: 0.3, max: 3.0, step: 0.1, initial: 1.4, category: 'appearance' },
-    { key: 'bassToSeparation', label: 'Bass → Spread', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Bass breathes poles apart' },
-    { key: 'midToRotation', label: 'Mid → Rotation', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Mids drive pole orbit' },
-    { key: 'rmsToGlow', label: 'RMS → Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Volume drives field glow' },
-    { key: 'beatToFlip', label: 'Beat → Pulse', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Beats pulse charge strength' },
-    { key: 'highToDetail', label: 'High → Detail', min: 0.0, max: 2.0, step: 0.1, initial: 0.8, category: 'audio-mapping', description: 'Highs add streak detail' },
-    { key: 'centroidToColor', label: 'Centroid → Color', min: 0.0, max: 2.0, step: 0.1, initial: 0.8, category: 'audio-mapping', description: 'Spectral centroid shifts palette' },
+    {
+      key: 'poleCount',
+      label: 'Balanced Pole Count',
+      min: 2,
+      max: 6,
+      step: 2,
+      initial: 2,
+      category: 'appearance',
+      description:
+        'Equal positive and negative point poles; use Dipole Field Lines for the physical vector model',
+    },
+    {
+      key: 'poleSeparation',
+      label: 'Separation',
+      min: 0.1,
+      max: 1.5,
+      step: 0.05,
+      initial: 0.5,
+      category: 'appearance',
+      description: 'Distance between poles',
+    },
+    {
+      key: 'streakLength',
+      label: 'Streak Length',
+      min: 4,
+      max: 32,
+      step: 2,
+      initial: 16,
+      category: 'appearance',
+      description: 'Field line trace steps',
+    },
+    {
+      key: 'fieldIntensity',
+      label: 'Intensity',
+      min: 0.5,
+      max: 3.0,
+      step: 0.1,
+      initial: 1.5,
+      category: 'appearance',
+      description: 'Field strength multiplier',
+    },
+    {
+      key: 'rotationSpeed',
+      label: 'Rotation',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.15,
+      category: 'appearance',
+      description: 'Pole orbit speed',
+    },
+    {
+      key: 'colorWarmth',
+      label: 'Warmth',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.5,
+      category: 'appearance',
+      description: 'Color temperature',
+    },
+    {
+      key: 'brightness',
+      label: 'Brightness',
+      min: 0.3,
+      max: 3.0,
+      step: 0.1,
+      initial: 1.4,
+      category: 'appearance',
+    },
+    {
+      key: 'bassToSeparation',
+      label: 'Bass → Spread',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Bass breathes poles apart',
+    },
+    {
+      key: 'midToRotation',
+      label: 'Mid → Rotation',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Mids drive pole orbit',
+    },
+    {
+      key: 'rmsToGlow',
+      label: 'RMS → Glow',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Volume drives field glow',
+    },
+    {
+      key: 'beatToFlip',
+      label: 'Beat → Pulse',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Beats pulse charge strength',
+    },
+    {
+      key: 'highToDetail',
+      label: 'High → Detail',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 0.8,
+      category: 'audio-mapping',
+      description: 'Highs add streak detail',
+    },
+    {
+      key: 'centroidToColor',
+      label: 'Centroid → Color',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 0.8,
+      category: 'audio-mapping',
+      description: 'Spectral centroid shifts palette',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
@@ -55,6 +177,8 @@ const magneticMetadata: VisualizerMetadata = {
 };
 
 export class MagneticVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = magneticMetadata;
 
   private unsub: Unsubscribe;
@@ -89,7 +213,7 @@ export class MagneticVisualizer implements Visualizer {
     rms: new EMASmoothing(0.15),
     spectralCentroid: new EMASmoothing(0.1),
     spectralFlux: new EMASmoothing(0.2),
-    beatPulse: new EMASmoothing(0.4),
+    beatPulse: new EventEnvelope(),
   };
 
   private chargePulse = new EMASmoothing(0.08);
@@ -97,9 +221,12 @@ export class MagneticVisualizer implements Visualizer {
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
     this.smoothers.high.reset(0);
@@ -115,6 +242,7 @@ export class MagneticVisualizer implements Visualizer {
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
+        u_rotationSpeedPhase: { value: 0 },
         u_time: { value: 0.0 },
         u_resolution: { value: new THREE.Vector2(1920, 1080) },
         u_zoom: { value: 1.0 },
@@ -142,24 +270,31 @@ export class MagneticVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.spectralFlux.update(f.spectralFlux);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.spectralFlux.update(f.spectralFlux, this.deltaSeconds);
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
 
       if (f.beatOnset && this.userParams.beatToFlip > 0) {
         this.chargePulse.reset(1.0);
       }
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     this.chargePulse.update(0.0);
@@ -173,16 +308,27 @@ export class MagneticVisualizer implements Visualizer {
       u.u_time.value = this.time;
       u.u_zoom.value = this._zoom;
       u.u_pan.value.set(this._panX, this._panY);
-      u.u_poleCount.value = this.userParams.poleCount;
-      u.u_poleSeparation.value = this.userParams.poleSeparation
-        + bass * 0.2 * this.userParams.bassToSeparation;
-      u.u_streakLength.value = this.userParams.streakLength
-        + high * 6.0 * this.userParams.highToDetail;
+      u.u_poleCount.value = 2 * Math.round(this.userParams.poleCount / 2);
+      u.u_poleSeparation.value =
+        this.userParams.poleSeparation +
+        bass * 0.2 * this.userParams.bassToSeparation;
+      u.u_streakLength.value =
+        this.userParams.streakLength +
+        high * 6.0 * this.userParams.highToDetail;
       u.u_fieldIntensity.value = this.userParams.fieldIntensity;
-      u.u_rotationSpeed.value = this.userParams.rotationSpeed
-        + mid * 0.15 * this.userParams.midToRotation;
-      u.u_colorWarmth.value = this.userParams.colorWarmth
-        + this.smoothers.spectralCentroid.value * 0.2 * this.userParams.centroidToColor;
+      u.u_rotationSpeed.value =
+        this.userParams.rotationSpeed +
+        mid * 0.15 * this.userParams.midToRotation;
+      u.u_rotationSpeedPhase.value = this.phases.advance(
+        'u_rotationSpeed',
+        u.u_rotationSpeed.value,
+        this.deltaSeconds,
+      );
+      u.u_colorWarmth.value =
+        this.userParams.colorWarmth +
+        this.smoothers.spectralCentroid.value *
+          0.2 *
+          this.userParams.centroidToColor;
       u.u_brightness.value = this.userParams.brightness;
       u.u_bass.value = bass;
       u.u_mid.value = mid;
@@ -190,12 +336,14 @@ export class MagneticVisualizer implements Visualizer {
       u.u_rms.value = this.smoothers.rms.value * this.userParams.rmsToGlow;
       u.u_spectralCentroid.value = this.smoothers.spectralCentroid.value;
       u.u_beatPulse.value = this.smoothers.beatPulse.value;
-      u.u_chargePulse.value = this.chargePulse.value * this.userParams.beatToFlip;
+      u.u_chargePulse.value =
+        this.chargePulse.value * this.userParams.beatToFlip;
     }
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -250,6 +398,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   #define TAU 6.28318530718
   #define MAX_POLES 6
 
+  uniform float u_rotationSpeedPhase;
   uniform float u_time;
   uniform vec2 u_resolution;
   uniform float u_zoom;
@@ -277,7 +426,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   vec2 polePosition(int idx, int count) {
     float fi = float(idx);
     float fc = float(count);
-    float angle = TAU * fi / fc + u_time * u_rotationSpeed;
+    float angle = TAU * fi / fc + u_rotationSpeedPhase;
     float r = u_poleSeparation;
     return vec2(cos(angle) * r, sin(angle) * r);
   }
@@ -299,7 +448,7 @@ const FRAGMENT_SHADER = /* glsl */ `
       float d2 = dot(r, r) + 0.01; // Softening to avoid singularity
       // 2D "magnetic" field: radial from positive, inward to negative
       // For dipole-like behavior, use gradient of potential
-      B += q * r / (d2 * u_fieldIntensity);
+      B += u_fieldIntensity * q * r / d2;
     }
     return B;
   }

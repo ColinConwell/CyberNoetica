@@ -1,8 +1,19 @@
+import { SegmentBatch } from '../../geometry/segment-batch.js';
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
-import type { ViewStateField, Visualizer, VisualizerMetadata, VisualizerParam } from '../types.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
+import type {
+  ViewStateField,
+  Visualizer,
+  VisualizerMetadata,
+  VisualizerParam,
+} from '../types.js';
 
 export interface Vec3 {
   x: number;
@@ -11,7 +22,13 @@ export interface Vec3 {
 }
 
 export const FLOW_VIEW_FIELDS: ViewStateField[] = [
-  { key: 'orbitAngle', label: 'Orbit', min: -Math.PI, max: Math.PI, step: 0.02 },
+  {
+    key: 'orbitAngle',
+    label: 'Orbit',
+    min: -Math.PI,
+    max: Math.PI,
+    step: 0.02,
+  },
   { key: 'elevation', label: 'Elevation', min: -1.2, max: 1.2, step: 0.02 },
   { key: 'distance', label: 'Distance', min: 4, max: 24, step: 0.1 },
 ];
@@ -19,16 +36,104 @@ export const FLOW_VIEW_FIELDS: ViewStateField[] = [
 export const FLOW_VIEWPORT = { pan: false, zoom: true, orbit: true } as const;
 
 export const FLOW_SHARED_PARAMS: VisualizerParam[] = [
-  { key: 'trailLength', label: 'Trail Length', min: 64, max: 512, step: 16, initial: 384, category: 'appearance', description: 'Points kept along each orbit' },
-  { key: 'brightness', label: 'Brightness', min: 0.3, max: 3.0, step: 0.1, initial: 1.2, category: 'appearance' },
-  { key: 'hueShift', label: 'Hue Shift', min: 0.0, max: 1.0, step: 0.01, initial: 0.0, category: 'appearance' },
-  { key: 'integrationSpeed', label: 'Flow Speed', min: 0.2, max: 2.5, step: 0.05, initial: 1.0, category: 'appearance', description: 'RK4 integration rate' },
-  { key: 'bassToDrive', label: 'Bass → Drive', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Bass modulates the primary ODE coefficient' },
-  { key: 'midToSpeed', label: 'Mid → Speed', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Mids accelerate the flow' },
-  { key: 'highToSpread', label: 'High → Spread', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Highs widen per-trail hue spread' },
-  { key: 'rmsToGlow', label: 'RMS → Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Volume drives trail brightness' },
-  { key: 'beatToKick', label: 'Beat → Kick', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Beats kick integration speed and jitter seeds' },
-  { key: 'centroidToHue', label: 'Centroid → Hue', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Spectral centroid shifts the palette' },
+  {
+    key: 'trailLength',
+    label: 'Trail Length',
+    min: 64,
+    max: 512,
+    step: 16,
+    initial: 384,
+    category: 'appearance',
+    description: 'Points kept along each orbit',
+  },
+  {
+    key: 'brightness',
+    label: 'Brightness',
+    min: 0.3,
+    max: 3.0,
+    step: 0.1,
+    initial: 1.2,
+    category: 'appearance',
+  },
+  {
+    key: 'hueShift',
+    label: 'Hue Shift',
+    min: 0.0,
+    max: 1.0,
+    step: 0.01,
+    initial: 0.0,
+    category: 'appearance',
+  },
+  {
+    key: 'integrationSpeed',
+    label: 'Flow Speed',
+    min: 0.2,
+    max: 2.5,
+    step: 0.05,
+    initial: 1.0,
+    category: 'appearance',
+    description: 'RK4 integration rate',
+  },
+  {
+    key: 'bassToDrive',
+    label: 'Bass → Drive',
+    min: 0.0,
+    max: 2.0,
+    step: 0.1,
+    initial: 1.0,
+    category: 'audio-mapping',
+    description: 'Bass modulates the primary ODE coefficient',
+  },
+  {
+    key: 'midToSpeed',
+    label: 'Mid → Speed',
+    min: 0.0,
+    max: 2.0,
+    step: 0.1,
+    initial: 1.0,
+    category: 'audio-mapping',
+    description: 'Mids accelerate the flow',
+  },
+  {
+    key: 'highToSpread',
+    label: 'High → Spread',
+    min: 0.0,
+    max: 2.0,
+    step: 0.1,
+    initial: 1.0,
+    category: 'audio-mapping',
+    description: 'Highs widen per-trail hue spread',
+  },
+  {
+    key: 'rmsToGlow',
+    label: 'RMS → Glow',
+    min: 0.0,
+    max: 2.0,
+    step: 0.1,
+    initial: 1.0,
+    category: 'audio-mapping',
+    description: 'Volume drives trail brightness',
+  },
+  {
+    key: 'beatToKick',
+    label: 'Beat → Kick',
+    min: 0.0,
+    max: 2.0,
+    step: 0.1,
+    initial: 1.0,
+    category: 'audio-mapping',
+    description: 'Beats kick integration speed and jitter seeds',
+  },
+  {
+    key: 'centroidToHue',
+    label: 'Centroid → Hue',
+    min: 0.0,
+    max: 2.0,
+    step: 0.1,
+    initial: 1.0,
+    category: 'audio-mapping',
+    description: 'Spectral centroid shifts the palette',
+  },
 ];
 
 export interface FlowConfig {
@@ -64,12 +169,18 @@ function hsv2rgb(h: number, s: number, v: number): [number, number, number] {
   const q = v * (1 - f * s);
   const t = v * (1 - (1 - f) * s);
   switch (i % 6) {
-    case 0: return [v, t, p];
-    case 1: return [q, v, p];
-    case 2: return [p, v, t];
-    case 3: return [p, q, v];
-    case 4: return [t, p, v];
-    default: return [v, p, q];
+    case 0:
+      return [v, t, p];
+    case 1:
+      return [q, v, p];
+    case 2:
+      return [p, v, t];
+    case 3:
+      return [p, q, v];
+    case 4:
+      return [t, p, v];
+    default:
+      return [v, p, q];
   }
 }
 
@@ -87,11 +198,14 @@ function vecLen(p: Vec3): number {
 }
 
 export class FlowVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata: VisualizerMetadata;
 
   private unsub: Unsubscribe;
   private latestFeatures: AudioFeatures | null = null;
   private time = 0;
+  private pendingSteps = 0;
 
   private userParams: Record<string, number>;
   private readonly config: FlowConfig;
@@ -112,7 +226,7 @@ export class FlowVisualizer implements Visualizer {
     high: new EMASmoothing(0.25),
     rms: new EMASmoothing(0.15),
     spectralCentroid: new EMASmoothing(0.1),
-    beatPulse: new EMASmoothing(0.4),
+    beatPulse: new EventEnvelope(),
   };
 
   private orbits: Vec3[] = [];
@@ -120,9 +234,7 @@ export class FlowVisualizer implements Visualizer {
   private writeHeads: number[] = [];
   private filled: number[] = [];
 
-  private material: THREE.ShaderMaterial | null = null;
-  private lines: THREE.Line[] = [];
-  private geometries: THREE.BufferGeometry[] = [];
+  private batch: SegmentBatch | null = null;
   private positions: Float32Array[] = [];
   private colors: Float32Array[] = [];
 
@@ -132,7 +244,10 @@ export class FlowVisualizer implements Visualizer {
   private k4: Vec3 = { x: 0, y: 0, z: 0 };
   private tmp: Vec3 = { x: 0, y: 0, z: 0 };
 
-  constructor(config: FlowConfig, private bus: MessageBus) {
+  constructor(
+    config: FlowConfig,
+    private bus: MessageBus,
+  ) {
     this.config = config;
     this.metadata = config.metadata;
     this.userParams = { ...config.defaultParams };
@@ -147,9 +262,12 @@ export class FlowVisualizer implements Visualizer {
     this._elevation = config.elevation ?? 0.35;
     this._distance = config.distance ?? 12;
 
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
 
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
@@ -170,53 +288,36 @@ export class FlowVisualizer implements Visualizer {
   }
 
   attach(scene: THREE.Scene): void {
-    this.material = new THREE.ShaderMaterial({
-      vertexShader: VERTEX_SHADER,
-      fragmentShader: FRAGMENT_SHADER,
-      uniforms: {
-        u_opacity: { value: 0.9 },
-        u_glowIntensity: { value: 1.0 },
-        u_beatPulse: { value: 0.0 },
-      },
-      transparent: true,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      vertexColors: true,
-    });
-
-    for (let t = 0; t < this.trailCount; t++) {
-      const posArr = new Float32Array(this.maxPoints * 3);
-      const colArr = new Float32Array(this.maxPoints * 3);
-      const geom = new THREE.BufferGeometry();
-      geom.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
-      geom.setAttribute('color', new THREE.BufferAttribute(colArr, 3));
-
-      const line = new THREE.Line(geom, this.material);
-      line.frustumCulled = false;
-      scene.add(line);
-
-      this.positions.push(posArr);
-      this.colors.push(colArr);
-      this.geometries.push(geom);
-      this.lines.push(line);
+    this.batch = new SegmentBatch(this.trailCount * (this.maxPoints - 1));
+    this.batch.material.linewidth = 1.5;
+    scene.add(this.batch.object);
+    for (let trail = 0; trail < this.trailCount; trail++) {
+      this.positions.push(new Float32Array(this.maxPoints * 3));
+      this.colors.push(new Float32Array(this.maxPoints * 3));
     }
-
     this.uploadTrails();
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     const bass = this.smoothers.bass.value;
@@ -229,30 +330,41 @@ export class FlowVisualizer implements Visualizer {
     const effective: Record<string, number> = { ...this.userParams };
     const driveKey = this.config.driveParam;
     if (driveKey in effective) {
-      effective[driveKey] = this.userParams[driveKey]
-        + bass * this.config.driveScale * this.userParams.bassToDrive;
+      effective[driveKey] =
+        this.userParams[driveKey] +
+        bass * this.config.driveScale * this.userParams.bassToDrive;
     }
+
+    const driveDefinition = this.metadata.params.find(
+      (param) => param.key === driveKey,
+    );
+    if (driveDefinition)
+      effective[driveKey] = Math.max(
+        driveDefinition.min,
+        Math.min(driveDefinition.max, effective[driveKey]),
+      );
 
     const beatKick = beat * 0.8 * this.userParams.beatToKick;
-    const speed = this.userParams.integrationSpeed
-      * (0.45 + mid * 0.9 * this.userParams.midToSpeed)
-      * (1.0 + beatKick);
-    const dt = this.config.dt * speed;
-    const steps = Math.max(1, Math.min(12, Math.round(this.stepsPerFrame * speed)));
-
-    const jitter = beat * 0.12 * this.userParams.beatToKick;
-    if (jitter > 0.002) {
-      for (let t = 0; t < this.trailCount; t++) {
-        this.orbits[t].x += (hash01(t + this.time * 17) - 0.5) * jitter;
-        this.orbits[t].y += (hash01(t + 41 + this.time * 13) - 0.5) * jitter;
-        this.orbits[t].z += (hash01(t + 83 + this.time * 11) - 0.5) * jitter;
-      }
-    }
+    const speed =
+      this.userParams.integrationSpeed *
+      (0.45 + mid * 0.9 * this.userParams.midToSpeed) *
+      (1.0 + beatKick);
+    // Speed changes simulated time, never the stability of an RK4 substep.
+    this.pendingSteps += Math.min(
+      72,
+      this.stepsPerFrame * speed * this.deltaSeconds * 60,
+    );
+    const steps = Math.floor(this.pendingSteps + 1e-9);
+    this.pendingSteps = Math.max(0, this.pendingSteps - steps);
+    const dt = this.config.dt;
 
     for (let t = 0; t < this.trailCount; t++) {
       for (let s = 0; s < steps; s++) {
         this.rk4(this.orbits[t], dt, effective);
-        if (!isFiniteVec(this.orbits[t]) || vecLen(this.orbits[t]) > this.bound) {
+        if (
+          !isFiniteVec(this.orbits[t]) ||
+          vecLen(this.orbits[t]) > this.bound
+        ) {
           this.seedOrbit(t);
           this.warmupOrbit(t, effective);
         }
@@ -260,15 +372,19 @@ export class FlowVisualizer implements Visualizer {
       }
     }
 
-    if (this.material) {
-      const glow = (0.55 + rms * 0.9 * this.userParams.rmsToGlow) * this.userParams.brightness;
-      this.material.uniforms.u_glowIntensity.value = glow;
-      this.material.uniforms.u_beatPulse.value = beat;
+    if (this.batch) {
+      const glow =
+        (0.55 + rms * 0.9 * this.userParams.rmsToGlow) *
+        this.userParams.brightness;
+      this.batch.material.color.setScalar(glow);
+      this.batch.material.linewidth = 1.25 + high * 0.75 + beat * 0.25;
       this.uploadTrails(high, centroid);
     }
   }
 
-  setResolution(_w: number, _h: number): void {}
+  setResolution(w: number, h: number): void {
+    this.batch?.setResolution(w, h);
+  }
 
   setUserParam(key: string, value: number): void {
     if (key in this.userParams) this.userParams[key] = value;
@@ -284,17 +400,16 @@ export class FlowVisualizer implements Visualizer {
 
   setViewState(partial: Record<string, number>): void {
     if ('orbitAngle' in partial) this._orbitAngle = partial.orbitAngle;
-    if ('elevation' in partial) this._elevation = Math.max(-1.2, Math.min(1.2, partial.elevation));
-    if ('distance' in partial) this._distance = Math.max(4, Math.min(24, partial.distance));
+    if ('elevation' in partial)
+      this._elevation = Math.max(-1.2, Math.min(1.2, partial.elevation));
+    if ('distance' in partial)
+      this._distance = Math.max(4, Math.min(24, partial.distance));
   }
 
   dispose(): void {
     this.unsub();
-    for (const geom of this.geometries) geom.dispose();
-    this.material?.dispose();
-    this.material = null;
-    this.lines = [];
-    this.geometries = [];
+    this.batch?.dispose();
+    this.batch = null;
     this.positions = [];
     this.colors = [];
   }
@@ -349,25 +464,33 @@ export class FlowVisualizer implements Visualizer {
   private rk4(p: Vec3, dt: number, params: Record<string, number>): void {
     const derivs = this.config.derivs;
     const d1 = derivs(p, params);
-    this.k1.x = d1.x; this.k1.y = d1.y; this.k1.z = d1.z;
+    this.k1.x = d1.x;
+    this.k1.y = d1.y;
+    this.k1.z = d1.z;
 
     this.tmp.x = p.x + this.k1.x * dt * 0.5;
     this.tmp.y = p.y + this.k1.y * dt * 0.5;
     this.tmp.z = p.z + this.k1.z * dt * 0.5;
     const d2 = derivs(this.tmp, params);
-    this.k2.x = d2.x; this.k2.y = d2.y; this.k2.z = d2.z;
+    this.k2.x = d2.x;
+    this.k2.y = d2.y;
+    this.k2.z = d2.z;
 
     this.tmp.x = p.x + this.k2.x * dt * 0.5;
     this.tmp.y = p.y + this.k2.y * dt * 0.5;
     this.tmp.z = p.z + this.k2.z * dt * 0.5;
     const d3 = derivs(this.tmp, params);
-    this.k3.x = d3.x; this.k3.y = d3.y; this.k3.z = d3.z;
+    this.k3.x = d3.x;
+    this.k3.y = d3.y;
+    this.k3.z = d3.z;
 
     this.tmp.x = p.x + this.k3.x * dt;
     this.tmp.y = p.y + this.k3.y * dt;
     this.tmp.z = p.z + this.k3.z * dt;
     const d4 = derivs(this.tmp, params);
-    this.k4.x = d4.x; this.k4.y = d4.y; this.k4.z = d4.z;
+    this.k4.x = d4.x;
+    this.k4.y = d4.y;
+    this.k4.z = d4.z;
 
     const sixth = dt / 6;
     p.x += (this.k1.x + 2 * this.k2.x + 2 * this.k3.x + this.k4.x) * sixth;
@@ -376,12 +499,18 @@ export class FlowVisualizer implements Visualizer {
   }
 
   private uploadTrails(high = 0, centroid = 0.5): void {
-    if (this.positions.length === 0) return;
+    if (this.positions.length === 0 || !this.batch) return;
+    let segmentCount = 0;
 
-    const trailLength = Math.max(8, Math.min(this.maxPoints, Math.round(this.userParams.trailLength)));
-    const hueBase = this.hueOffset + this.userParams.hueShift
-      + centroid * 0.18 * this.userParams.centroidToHue
-      + this.time * 0.015;
+    const trailLength = Math.max(
+      8,
+      Math.min(this.maxPoints, Math.round(this.userParams.trailLength)),
+    );
+    const hueBase =
+      this.hueOffset +
+      this.userParams.hueShift +
+      centroid * 0.18 * this.userParams.centroidToHue +
+      this.time * 0.015;
     const spread = 0.08 + high * 0.22 * this.userParams.highToSpread;
     const brightness = this.userParams.brightness;
 
@@ -390,7 +519,7 @@ export class FlowVisualizer implements Visualizer {
       const hist = this.history[t];
       const pos = this.positions[t];
       const col = this.colors[t];
-      const oldest = this.filled[t] < this.maxPoints ? 0 : this.writeHeads[t];
+      const oldest = (this.writeHeads[t] - n + this.maxPoints) % this.maxPoints;
       const trailHue = hueBase + (t / this.trailCount) * spread;
 
       for (let i = 0; i < n; i++) {
@@ -404,45 +533,22 @@ export class FlowVisualizer implements Visualizer {
 
         const fade = 0.18 + 0.82 * (i / Math.max(1, n - 1));
         const heightHue = (y * 0.12 + 0.5) * 0.35;
-        const hue = ((trailHue + heightHue) % 1 + 1) % 1;
+        const hue = (((trailHue + heightHue) % 1) + 1) % 1;
         const [r, g, b] = hsv2rgb(hue, 0.62, fade * brightness);
         col[i * 3] = r;
         col[i * 3 + 1] = g;
         col[i * 3 + 2] = b;
       }
 
-      this.geometries[t].setDrawRange(0, n);
-      this.geometries[t].attributes.position.needsUpdate = true;
-      this.geometries[t].attributes.color.needsUpdate = true;
+      for (let i = 1; i < n; i++) {
+        const offset = segmentCount++ * 6;
+        this.batch.positions.set(
+          pos.subarray((i - 1) * 3, (i + 1) * 3),
+          offset,
+        );
+        this.batch.colors.set(col.subarray((i - 1) * 3, (i + 1) * 3), offset);
+      }
     }
+    this.batch.upload(segmentCount);
   }
 }
-
-const VERTEX_SHADER = /* glsl */ `
-  varying vec3 vColor;
-  varying float vDepth;
-
-  void main() {
-    vColor = color;
-    vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
-    vDepth = -mvPos.z;
-    gl_Position = projectionMatrix * mvPos;
-  }
-`;
-
-const FRAGMENT_SHADER = /* glsl */ `
-  uniform float u_opacity;
-  uniform float u_glowIntensity;
-  uniform float u_beatPulse;
-
-  varying vec3 vColor;
-  varying float vDepth;
-
-  void main() {
-    float depthFade = exp(-vDepth * 0.05);
-    vec3 col = vColor * u_glowIntensity * depthFade;
-    col += vColor * u_beatPulse * 0.25;
-    col = col / (0.75 + col);
-    gl_FragColor = vec4(col, u_opacity * depthFade);
-  }
-`;

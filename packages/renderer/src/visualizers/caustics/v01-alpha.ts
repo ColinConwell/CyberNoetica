@@ -1,7 +1,12 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -33,18 +38,126 @@ const causticsMetadata: VisualizerMetadata = {
   description: 'Underwater light refraction patterns',
   usesPerspective: false,
   params: [
-    { key: 'waveAmplitude', label: 'Wave Amplitude', min: 0.2, max: 2.0, step: 0.05, initial: 1.0, category: 'appearance', description: 'Surface wave height' },
-    { key: 'waveSpeed', label: 'Wave Speed', min: 0.1, max: 2.0, step: 0.05, initial: 0.7, category: 'appearance', description: 'Surface animation rate' },
-    { key: 'surfaceDetail', label: 'Surface Detail', min: 1.0, max: 5.0, step: 0.5, initial: 3.0, category: 'appearance', description: 'Number of wave octaves' },
-    { key: 'brightness', label: 'Brightness', min: 0.3, max: 3.0, step: 0.1, initial: 1.2, category: 'appearance', description: 'Light intensity' },
-    { key: 'colorTemp', label: 'Color Temp', min: 0.0, max: 1.0, step: 0.05, initial: 0.3, category: 'appearance', description: 'Cool blue to warm gold' },
-    { key: 'depth', label: 'Depth', min: 0.5, max: 4.0, step: 0.1, initial: 1.5, category: 'appearance', description: 'Simulated water depth' },
-    { key: 'bassToAmplitude', label: 'Bass → Waves', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Bass deepens waves' },
-    { key: 'midToSpeed', label: 'Mid → Speed', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Mids drive animation' },
-    { key: 'highToDetail', label: 'High → Detail', min: 0.0, max: 2.0, step: 0.1, initial: 0.8, category: 'audio-mapping', description: 'Highs add surface ripples' },
-    { key: 'rmsToGlow', label: 'RMS → Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Volume drives light intensity' },
-    { key: 'beatToSplash', label: 'Beat → Splash', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Beats create splash ripples' },
-    { key: 'centroidToColor', label: 'Centroid → Color', min: 0.0, max: 2.0, step: 0.1, initial: 0.8, category: 'audio-mapping', description: 'Spectral centroid shifts color' },
+    {
+      key: 'waveAmplitude',
+      label: 'Wave Amplitude',
+      min: 0.2,
+      max: 2.0,
+      step: 0.05,
+      initial: 1.0,
+      category: 'appearance',
+      description: 'Surface wave height',
+    },
+    {
+      key: 'waveSpeed',
+      label: 'Wave Speed',
+      min: 0.1,
+      max: 2.0,
+      step: 0.05,
+      initial: 0.7,
+      category: 'appearance',
+      description: 'Surface animation rate',
+    },
+    {
+      key: 'surfaceDetail',
+      label: 'Surface Detail',
+      min: 1.0,
+      max: 5.0,
+      step: 0.5,
+      initial: 3.0,
+      category: 'appearance',
+      description: 'Number of wave octaves',
+    },
+    {
+      key: 'brightness',
+      label: 'Brightness',
+      min: 0.3,
+      max: 3.0,
+      step: 0.1,
+      initial: 1.2,
+      category: 'appearance',
+      description: 'Light intensity',
+    },
+    {
+      key: 'colorTemp',
+      label: 'Color Temp',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.3,
+      category: 'appearance',
+      description: 'Cool blue to warm gold',
+    },
+    {
+      key: 'depth',
+      label: 'Depth',
+      min: 0.5,
+      max: 4.0,
+      step: 0.1,
+      initial: 1.5,
+      category: 'appearance',
+      description: 'Simulated water depth',
+    },
+    {
+      key: 'bassToAmplitude',
+      label: 'Bass → Waves',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Bass deepens waves',
+    },
+    {
+      key: 'midToSpeed',
+      label: 'Mid → Speed',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Mids drive animation',
+    },
+    {
+      key: 'highToDetail',
+      label: 'High → Detail',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 0.8,
+      category: 'audio-mapping',
+      description: 'Highs add surface ripples',
+    },
+    {
+      key: 'rmsToGlow',
+      label: 'RMS → Glow',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Volume drives light intensity',
+    },
+    {
+      key: 'beatToSplash',
+      label: 'Beat → Splash',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Beats create splash ripples',
+    },
+    {
+      key: 'centroidToColor',
+      label: 'Centroid → Color',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 0.8,
+      category: 'audio-mapping',
+      description: 'Spectral centroid shifts color',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
@@ -55,6 +168,8 @@ const causticsMetadata: VisualizerMetadata = {
 };
 
 export class CausticsVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = causticsMetadata;
 
   private unsub: Unsubscribe;
@@ -87,16 +202,19 @@ export class CausticsVisualizer implements Visualizer {
     high: new EMASmoothing(0.22),
     rms: new EMASmoothing(0.15),
     spectralCentroid: new EMASmoothing(0.1),
-    beatPulse: new EMASmoothing(0.35),
+    beatPulse: new EventEnvelope(),
   };
 
   private material: THREE.ShaderMaterial | null = null;
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
     this.smoothers.high.reset(0);
@@ -135,19 +253,26 @@ export class CausticsVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     if (this.material) {
@@ -159,27 +284,34 @@ export class CausticsVisualizer implements Visualizer {
       u.u_time.value = this.time;
       u.u_center.value.set(this._centerX, this._centerY);
       u.u_zoom.value = this._zoom;
-      u.u_waveAmplitude.value = this.userParams.waveAmplitude
-        + bass * 0.4 * this.userParams.bassToAmplitude;
-      u.u_waveSpeed.value = this.userParams.waveSpeed
-        + mid * 0.3 * this.userParams.midToSpeed;
-      u.u_surfaceDetail.value = this.userParams.surfaceDetail
-        + high * 1.5 * this.userParams.highToDetail;
+      u.u_waveAmplitude.value =
+        this.userParams.waveAmplitude +
+        bass * 0.4 * this.userParams.bassToAmplitude;
+      u.u_waveSpeed.value =
+        this.userParams.waveSpeed + mid * 0.3 * this.userParams.midToSpeed;
+      u.u_surfaceDetail.value =
+        this.userParams.surfaceDetail +
+        high * 1.5 * this.userParams.highToDetail;
       u.u_brightness.value = this.userParams.brightness;
-      u.u_colorTemp.value = this.userParams.colorTemp
-        + this.smoothers.spectralCentroid.value * 0.2 * this.userParams.centroidToColor;
+      u.u_colorTemp.value =
+        this.userParams.colorTemp +
+        this.smoothers.spectralCentroid.value *
+          0.2 *
+          this.userParams.centroidToColor;
       u.u_depth.value = this.userParams.depth;
       u.u_bass.value = bass;
       u.u_mid.value = mid;
       u.u_high.value = high;
       u.u_rms.value = this.smoothers.rms.value * this.userParams.rmsToGlow;
       u.u_spectralCentroid.value = this.smoothers.spectralCentroid.value;
-      u.u_beatPulse.value = this.smoothers.beatPulse.value * this.userParams.beatToSplash;
+      u.u_beatPulse.value =
+        this.smoothers.beatPulse.value * this.userParams.beatToSplash;
     }
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -278,38 +410,23 @@ const FRAGMENT_SHADER = /* glsl */ `
     return h;
   }
 
-  // Compute caustic intensity via Jacobian determinant of refracted ray mapping
-  // This measures how much refracted rays converge/diverge at the sea floor
+  // Vertical incident light refracted from air into water. This maps a
+  // surface coordinate to the floor; intensity below is still a source-space
+  // Jacobian proxy, not a forward-splatted irradiance image.
+  vec2 refractedFloor(vec2 p, float t, float eps) {
+    float h = waterHeight(p, t);
+    vec2 slope = vec2(waterHeight(p + vec2(eps, 0.0), t) - h,
+                      waterHeight(p + vec2(0.0, eps), t) - h) / eps;
+    vec3 normal = normalize(vec3(-slope, 1.0));
+    vec3 ray = refract(vec3(0.0, 0.0, -1.0), normal, 1.0 / 1.33);
+    return p + u_depth * ray.xy / max(-ray.z, 1e-6);
+  }
+
   float causticIntensity(vec2 p, float t) {
     float eps = 0.004 / u_zoom;
-
-    // Surface normal via central differences
-    float hc = waterHeight(p, t);
-    float hx = waterHeight(p + vec2(eps, 0.0), t);
-    float hy = waterHeight(p + vec2(0.0, eps), t);
-
-    // Gradient of height field = surface slope
-    vec2 grad = vec2(hx - hc, hy - hc) / eps;
-
-    // Refracted ray displacement on the sea floor
-    // Snell's law simplified: displacement ~ -depth * gradient / n_water
-    float n_water = 1.33;
-    vec2 displacement = -u_depth * grad / n_water;
-
-    // The "refracted position" on the floor
-    vec2 floorPos = p + displacement;
-
-    // Jacobian determinant via finite differences of the refraction map
-    vec2 floorPosX = (p + vec2(eps, 0.0))
-      + (-u_depth / n_water) * vec2(
-          waterHeight(p + vec2(2.0 * eps, 0.0), t) - hx,
-          waterHeight(p + vec2(eps, eps), t) - waterHeight(p + vec2(eps, 0.0), t)
-        ) / eps;
-    vec2 floorPosY = (p + vec2(0.0, eps))
-      + (-u_depth / n_water) * vec2(
-          waterHeight(p + vec2(eps, eps), t) - hy,
-          waterHeight(p + vec2(0.0, 2.0 * eps), t) - waterHeight(p + vec2(0.0, eps), t)
-        ) / eps;
+    vec2 floorPos = refractedFloor(p, t, eps);
+    vec2 floorPosX = refractedFloor(p + vec2(eps, 0.0), t, eps);
+    vec2 floorPosY = refractedFloor(p + vec2(0.0, eps), t, eps);
 
     vec2 dFdx = (floorPosX - floorPos) / eps;
     vec2 dFdy = (floorPosY - floorPos) / eps;

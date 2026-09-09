@@ -1,6 +1,20 @@
-import { el, sectionLabel, glassButton, infoBlock, updateInfoBlock, sectionLabelWithToggle } from '../components.js';
+import {
+  el,
+  sectionLabel,
+  glassButton,
+  infoBlock,
+  updateInfoBlock,
+  sectionLabelWithToggle,
+} from '../components.js';
 import type { InfoBlockField } from '../components.js';
-import { ACCENT, FONT, GLASS_BORDER, TEXT_DIM, TEXT_PRIMARY, TEXT_SECONDARY } from '../styles.js';
+import {
+  ACCENT,
+  FONT,
+  GLASS_BORDER,
+  TEXT_DIM,
+  TEXT_PRIMARY,
+  TEXT_SECONDARY,
+} from '../styles.js';
 import type { AudioFeatures, BusMessage } from '@cybernoetica/core';
 import {
   createLogDisplay,
@@ -25,21 +39,33 @@ export function renderDebugPanel(container: HTMLElement): () => void {
   // ── Performance ─────────────────────────────────────────────────
   container.appendChild(sectionLabel('Performance'));
   const perfGrid = el('div', {
-    display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 12px',
-    fontSize: '11px', color: TEXT_SECONDARY, marginBottom: '14px',
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: '6px 12px',
+    fontSize: '11px',
+    color: TEXT_SECONDARY,
+    marginBottom: '14px',
   });
   const fpsVal = el('span', { color: TEXT_PRIMARY, fontFamily: 'monospace' });
   const ftVal = el('span', { color: TEXT_PRIMARY, fontFamily: 'monospace' });
-  const fpsRow = el('div', {}); fpsRow.textContent = 'FPS'; fpsRow.appendChild(fpsVal);
-  const ftRow = el('div', {}); ftRow.textContent = 'Frame '; ftRow.appendChild(ftVal);
+  const fpsRow = el('div', {});
+  fpsRow.textContent = 'FPS';
+  fpsRow.appendChild(fpsVal);
+  const ftRow = el('div', {});
+  ftRow.textContent = 'Frame ';
+  ftRow.appendChild(ftVal);
   perfGrid.append(fpsRow, ftRow);
   container.appendChild(perfGrid);
 
   // ── Audio ───────────────────────────────────────────────────────
   container.appendChild(sectionLabel('Audio'));
   const audioGrid = el('div', {
-    display: 'grid', gridTemplateColumns: '60px 1fr', gap: '4px 8px',
-    fontSize: '11px', color: TEXT_SECONDARY, marginBottom: '14px',
+    display: 'grid',
+    gridTemplateColumns: '60px 1fr',
+    gap: '4px 8px',
+    fontSize: '11px',
+    color: TEXT_SECONDARY,
+    marginBottom: '14px',
   });
 
   const audioFields: Record<string, HTMLElement> = {};
@@ -47,12 +73,18 @@ export function renderDebugPanel(container: HTMLElement): () => void {
     const lbl = el('span', { color: TEXT_DIM });
     lbl.textContent = label;
     const bar = el('div', {
-      height: '8px', borderRadius: '4px', background: 'rgba(255,255,255,0.06)',
-      overflow: 'hidden', position: 'relative',
+      height: '8px',
+      borderRadius: '4px',
+      background: 'rgba(255,255,255,0.06)',
+      overflow: 'hidden',
+      position: 'relative',
     });
     const fill = el('div', {
-      height: '100%', borderRadius: '4px', transition: 'width 0.1s ease',
-      background: ACCENT, width: '0%',
+      height: '100%',
+      borderRadius: '4px',
+      transition: 'width 0.1s ease',
+      background: ACCENT,
+      width: '0%',
     });
     bar.appendChild(fill);
     audioFields[label.toLowerCase()] = fill;
@@ -60,9 +92,13 @@ export function renderDebugPanel(container: HTMLElement): () => void {
   }
   container.appendChild(audioGrid);
 
-  const wasmBadge = el('div', { fontSize: '10px', color: TEXT_DIM, marginBottom: '14px' });
+  const wasmBadge = el('div', {
+    fontSize: '10px',
+    color: TEXT_DIM,
+    marginBottom: '14px',
+  });
   const state = store.getState();
-  wasmBadge.textContent = `Analyzer: ${state.audio?.wasm ? 'WASM' : 'JS fallback'}`;
+  wasmBadge.textContent = `Analyzer: ${state.audio?.backend === 'worklet' ? 'AudioWorklet' : 'Main thread (same DSP)'}`;
   container.appendChild(wasmBadge);
 
   // ── Visualizer ──────────────────────────────────────────────────
@@ -78,20 +114,31 @@ export function renderDebugPanel(container: HTMLElement): () => void {
   // ── State ───────────────────────────────────────────────────────
   let stateViewMode: 'json' | 'tree' = 'json';
 
-  const stateHeader = sectionLabelWithToggle('State', ['JSON', 'Tree'], 0, (idx) => {
-    stateViewMode = idx === 0 ? 'json' : 'tree';
-    const s = store.getState();
-    updateStateDisplay(s);
-  });
+  const stateHeader = sectionLabelWithToggle(
+    'State',
+    ['JSON', 'Tree'],
+    0,
+    (idx) => {
+      stateViewMode = idx === 0 ? 'json' : 'tree';
+      const s = store.getState();
+      updateStateDisplay(s);
+    },
+  );
   container.appendChild(stateHeader);
 
   const stateContainer = el('div', { marginBottom: '10px' });
   container.appendChild(stateContainer);
 
   const stateBox = el('pre', {
-    fontSize: '10px', color: TEXT_DIM, fontFamily: 'monospace',
-    background: 'rgba(0,0,0,0.3)', borderRadius: '8px', padding: '8px',
-    maxHeight: '140px', overflowY: 'auto', whiteSpace: 'pre-wrap',
+    fontSize: '10px',
+    color: TEXT_DIM,
+    fontFamily: 'monospace',
+    background: 'rgba(0,0,0,0.3)',
+    borderRadius: '8px',
+    padding: '8px',
+    maxHeight: '140px',
+    overflowY: 'auto',
+    whiteSpace: 'pre-wrap',
     wordBreak: 'break-all',
     border: `1px solid ${GLASS_BORDER}`,
     margin: '0',
@@ -125,18 +172,24 @@ export function renderDebugPanel(container: HTMLElement): () => void {
       (match) => {
         let color = 'rgba(180, 220, 255, 0.6)';
         if (/^"/.test(match)) {
-          color = match.endsWith(':') ? 'rgba(140, 160, 255, 0.7)' : 'rgba(120, 220, 140, 0.7)';
+          color = match.endsWith(':')
+            ? 'rgba(140, 160, 255, 0.7)'
+            : 'rgba(120, 220, 140, 0.7)';
         } else if (/true|false/.test(match)) {
           color = 'rgba(255, 180, 80, 0.7)';
         } else if (/null/.test(match)) {
           color = 'rgba(255, 255, 255, 0.3)';
         }
         return `<span style="color:${color}">${match}</span>`;
-      }
+      },
     );
   }
 
-  function buildPropertyTree(obj: any, depth: number, expanded: boolean): HTMLElement {
+  function buildPropertyTree(
+    obj: any,
+    depth: number,
+    expanded: boolean,
+  ): HTMLElement {
     const container = el('div', { paddingLeft: depth > 0 ? '12px' : '0' });
 
     if (obj === null || obj === undefined) {
@@ -148,10 +201,14 @@ export function renderDebugPanel(container: HTMLElement): () => void {
 
     if (typeof obj !== 'object') {
       const val = el('span', {
-        color: typeof obj === 'string' ? 'rgba(120, 220, 140, 0.7)'
-          : typeof obj === 'number' ? 'rgba(180, 220, 255, 0.6)'
-          : typeof obj === 'boolean' ? 'rgba(255, 180, 80, 0.7)'
-          : TEXT_DIM,
+        color:
+          typeof obj === 'string'
+            ? 'rgba(120, 220, 140, 0.7)'
+            : typeof obj === 'number'
+              ? 'rgba(180, 220, 255, 0.6)'
+              : typeof obj === 'boolean'
+                ? 'rgba(255, 180, 80, 0.7)'
+                : TEXT_DIM,
       });
       val.textContent = typeof obj === 'string' ? `"${obj}"` : String(obj);
       container.appendChild(val);
@@ -166,18 +223,28 @@ export function renderDebugPanel(container: HTMLElement): () => void {
       if (isComplex) {
         let isOpen = depth < 1;
         const toggle = el('span', {
-          cursor: 'pointer', userSelect: 'none',
-          color: TEXT_DIM, fontSize: '9px', marginRight: '4px',
-          display: 'inline-block', width: '10px',
+          cursor: 'pointer',
+          userSelect: 'none',
+          color: TEXT_DIM,
+          fontSize: '9px',
+          marginRight: '4px',
+          display: 'inline-block',
+          width: '10px',
         });
         toggle.textContent = isOpen ? '\u25BE' : '\u25B8';
 
         const keyEl = el('span', { color: 'rgba(140, 160, 255, 0.7)' });
         keyEl.textContent = key;
 
-        const preview = el('span', { color: TEXT_DIM, marginLeft: '4px', fontSize: '9px' });
+        const preview = el('span', {
+          color: TEXT_DIM,
+          marginLeft: '4px',
+          fontSize: '9px',
+        });
         const childEntries = Object.keys(value as object);
-        preview.textContent = Array.isArray(value) ? ` [${childEntries.length}]` : ` {${childEntries.length}}`;
+        preview.textContent = Array.isArray(value)
+          ? ` [${childEntries.length}]`
+          : ` {${childEntries.length}}`;
 
         const childContainer = el('div', {
           display: isOpen ? 'block' : 'none',
@@ -195,18 +262,27 @@ export function renderDebugPanel(container: HTMLElement): () => void {
         row.append(toggle, keyEl, preview);
         row.appendChild(childContainer);
       } else {
-        const spacer = el('span', { display: 'inline-block', width: '10px', marginRight: '4px' });
+        const spacer = el('span', {
+          display: 'inline-block',
+          width: '10px',
+          marginRight: '4px',
+        });
         const keyEl = el('span', { color: 'rgba(140, 160, 255, 0.7)' });
         keyEl.textContent = key;
         const sep = el('span', { color: TEXT_DIM });
         sep.textContent = ': ';
         const valEl = el('span', {
-          color: typeof value === 'string' ? 'rgba(120, 220, 140, 0.7)'
-            : typeof value === 'number' ? 'rgba(180, 220, 255, 0.6)'
-            : typeof value === 'boolean' ? 'rgba(255, 180, 80, 0.7)'
-            : 'rgba(255,255,255,0.3)',
+          color:
+            typeof value === 'string'
+              ? 'rgba(120, 220, 140, 0.7)'
+              : typeof value === 'number'
+                ? 'rgba(180, 220, 255, 0.6)'
+                : typeof value === 'boolean'
+                  ? 'rgba(255, 180, 80, 0.7)'
+                  : 'rgba(255,255,255,0.3)',
         });
-        valEl.textContent = typeof value === 'string' ? `"${value}"` : String(value);
+        valEl.textContent =
+          typeof value === 'string' ? `"${value}"` : String(value);
         row.append(spacer, keyEl, sep, valEl);
       }
 
@@ -217,16 +293,23 @@ export function renderDebugPanel(container: HTMLElement): () => void {
   }
 
   const exportBtn = el('button', {
-    padding: '6px 14px', fontSize: '10px', fontFamily: FONT,
-    background: 'rgba(255,255,255,0.06)', color: TEXT_SECONDARY,
-    border: `1px solid ${GLASS_BORDER}`, borderRadius: '6px',
-    cursor: 'pointer', transition: 'all 0.15s',
+    padding: '6px 14px',
+    fontSize: '10px',
+    fontFamily: FONT,
+    background: 'rgba(255,255,255,0.06)',
+    color: TEXT_SECONDARY,
+    border: `1px solid ${GLASS_BORDER}`,
+    borderRadius: '6px',
+    cursor: 'pointer',
+    transition: 'all 0.15s',
   });
   exportBtn.textContent = 'Copy State JSON';
   exportBtn.addEventListener('click', () => {
     navigator.clipboard.writeText(store.serialize()).then(() => {
       exportBtn.textContent = 'Copied';
-      setTimeout(() => { exportBtn.textContent = 'Copy State JSON'; }, 1500);
+      setTimeout(() => {
+        exportBtn.textContent = 'Copy State JSON';
+      }, 1500);
     });
   });
   container.appendChild(exportBtn);
@@ -248,17 +331,32 @@ export function renderDebugPanel(container: HTMLElement): () => void {
   let currentLogStyle: LogStyle = 'clean';
 
   const logControlRow = el('div', {
-    display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '6px', alignItems: 'center',
+    display: 'flex',
+    gap: '6px',
+    flexWrap: 'wrap',
+    marginBottom: '6px',
+    alignItems: 'center',
   });
 
   // Level filter
   const levelSelect = el('select', {
-    padding: '4px 8px', fontSize: '10px', fontFamily: FONT,
-    background: 'rgba(255,255,255,0.06)', color: TEXT_SECONDARY,
-    border: `1px solid ${GLASS_BORDER}`, borderRadius: '6px',
-    cursor: 'pointer', outline: 'none',
+    padding: '4px 8px',
+    fontSize: '10px',
+    fontFamily: FONT,
+    background: 'rgba(255,255,255,0.06)',
+    color: TEXT_SECONDARY,
+    border: `1px solid ${GLASS_BORDER}`,
+    borderRadius: '6px',
+    cursor: 'pointer',
+    outline: 'none',
   }) as HTMLSelectElement;
-  const levelLabels: [string, string][] = [['all', 'All'], ['debug', 'Debug'], ['info', 'Info'], ['warn', 'Warn'], ['error', 'Error']];
+  const levelLabels: [string, string][] = [
+    ['all', 'All'],
+    ['debug', 'Debug'],
+    ['info', 'Info'],
+    ['warn', 'Warn'],
+    ['error', 'Error'],
+  ];
   for (const [value, label] of levelLabels) {
     const opt = document.createElement('option');
     opt.value = value;
@@ -275,33 +373,62 @@ export function renderDebugPanel(container: HTMLElement): () => void {
 
   // Style toggle (Raw / Clean)
   const styleToggle = el('div', {
-    display: 'flex', borderRadius: '6px', overflow: 'hidden',
+    display: 'flex',
+    borderRadius: '6px',
+    overflow: 'hidden',
     border: `1px solid ${GLASS_BORDER}`,
   });
   const isRawStyle = () => currentLogStyle === 'raw';
   const styleRawBtn = el('button', {
-    padding: '3px 8px', fontSize: '9px', fontFamily: FONT,
-    background: isRawStyle() ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.03)',
+    padding: '3px 8px',
+    fontSize: '9px',
+    fontFamily: FONT,
+    background: isRawStyle()
+      ? 'rgba(255,255,255,0.15)'
+      : 'rgba(255,255,255,0.03)',
     color: isRawStyle() ? TEXT_PRIMARY : TEXT_DIM,
-    border: 'none', cursor: 'pointer', outline: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    outline: 'none',
   });
   styleRawBtn.textContent = 'Raw';
   const styleCleanBtn = el('button', {
-    padding: '3px 8px', fontSize: '9px', fontFamily: FONT,
-    background: currentLogStyle === 'clean' ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.03)',
+    padding: '3px 8px',
+    fontSize: '9px',
+    fontFamily: FONT,
+    background:
+      currentLogStyle === 'clean'
+        ? 'rgba(255,255,255,0.15)'
+        : 'rgba(255,255,255,0.03)',
     color: currentLogStyle === 'clean' ? TEXT_PRIMARY : TEXT_DIM,
-    border: 'none', cursor: 'pointer', outline: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    outline: 'none',
   });
   styleCleanBtn.textContent = 'Clean';
 
   function updateStyleButtons() {
-    styleRawBtn.style.background = isRawStyle() ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.03)';
+    styleRawBtn.style.background = isRawStyle()
+      ? 'rgba(255,255,255,0.15)'
+      : 'rgba(255,255,255,0.03)';
     styleRawBtn.style.color = isRawStyle() ? TEXT_PRIMARY : TEXT_DIM;
-    styleCleanBtn.style.background = currentLogStyle === 'clean' ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.03)';
-    styleCleanBtn.style.color = currentLogStyle === 'clean' ? TEXT_PRIMARY : TEXT_DIM;
+    styleCleanBtn.style.background =
+      currentLogStyle === 'clean'
+        ? 'rgba(255,255,255,0.15)'
+        : 'rgba(255,255,255,0.03)';
+    styleCleanBtn.style.color =
+      currentLogStyle === 'clean' ? TEXT_PRIMARY : TEXT_DIM;
   }
-  styleRawBtn.addEventListener('click', () => { currentLogStyle = 'raw'; updateStyleButtons(); reopenLogDisplay(); });
-  styleCleanBtn.addEventListener('click', () => { currentLogStyle = 'clean'; updateStyleButtons(); reopenLogDisplay(); });
+  styleRawBtn.addEventListener('click', () => {
+    currentLogStyle = 'raw';
+    updateStyleButtons();
+    reopenLogDisplay();
+  });
+  styleCleanBtn.addEventListener('click', () => {
+    currentLogStyle = 'clean';
+    updateStyleButtons();
+    reopenLogDisplay();
+  });
   styleToggle.append(styleRawBtn, styleCleanBtn);
   logControlRow.appendChild(styleToggle);
 
@@ -309,7 +436,10 @@ export function renderDebugPanel(container: HTMLElement): () => void {
 
   // Mode buttons row
   const logModeRow = el('div', {
-    display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px',
+    display: 'flex',
+    gap: '6px',
+    flexWrap: 'wrap',
+    marginBottom: '10px',
   });
 
   const modes: { label: string; mode: LogDisplayMode }[] = [
@@ -342,7 +472,9 @@ export function renderDebugPanel(container: HTMLElement): () => void {
     for (const b of modeButtons) {
       const isActive = b === activeBtn;
       b.dataset.active = String(isActive);
-      b.style.background = isActive ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.06)';
+      b.style.background = isActive
+        ? 'rgba(255,255,255,0.18)'
+        : 'rgba(255,255,255,0.06)';
       b.style.borderColor = isActive ? 'rgba(255,255,255,0.3)' : GLASS_BORDER;
     }
   }
@@ -356,11 +488,16 @@ export function renderDebugPanel(container: HTMLElement): () => void {
 
   function reopenLogDisplay() {
     closeLogDisplay();
-    activeLogDisplay = createLogDisplay(currentLogMode, currentLogFilter, currentLogStyle);
-    const activeBtn = modeButtons.find(b => {
-      const m = modes.find(md => md.label === b.textContent);
-      return m?.mode === currentLogMode;
-    }) ?? null;
+    activeLogDisplay = createLogDisplay(
+      currentLogMode,
+      currentLogFilter,
+      currentLogStyle,
+    );
+    const activeBtn =
+      modeButtons.find((b) => {
+        const m = modes.find((md) => md.label === b.textContent);
+        return m?.mode === currentLogMode;
+      }) ?? null;
     updateModeButtons(activeBtn);
   }
 
@@ -368,14 +505,19 @@ export function renderDebugPanel(container: HTMLElement): () => void {
 
   // ── Live Data Subscriptions ─────────────────────────────────────
   let latestFeatures: AudioFeatures | null = null;
-  const unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-    latestFeatures = msg.payload;
-  });
+  const unsub = bus.subscribe(
+    'audio:features',
+    (msg: BusMessage<AudioFeatures>) => {
+      latestFeatures = msg.payload;
+    },
+  );
 
   let busMessageCount = 0;
   let busRate = 0;
   let lastBusCheck = performance.now();
-  const busSub = bus.subscribe('audio:*', () => { busMessageCount++; });
+  const busSub = bus.subscribe('audio:*', () => {
+    busMessageCount++;
+  });
 
   const interval = setInterval(() => {
     const debug = getDebugInfo();
@@ -406,14 +548,20 @@ export function renderDebugPanel(container: HTMLElement): () => void {
     const vizMgr = window.__cybernoetica?.vizManager;
     const activeViz = vizMgr?.getActive?.();
     const viewState = activeViz?.getViewState?.() ?? {};
-    const viewStr = Object.entries(viewState).map(([k, v]) =>
-      `${k}:${typeof v === 'number' ? (Math.abs(v) < 0.01 ? v.toExponential(1) : v.toFixed(3)) : v}`
-    ).join('  ');
+    const viewStr = Object.entries(viewState)
+      .map(
+        ([k, v]) =>
+          `${k}:${typeof v === 'number' ? (Math.abs(v) < 0.01 ? v.toExponential(1) : v.toFixed(3)) : v}`,
+      )
+      .join('  ');
     updateInfoBlock(vizInfoBlock, [
       { label: 'Type', value: s.visualizer?.type || '\u2014' },
       { label: 'Playback', value: playbackState },
       { label: 'View', value: viewStr || '\u2014' },
-      { label: 'Params', value: JSON.stringify(s.visualizer?.userParams || {}) },
+      {
+        label: 'Params',
+        value: JSON.stringify(s.visualizer?.userParams || {}),
+      },
     ]);
     updateStateDisplay(s);
     updateInfoBlock(busInfoBlock, [
@@ -430,9 +578,12 @@ export function renderDebugPanel(container: HTMLElement): () => void {
 }
 
 export function isDebugEnabled(): boolean {
-  if (typeof import.meta !== 'undefined' && (import.meta as any).env?.DEV) return true;
+  if (typeof import.meta !== 'undefined' && (import.meta as any).env?.DEV)
+    return true;
   if (window.__cybernoetica_debug_enabled) return true;
   try {
     return new URLSearchParams(window.location.search).has('debug');
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }

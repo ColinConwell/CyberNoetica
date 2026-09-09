@@ -1,7 +1,12 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -21,12 +26,12 @@ import { registerVisualizer } from '../registry.js';
 
 // Known beautiful parameter presets
 const PRESETS = [
-  { a: -1.4, b: 1.6, c: 1.0, d: 0.7 },    // classic flowing curves
-  { a: 1.7, b: 1.7, c: 0.6, d: 1.2 },      // tight spiral clusters
-  { a: -1.8, b: -2.0, c: -0.5, d: -0.9 },   // delicate filaments
-  { a: 1.5, b: -1.8, c: 1.6, d: 0.9 },      // wide symmetric arcs
-  { a: -1.7, b: 1.3, c: -0.1, d: -1.2 },    // organic tendrils
-  { a: 1.1, b: -1.32, c: -1.03, d: 1.54 },  // intricate lattice
+  { a: -1.4, b: 1.6, c: 1.0, d: 0.7 }, // classic flowing curves
+  { a: 1.7, b: 1.7, c: 0.6, d: 1.2 }, // tight spiral clusters
+  { a: -1.8, b: -2.0, c: -0.5, d: -0.9 }, // delicate filaments
+  { a: 1.5, b: -1.8, c: 1.6, d: 0.9 }, // wide symmetric arcs
+  { a: -1.7, b: 1.3, c: -0.1, d: -1.2 }, // organic tendrils
+  { a: 1.1, b: -1.32, c: -1.03, d: 1.54 }, // intricate lattice
 ];
 
 const cliffordMetadata: VisualizerMetadata = {
@@ -36,16 +41,97 @@ const cliffordMetadata: VisualizerMetadata = {
   usesPerspective: false,
   params: [
     // Appearance
-    { key: 'iterations', label: 'Iterations', min: 16, max: 96, step: 4, initial: 48, category: 'appearance', description: 'Orbit iteration count (more = finer detail)' },
-    { key: 'brightness', label: 'Brightness', min: 0.5, max: 3.0, step: 0.1, initial: 1.5, category: 'appearance', description: 'Overall brightness multiplier' },
-    { key: 'falloff', label: 'Falloff', min: 100, max: 1000, step: 50, initial: 400, category: 'appearance', description: 'Density falloff sharpness (wispy to bold)' },
-    { key: 'colorShift', label: 'Color Shift', min: 0.0, max: 1.0, step: 0.05, initial: 0.0, category: 'appearance', description: 'Base hue offset' },
-    { key: 'morphSpeed', label: 'Morph Speed', min: 0.0, max: 1.0, step: 0.05, initial: 0.2, category: 'appearance', description: 'Speed of parameter interpolation' },
+    {
+      key: 'iterations',
+      label: 'Iterations',
+      min: 16,
+      max: 96,
+      step: 4,
+      initial: 48,
+      category: 'appearance',
+      description: 'Orbit iteration count (more = finer detail)',
+    },
+    {
+      key: 'brightness',
+      label: 'Brightness',
+      min: 0.5,
+      max: 3.0,
+      step: 0.1,
+      initial: 1.5,
+      category: 'appearance',
+      description: 'Overall brightness multiplier',
+    },
+    {
+      key: 'falloff',
+      label: 'Falloff',
+      min: 100,
+      max: 1000,
+      step: 50,
+      initial: 400,
+      category: 'appearance',
+      description: 'Density falloff sharpness (wispy to bold)',
+    },
+    {
+      key: 'colorShift',
+      label: 'Color Shift',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.0,
+      category: 'appearance',
+      description: 'Base hue offset',
+    },
+    {
+      key: 'morphSpeed',
+      label: 'Morph Speed',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.2,
+      category: 'appearance',
+      description: 'Speed of parameter interpolation',
+    },
     // Audio mapping
-    { key: 'bassToA', label: 'Bass → Shape', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How bass morphs the attractor shape' },
-    { key: 'midToCD', label: 'Mid → Curvature', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How mids modulate arm width and curvature' },
-    { key: 'spectralToIter', label: 'Spectral → Detail', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How spectral centroid reveals detail depth' },
-    { key: 'rmsToFalloff', label: 'RMS → Boldness', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How volume controls wispy vs bold rendering' },
+    {
+      key: 'bassToA',
+      label: 'Bass → Shape',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How bass morphs the attractor shape',
+    },
+    {
+      key: 'midToCD',
+      label: 'Mid → Curvature',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How mids modulate arm width and curvature',
+    },
+    {
+      key: 'spectralToIter',
+      label: 'Spectral → Detail',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How spectral centroid reveals detail depth',
+    },
+    {
+      key: 'rmsToFalloff',
+      label: 'RMS → Boldness',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How volume controls wispy vs bold rendering',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
@@ -56,6 +142,8 @@ const cliffordMetadata: VisualizerMetadata = {
 };
 
 export class CliffordVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = cliffordMetadata;
 
   private unsub: Unsubscribe;
@@ -87,7 +175,7 @@ export class CliffordVisualizer implements Visualizer {
     high: new EMASmoothing(0.2),
     rms: new EMASmoothing(0.18),
     spectralCentroid: new EMASmoothing(0.1),
-    beatPulse: new EMASmoothing(0.5),
+    beatPulse: new EventEnvelope(),
     paramA: new EMASmoothing(0.03),
     paramB: new EMASmoothing(0.03),
     paramC: new EMASmoothing(0.03),
@@ -98,9 +186,12 @@ export class CliffordVisualizer implements Visualizer {
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
 
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
@@ -148,17 +239,24 @@ export class CliffordVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
 
       // On beat, advance to next preset (with cooldown)
       if (f.beatOnset && this.time - this.lastBeatTime > 2.0) {
@@ -166,21 +264,34 @@ export class CliffordVisualizer implements Visualizer {
         this.presetIndex = (this.presetIndex + 1) % PRESETS.length;
       }
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     // Slowly morph toward current preset
     const target = PRESETS[this.presetIndex];
 
     // Bass modulates the 'a' parameter around the preset value
-    const bassOffset = this.smoothers.bass.value * 0.5 * this.userParams.bassToA;
-    this.smoothers.paramA.update(target.a + bassOffset);
-    this.smoothers.paramB.update(target.b);
+    const bassOffset =
+      this.smoothers.bass.value * 0.025 * this.userParams.bassToA;
+    this.smoothers.paramA.update(
+      target.a + bassOffset,
+      this.deltaSeconds * this.userParams.morphSpeed,
+    );
+    this.smoothers.paramB.update(
+      target.b,
+      this.deltaSeconds * this.userParams.morphSpeed,
+    );
 
     // Mids modulate c and d
-    const midOffset = this.smoothers.mid.value * 0.3 * this.userParams.midToCD;
-    this.smoothers.paramC.update(target.c + midOffset);
-    this.smoothers.paramD.update(target.d - midOffset * 0.5);
+    const midOffset = this.smoothers.mid.value * 0.02 * this.userParams.midToCD;
+    this.smoothers.paramC.update(
+      target.c + midOffset,
+      this.deltaSeconds * this.userParams.morphSpeed,
+    );
+    this.smoothers.paramD.update(
+      target.d - midOffset * 0.5,
+      this.deltaSeconds * this.userParams.morphSpeed,
+    );
 
     if (this.material) {
       const u = this.material.uniforms;
@@ -191,11 +302,17 @@ export class CliffordVisualizer implements Visualizer {
       u.u_paramB.value = this.smoothers.paramB.value;
       u.u_paramC.value = this.smoothers.paramC.value;
       u.u_paramD.value = this.smoothers.paramD.value;
-      u.u_iterations.value = this.userParams.iterations;
+      u.u_iterations.value =
+        this.userParams.iterations *
+        (1 +
+          this.smoothers.spectralCentroid.value *
+            0.5 *
+            this.userParams.spectralToIter);
       u.u_brightness.value = this.userParams.brightness;
 
       // RMS modulates falloff (boldness)
-      const falloffMod = 1.0 - this.smoothers.rms.value * 0.4 * this.userParams.rmsToFalloff;
+      const falloffMod =
+        1.0 - this.smoothers.rms.value * 0.4 * this.userParams.rmsToFalloff;
       u.u_falloff.value = this.userParams.falloff * Math.max(0.3, falloffMod);
 
       u.u_colorShift.value = this.userParams.colorShift;
@@ -209,7 +326,8 @@ export class CliffordVisualizer implements Visualizer {
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -221,9 +339,12 @@ export class CliffordVisualizer implements Visualizer {
   }
 
   setViewState(partial: Record<string, number>): void {
-    if ('zoom' in partial) this._zoom = Math.max(0.2, Math.min(5.0, partial.zoom));
-    if ('panX' in partial) this._panX = Math.max(-3.0, Math.min(3.0, partial.panX));
-    if ('panY' in partial) this._panY = Math.max(-3.0, Math.min(3.0, partial.panY));
+    if ('zoom' in partial)
+      this._zoom = Math.max(0.2, Math.min(5.0, partial.zoom));
+    if ('panX' in partial)
+      this._panX = Math.max(-3.0, Math.min(3.0, partial.panX));
+    if ('panY' in partial)
+      this._panY = Math.max(-3.0, Math.min(3.0, partial.panY));
   }
 
   dispose(): void {
@@ -291,7 +412,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     // Use pixel position as seed, iterate the Clifford map
     vec2 p = uv;
     float density = 0.0;
-    float colorAccum = 0.0;
+    vec2 colorDirection=vec2(0.0);
 
     for (int i = 0; i < MAX_ITER; i++) {
       if (i >= iters) break;
@@ -308,7 +429,7 @@ const FRAGMENT_SHADER = /* glsl */ `
       density += exp(-dist * 2.0);
 
       // Color: accumulate angle for hue variation
-      colorAccum += atan(p.y, p.x);
+      colorDirection += p/max(length(p),1e-6);
     }
 
     density /= float(iters);
@@ -334,7 +455,7 @@ const FRAGMENT_SHADER = /* glsl */ `
 
     // --- Coloring ---
     float hue = fract(
-      colorAccum * 0.02
+      atan(colorDirection.y,colorDirection.x)/6.28318530718
       + u_colorShift
       + combined * 0.5
       + u_spectralCentroid * 0.15

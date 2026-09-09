@@ -1,7 +1,12 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -38,19 +43,136 @@ const lyapunovMetadata: VisualizerMetadata = {
   description: 'Markus-Lyapunov fractal -- biomechanical logistic-map basins',
   usesPerspective: false,
   params: [
+    {
+      key: 'convergenceView',
+      label: 'Convergence diagnostic',
+      min: 0,
+      max: 1,
+      step: 1,
+      initial: 0,
+      category: 'appearance',
+      description:
+        'Warm pixels indicate disagreement between half and full measurement windows; not a rigorous error bound',
+    },
+    {
+      key: 'sequencePreset',
+      label: 'Sequence (AB / AAB / ABB / ABBA / seeded)',
+      min: 0,
+      max: 4,
+      step: 1,
+      initial: 0,
+      category: 'appearance',
+    },
     // Appearance
-    { key: 'sequenceBias', label: 'Sequence Bias', min: 0.0, max: 1.0, step: 0.01, initial: 0.5, category: 'appearance', description: 'Fraction of B in alternation (0=all A, 1=all B)' },
-    { key: 'warmup', label: 'Warmup Steps', min: 20, max: 200, step: 10, initial: 80, category: 'appearance', description: 'Burn-in iterations before measuring lambda' },
-    { key: 'measure', label: 'Measure Steps', min: 40, max: 300, step: 10, initial: 140, category: 'appearance', description: 'Iterations used to compute lambda' },
-    { key: 'brightness', label: 'Brightness', min: 0.3, max: 2.5, step: 0.05, initial: 1.2, category: 'appearance' },
-    { key: 'contrast', label: 'Contrast', min: 0.3, max: 2.5, step: 0.05, initial: 1.1, category: 'appearance' },
-    { key: 'hueShift', label: 'Hue Shift', min: 0.0, max: 1.0, step: 0.01, initial: 0.06, category: 'appearance', description: 'Palette rotation' },
+    {
+      key: 'sequenceBias',
+      label: 'Sequence Bias',
+      min: 0.0,
+      max: 1.0,
+      step: 0.01,
+      initial: 0.5,
+      category: 'appearance',
+      description: 'Fraction of B in alternation (0=all A, 1=all B)',
+    },
+    {
+      key: 'warmup',
+      label: 'Warmup Steps',
+      min: 20,
+      max: 200,
+      step: 10,
+      initial: 80,
+      category: 'appearance',
+      description: 'Burn-in iterations before measuring lambda',
+    },
+    {
+      key: 'measure',
+      label: 'Measure Steps',
+      min: 40,
+      max: 300,
+      step: 10,
+      initial: 140,
+      category: 'appearance',
+      description: 'Iterations used to compute lambda',
+    },
+    {
+      key: 'brightness',
+      label: 'Brightness',
+      min: 0.3,
+      max: 2.5,
+      step: 0.05,
+      initial: 1.2,
+      category: 'appearance',
+    },
+    {
+      key: 'contrast',
+      label: 'Contrast',
+      min: 0.3,
+      max: 2.5,
+      step: 0.05,
+      initial: 1.1,
+      category: 'appearance',
+    },
+    {
+      key: 'hueShift',
+      label: 'Hue Shift',
+      min: 0.0,
+      max: 1.0,
+      step: 0.01,
+      initial: 0.06,
+      category: 'appearance',
+      description: 'Palette rotation',
+    },
     // Audio mapping
-    { key: 'bassToBias', label: 'Bass \u2192 Bias', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Bass shifts the A/B bias' },
-    { key: 'midToWarp', label: 'Mid \u2192 Warp', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Mids warp the parameter plane' },
-    { key: 'highToSparkle', label: 'High \u2192 Sparkle', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Highs sparkle in chaos regions' },
-    { key: 'rmsToGlow', label: 'RMS \u2192 Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Volume drives overall brightness' },
-    { key: 'beatToJolt', label: 'Beat \u2192 Jolt', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Beats rotate the sequence phase' },
+    {
+      key: 'bassToBias',
+      label: 'Bass \u2192 Bias',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Bass shifts the A/B bias',
+    },
+    {
+      key: 'midToWarp',
+      label: 'Mid \u2192 Warp',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Mids warp the parameter plane',
+    },
+    {
+      key: 'highToSparkle',
+      label: 'High \u2192 Sparkle',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Highs sparkle in chaos regions',
+    },
+    {
+      key: 'rmsToGlow',
+      label: 'RMS \u2192 Glow',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Volume drives overall brightness',
+    },
+    {
+      key: 'beatToJolt',
+      label: 'Beat \u2192 Jolt',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Beats rotate the sequence phase',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
@@ -61,14 +183,19 @@ const lyapunovMetadata: VisualizerMetadata = {
 };
 
 export class LyapunovVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = lyapunovMetadata;
 
   private unsub: Unsubscribe;
   private latestFeatures: AudioFeatures | null = null;
   private time = 0;
+  private sequenceBias = 0.5;
   private sequencePhase = 0;
 
   private userParams: Record<string, number> = {
+    convergenceView: 0,
+    sequencePreset: 0,
     sequenceBias: 0.5,
     warmup: 80,
     measure: 140,
@@ -93,16 +220,19 @@ export class LyapunovVisualizer implements Visualizer {
     mid: new EMASmoothing(0.15),
     high: new EMASmoothing(0.22),
     rms: new EMASmoothing(0.12),
-    beatPulse: new EMASmoothing(0.4),
+    beatPulse: new EventEnvelope(),
   };
 
   private material: THREE.ShaderMaterial | null = null;
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
 
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
@@ -116,6 +246,9 @@ export class LyapunovVisualizer implements Visualizer {
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
+        u_convergenceView: { value: 0 },
+        u_workBudget: { value: 1 },
+        u_sequencePreset: { value: 0 },
         u_time: { value: 0.0 },
         u_resolution: { value: new THREE.Vector2(1920, 1080) },
         u_zoom: { value: 1.0 },
@@ -141,63 +274,78 @@ export class LyapunovVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
 
       if (f.beatOnset && this.userParams.beatToJolt > 0) {
-        this.sequencePhase += 0.15 * this.userParams.beatToJolt;
+        this.sequencePhase += 1;
+        this.sequenceBias = Math.max(
+          0,
+          Math.min(
+            1,
+            this.userParams.sequenceBias +
+              (this.smoothers.bass.value - 0.3) *
+                0.4 *
+                this.userParams.bassToBias,
+          ),
+        );
       }
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     // Slow continuous drift in sequence phase
-    this.sequencePhase += (1 / 60) * 0.04;
+    // Seeded sequence changes only on explicit onset events.
 
-    const bias = Math.max(
-      0,
-      Math.min(
-        1,
-        this.userParams.sequenceBias + (this.smoothers.bass.value - 0.3) * 0.4 * this.userParams.bassToBias,
-      ),
-    );
+    const bias = this.sequenceBias;
 
     const warpMag = 0.05 * this.smoothers.mid.value * this.userParams.midToWarp;
 
     if (this.material) {
       const u = this.material.uniforms;
+      u.u_convergenceView.value = this.userParams.convergenceView;
       u.u_time.value = this.time;
       u.u_zoom.value = this._zoom;
       u.u_pan.value.set(this._panX, this._panY);
+      u.u_sequencePreset.value = Math.round(this.userParams.sequencePreset);
       u.u_sequenceBias.value = bias;
       u.u_sequencePhase.value = this.sequencePhase;
       u.u_warmup.value = this.userParams.warmup;
       u.u_measure.value = this.userParams.measure;
-      u.u_brightness.value = this.userParams.brightness * (0.7 + this.smoothers.rms.value * 0.6 * this.userParams.rmsToGlow);
+      u.u_brightness.value =
+        this.userParams.brightness *
+        (0.7 + this.smoothers.rms.value * 0.6 * this.userParams.rmsToGlow);
       u.u_contrast.value = this.userParams.contrast;
       u.u_hueShift.value = this.userParams.hueShift;
       u.u_warpX.value = Math.sin(this.time * 0.3) * warpMag;
       u.u_warpY.value = Math.cos(this.time * 0.25) * warpMag;
-      u.u_high.value = this.smoothers.high.value * this.userParams.highToSparkle;
+      u.u_high.value =
+        this.smoothers.high.value * this.userParams.highToSparkle;
       u.u_rms.value = this.smoothers.rms.value;
       u.u_beatPulse.value = this.smoothers.beatPulse.value;
     }
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
     if (key in this.userParams) this.userParams[key] = value;
+    if (key === 'sequenceBias') this.sequenceBias = value;
   }
 
   getViewState(): Record<string, number> {
@@ -254,6 +402,9 @@ const FRAGMENT_SHADER = /* glsl */ `
   #define PI 3.14159265359
   #define MAX_STEPS 500
 
+  uniform float u_convergenceView;
+  uniform float u_workBudget;
+  uniform float u_sequencePreset;
   uniform float u_time;
   uniform vec2 u_resolution;
   uniform float u_zoom;
@@ -279,6 +430,11 @@ const FRAGMENT_SHADER = /* glsl */ `
   // We use a smooth Bernoulli-like pattern parameterized by bias and a
   // deterministic hash-based permutation advanced by u_sequencePhase.
   float pickB(int n) {
+    float index = float(n);
+    if (u_sequencePreset < .5) return mod(index, 2.0);
+    if (u_sequencePreset < 1.5) return step(1.5, mod(index, 3.0));
+    if (u_sequencePreset < 2.5) return step(.5, mod(index, 3.0));
+    if (u_sequencePreset < 3.5) return step(.5, mod(index, 4.0)) * (1.0 - step(2.5, mod(index, 4.0)));
     float h = fract(sin(float(n) * 12.9898 + u_sequencePhase * 17.3) * 43758.5453);
     return step(h, u_sequenceBias);
   }
@@ -293,14 +449,17 @@ const FRAGMENT_SHADER = /* glsl */ `
     ab.y += u_warpY;
 
     // Clamp to the logistic-map stability range (0, 4)
+    if (ab.x <= 0.0 || ab.x > 4.0 || ab.y <= 0.0 || ab.y > 4.0) {
+      gl_FragColor = vec4(.006, .004, .012, 1.0); return;
+    }
     float a = clamp(ab.x, 0.01, 4.0);
     float b = clamp(ab.y, 0.01, 4.0);
 
     int warmup = int(clamp(u_warmup, 10.0, 250.0));
-    int measure = int(clamp(u_measure, 20.0, 250.0));
+    int measure = int(clamp(u_measure, 20.0, floor(300.0 * u_workBudget)));
 
     // Initial seed away from 0 and 1
-    float x = 0.5;
+    float x = 0.123456789;
 
     // Warmup: discard transient
     for (int i = 0; i < MAX_STEPS; i++) {
@@ -311,15 +470,17 @@ const FRAGMENT_SHADER = /* glsl */ `
     }
 
     // Measurement: accumulate sum of log|r * (1 - 2x)|
-    float lambdaSum = 0.0;
+    float lambdaSum = 0.0;float firstHalf=0.0;
     for (int i = 0; i < MAX_STEPS; i++) {
       if (i >= measure) break;
       float pickBf = pickB(warmup + i);
       float r = mix(a, b, pickBf);
-      x = r * x * (1.0 - x);
+      // Derivative at x_n, before advancing to x_(n+1).
       float deriv = abs(r * (1.0 - 2.0 * x));
+      x = r * x * (1.0 - x);
       // log(0) guard -- clamp
       lambdaSum += log(max(deriv, 1e-10));
+      if(i+1==measure/2)firstHalf=lambdaSum;
     }
 
     float lambda = lambdaSum / float(measure);
@@ -360,6 +521,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     // Tone mapping
     color = color / (1.0 + color);
 
+    if(u_convergenceView>.5){float error=abs(lambda-firstHalf/float(measure/2));color=mix(vec3(.03,.25,.3),vec3(1.,.15,.03),smoothstep(.01,.2,error));}
     gl_FragColor = vec4(color, 1.0);
   }
 `;

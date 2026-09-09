@@ -25,16 +25,43 @@ const metadata: VisualizerMetadata = {
   description: 'Rössler single-scroll attractor',
   usesPerspective: true,
   params: [
-    { key: 'paramA', label: 'Param a', min: 0.05, max: 0.4, step: 0.01, initial: 0.2, category: 'appearance', description: 'Linear y-coupling' },
-    { key: 'paramB', label: 'Param b', min: 0.05, max: 0.6, step: 0.01, initial: 0.2, category: 'appearance', description: 'Constant z-drive' },
-    { key: 'paramC', label: 'Param c', min: 4.0, max: 10.0, step: 0.05, initial: 5.7, category: 'appearance', description: 'Folding threshold' },
+    {
+      key: 'paramA',
+      label: 'Param a',
+      min: 0.18,
+      max: 0.22,
+      step: 0.01,
+      initial: 0.2,
+      category: 'appearance',
+      description: 'Linear y-coupling',
+    },
+    {
+      key: 'paramB',
+      label: 'Param b',
+      min: 0.18,
+      max: 0.22,
+      step: 0.01,
+      initial: 0.2,
+      category: 'appearance',
+      description: 'Constant z-drive',
+    },
+    {
+      key: 'paramC',
+      label: 'Param c',
+      min: 5.3,
+      max: 6.1,
+      step: 0.05,
+      initial: 5.7,
+      category: 'appearance',
+      description: 'Folding threshold',
+    },
     ...FLOW_SHARED_PARAMS,
   ],
   viewport: { ...FLOW_VIEWPORT },
   viewStateFields: FLOW_VIEW_FIELDS,
 };
 
-function rosslerDerivs(p: Vec3, params: Record<string, number>): Vec3 {
+export function rosslerDerivs(p: Vec3, params: Record<string, number>): Vec3 {
   const a = params.paramA;
   const b = params.paramB;
   const c = params.paramC;
@@ -52,7 +79,7 @@ const config: FlowConfig = {
   scale: 0.22,
   dt: 0.02,
   driveParam: 'paramC',
-  driveScale: 2.2,
+  driveScale: 0.4,
   seed: { x: 0.1, y: 0.1, z: 0.1 },
   hueOffset: 0.08,
   orbitAngle: 0.5,

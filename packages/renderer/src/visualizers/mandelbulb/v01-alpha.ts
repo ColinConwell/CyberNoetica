@@ -1,7 +1,12 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -25,15 +30,127 @@ const mandelbulbMetadata: VisualizerMetadata = {
   description: '3D fractal raymarched in real-time',
   usesPerspective: false,
   params: [
-    { key: 'power', label: 'Power', min: 2, max: 16, step: 0.5, initial: 8, category: 'appearance', description: 'Fractal power exponent (8 = classic Mandelbulb)' },
-    { key: 'iterations', label: 'Iterations', min: 2, max: 12, step: 1, initial: 6, category: 'appearance', description: 'Fractal iteration depth' },
-    { key: 'orbitSpeed', label: 'Orbit Speed', min: 0.0, max: 1.0, step: 0.05, initial: 0.15, category: 'appearance', description: 'Camera orbit speed' },
-    { key: 'colorScheme', label: 'Color Shift', min: 0.0, max: 1.0, step: 0.01, initial: 0.0, category: 'appearance', description: 'Palette hue offset' },
-    { key: 'glowIntensity', label: 'Glow', min: 0.2, max: 2.0, step: 0.1, initial: 1.0, category: 'appearance', description: 'Surface glow intensity' },
-    { key: 'bassToPower', label: 'Bass -> Power', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Bass modulates fractal power' },
-    { key: 'spectralToOrbit', label: 'Spectral -> Orbit', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Spectral centroid drives orbit angle' },
-    { key: 'rmsToGlow', label: 'RMS -> Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Volume drives surface glow' },
-    { key: 'beatToPulse', label: 'Beat -> Pulse', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Beats trigger power spikes' },
+    {
+      key: 'stableShape',
+      label: 'Stable shape preset',
+      min: 0,
+      max: 1,
+      step: 1,
+      initial: 1,
+      category: 'appearance',
+      description:
+        'Hold geometric parameters while sound changes light and camera',
+    },
+    {
+      key: 'stepSafety',
+      label: 'March safety factor',
+      min: 0.2,
+      max: 0.8,
+      step: 0.05,
+      initial: 0.5,
+      category: 'appearance',
+      description:
+        'Conservative multiplier for an approximate distance estimate',
+    },
+    {
+      key: 'hitTolerance',
+      label: 'Hit tolerance',
+      min: 0.0002,
+      max: 0.005,
+      step: 0.0002,
+      initial: 0.001,
+      category: 'appearance',
+    },
+    {
+      key: 'power',
+      label: 'Power',
+      min: 2,
+      max: 16,
+      step: 0.5,
+      initial: 8,
+      category: 'appearance',
+      description: 'Fractal power exponent (8 = classic Mandelbulb)',
+    },
+    {
+      key: 'iterations',
+      label: 'Iterations',
+      min: 2,
+      max: 12,
+      step: 1,
+      initial: 6,
+      category: 'appearance',
+      description: 'Fractal iteration depth',
+    },
+    {
+      key: 'orbitSpeed',
+      label: 'Orbit Speed',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.15,
+      category: 'appearance',
+      description: 'Camera orbit speed',
+    },
+    {
+      key: 'colorScheme',
+      label: 'Color Shift',
+      min: 0.0,
+      max: 1.0,
+      step: 0.01,
+      initial: 0.0,
+      category: 'appearance',
+      description: 'Palette hue offset',
+    },
+    {
+      key: 'glowIntensity',
+      label: 'Glow',
+      min: 0.2,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'appearance',
+      description: 'Surface glow intensity',
+    },
+    {
+      key: 'bassToPower',
+      label: 'Bass -> Power',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Bass modulates fractal power',
+    },
+    {
+      key: 'spectralToOrbit',
+      label: 'Spectral -> Orbit',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Spectral centroid drives orbit angle',
+    },
+    {
+      key: 'rmsToGlow',
+      label: 'RMS -> Glow',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Volume drives surface glow',
+    },
+    {
+      key: 'beatToPulse',
+      label: 'Beat -> Pulse',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Beats trigger power spikes',
+    },
   ],
   viewport: { pan: false, zoom: true, orbit: false },
   viewStateFields: [
@@ -42,6 +159,8 @@ const mandelbulbMetadata: VisualizerMetadata = {
 };
 
 export class MandelbulbVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = mandelbulbMetadata;
 
   private unsub: Unsubscribe;
@@ -49,6 +168,9 @@ export class MandelbulbVisualizer implements Visualizer {
   private time = 0;
 
   private userParams: Record<string, number> = {
+    stableShape: 1,
+    stepSafety: 0.5,
+    hitTolerance: 0.001,
     power: 8,
     iterations: 6,
     orbitSpeed: 0.15,
@@ -69,16 +191,19 @@ export class MandelbulbVisualizer implements Visualizer {
     high: new EMASmoothing(0.22),
     rms: new EMASmoothing(0.15),
     spectralCentroid: new EMASmoothing(0.08),
-    beatPulse: new EMASmoothing(0.4),
+    beatPulse: new EventEnvelope(),
   };
 
   private material: THREE.ShaderMaterial | null = null;
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
 
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
@@ -93,6 +218,9 @@ export class MandelbulbVisualizer implements Visualizer {
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
+        u_stepSafety: { value: 0.5 },
+        u_hitTolerance: { value: 0.001 },
+        u_workBudget: { value: 1 },
         u_time: { value: 0.0 },
         u_resolution: { value: new THREE.Vector2(1920, 1080) },
         u_zoom: { value: 1.0 },
@@ -116,33 +244,56 @@ export class MandelbulbVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
-    const orbitAngle = this.time * this.userParams.orbitSpeed
-      + this.smoothers.spectralCentroid.value * 2.0 * this.userParams.spectralToOrbit;
+    const orbitAngle = this.phases.advance(
+      'orbit',
+      this.userParams.orbitSpeed *
+        (1 +
+          this.smoothers.spectralCentroid.value *
+            this.userParams.spectralToOrbit),
+      this.deltaSeconds,
+    );
 
-    const effectivePower = this.userParams.power
-      + this.smoothers.bass.value * 2.0 * this.userParams.bassToPower
-      + this.smoothers.beatPulse.value * 3.0 * this.userParams.beatToPulse;
+    const effectivePower =
+      this.userParams.power +
+      (1 - this.userParams.stableShape) *
+        this.smoothers.bass.value *
+        2.0 *
+        this.userParams.bassToPower +
+      (1 - this.userParams.stableShape) *
+        this.smoothers.beatPulse.value *
+        3.0 *
+        this.userParams.beatToPulse;
 
-    const effectiveGlow = this.userParams.glowIntensity
-      + this.smoothers.rms.value * 0.8 * this.userParams.rmsToGlow;
+    const effectiveGlow =
+      this.userParams.glowIntensity +
+      this.smoothers.rms.value * 0.8 * this.userParams.rmsToGlow;
 
     if (this.material) {
       const u = this.material.uniforms;
+      u.u_stepSafety.value = this.userParams.stepSafety;
+      u.u_hitTolerance.value = this.userParams.hitTolerance;
       u.u_time.value = this.time;
       u.u_zoom.value = this._zoom;
       u.u_power.value = effectivePower;
@@ -160,7 +311,8 @@ export class MandelbulbVisualizer implements Visualizer {
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -211,6 +363,8 @@ const FRAGMENT_SHADER = /* glsl */ `
   #define MAX_DIST 10.0
   #define SURF_DIST 0.001
 
+  uniform float u_workBudget;
+  uniform float u_stepSafety;uniform float u_hitTolerance;
   uniform float u_time;
   uniform vec2 u_resolution;
   uniform float u_zoom;
@@ -259,7 +413,7 @@ const FRAGMENT_SHADER = /* glsl */ `
       if (r > 2.0) break;
 
       // Convert to spherical coordinates
-      float theta = acos(z.z / r);
+      float theta = acos(clamp(z.z / max(r, 1e-12), -1.0, 1.0));
       float phi = atan(z.y, z.x);
 
       // Running derivative for distance estimation
@@ -282,7 +436,9 @@ const FRAGMENT_SHADER = /* glsl */ `
       orbitTrap = min(orbitTrap, length(z));
     }
 
-    return 0.5 * log(r) * r / dr;
+    r = length(z);
+    if (r <= 2.0) return 0.0; // No escape within the iteration budget.
+    return 0.5 * log(r) * r / max(dr, 1e-12);
   }
 
   // Ambient occlusion approximation
@@ -345,19 +501,20 @@ const FRAGMENT_SHADER = /* glsl */ `
     bool hit = false;
 
     for (int i = 0; i < MAX_STEPS; i++) {
+      if (float(i) >= max(32.0, float(MAX_STEPS) * u_workBudget)) break;
       vec3 p = ro + rd * t;
       float trapVal;
       float d = mandelbulbDE(p, u_power, iters, trapVal);
 
       glow += 0.015 / (0.05 + d * d);
 
-      if (d < SURF_DIST) {
+      if (d < u_hitTolerance) {
         orbitTrap = trapVal;
         hit = true;
         break;
       }
       if (t > MAX_DIST) break;
-      t += d * 0.7;
+      t += d * u_stepSafety;
     }
 
     vec3 color = vec3(0.0);

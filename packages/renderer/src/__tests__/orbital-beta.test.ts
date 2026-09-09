@@ -14,7 +14,7 @@ describe('OrbitalBetaVisualizer', () => {
     const bus = new MessageBus();
     const viz = new OrbitalBetaVisualizer(bus);
     expect(viz.metadata.type).toBe('orbital-beta');
-    expect(viz.metadata.label).toBe('Orbital Beta');
+    expect(viz.metadata.label).toBe('Orbital (β)');
     expect(viz.metadata.usesPerspective).toBe(true);
     expect(viz.metadata.viewport.orbit).toBe(true);
     expect(viz.metadata.viewport.zoom).toBe(true);
@@ -25,9 +25,16 @@ describe('OrbitalBetaVisualizer', () => {
     const bus = new MessageBus();
     const viz = new OrbitalBetaVisualizer(bus);
     const features: AudioFeatures = {
-      fftBins: new Float32Array(1024), bass: 0.8, mid: 0.5, high: 0.3,
-      spectralCentroid: 0.6, spectralFlux: 0.2, rms: 0.7,
-      beatOnset: true, beatConfidence: 0.9, degraded: false,
+      fftBins: new Float32Array(1024),
+      bass: 0.8,
+      mid: 0.5,
+      high: 0.3,
+      spectralCentroid: 0.6,
+      spectralFlux: 0.2,
+      rms: 0.7,
+      beatOnset: true,
+      beatConfidence: 0.9,
+      degraded: false,
     };
     bus.publish('audio:features', features);
     viz.tick();
@@ -72,9 +79,11 @@ describe('OrbitalBetaVisualizer', () => {
   it('has perturbation param (orbit drift)', () => {
     const bus = new MessageBus();
     const viz = new OrbitalBetaVisualizer(bus);
-    const driftParam = viz.metadata.params.find(p => p.key === 'perturbation');
+    const driftParam = viz.metadata.params.find(
+      (p) => p.key === 'perturbation',
+    );
     expect(driftParam).toBeDefined();
-    expect(driftParam!.label).toBe('Orbit Drift');
+    expect(driftParam!.label).toBe('Slow Orbital Drift');
   });
 
   it('getCameraPosition computes from view state', () => {
@@ -90,14 +99,16 @@ describe('OrbitalBetaVisualizer', () => {
     const bus = new MessageBus();
     const viz = new OrbitalBetaVisualizer(bus);
     expect(viz.metadata.viewStateFields.length).toBe(3);
-    const keys = viz.metadata.viewStateFields.map(f => f.key);
+    const keys = viz.metadata.viewStateFields.map((f) => f.key);
     expect(keys).toEqual(['orbitAngle', 'elevation', 'distance']);
   });
 
   it('has audio-mapping params', () => {
     const bus = new MessageBus();
     const viz = new OrbitalBetaVisualizer(bus);
-    const audioParams = viz.metadata.params.filter(p => p.category === 'audio-mapping');
+    const audioParams = viz.metadata.params.filter(
+      (p) => p.category === 'audio-mapping',
+    );
     expect(audioParams.length).toBeGreaterThanOrEqual(3);
   });
 });

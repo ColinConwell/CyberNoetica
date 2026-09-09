@@ -1,17 +1,20 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
 /**
  * Apollonian Gasket visualizer -- fractal circle packing.
  *
- * Renders the self-similar fractal formed by repeatedly inscribing
- * mutually tangent circles using the Descartes Circle Theorem.
- * Implemented via iterated circle inversions in a fragment shader,
- * producing an infinite recursive structure with fractal dimension ~1.3058.
+ * Iterated circle inversions inspired by Apollonian packing. This is not
+ * a Descartes-circle construction, and no packing dimension is asserted.
  *
  * Audio mapping:
  *   bass  -> scale pulsation (circles breathe outward)
@@ -24,22 +27,121 @@ import { registerVisualizer } from '../registry.js';
 const apollonianMetadata: VisualizerMetadata = {
   type: 'apollonian',
   label: 'Apollonian Gasket',
-  description: 'Fractal circle packing via Möbius inversions',
+  description: 'Apollonian-inspired circle inversions',
   usesPerspective: false,
   params: [
     // Appearance
-    { key: 'iterations', label: 'Depth', min: 4, max: 14, step: 1, initial: 9, category: 'appearance', description: 'Inversion recursion depth' },
-    { key: 'lineWidth', label: 'Line Width', min: 0.5, max: 4.0, step: 0.25, initial: 1.5, category: 'appearance', description: 'Circle outline thickness' },
-    { key: 'colorCycles', label: 'Color Cycles', min: 0.5, max: 4.0, step: 0.25, initial: 1.5, category: 'appearance', description: 'Hue cycles across recursion depth' },
-    { key: 'brightness', label: 'Brightness', min: 0.3, max: 2.0, step: 0.05, initial: 1.0, category: 'appearance', description: 'Overall luminance' },
-    { key: 'rotationSpeed', label: 'Rotation', min: 0.0, max: 1.0, step: 0.05, initial: 0.15, category: 'appearance', description: 'Slow rotation animation' },
-    { key: 'fillOpacity', label: 'Fill Opacity', min: 0.0, max: 1.0, step: 0.05, initial: 0.3, category: 'appearance', description: 'Circle interior fill' },
+    {
+      key: 'iterations',
+      label: 'Depth',
+      min: 4,
+      max: 14,
+      step: 1,
+      initial: 9,
+      category: 'appearance',
+      description: 'Inversion recursion depth',
+    },
+    {
+      key: 'lineWidth',
+      label: 'Line Width',
+      min: 0.5,
+      max: 4.0,
+      step: 0.25,
+      initial: 1.5,
+      category: 'appearance',
+      description: 'Circle outline thickness',
+    },
+    {
+      key: 'colorCycles',
+      label: 'Color Cycles',
+      min: 0.5,
+      max: 4.0,
+      step: 0.25,
+      initial: 1.5,
+      category: 'appearance',
+      description: 'Hue cycles across recursion depth',
+    },
+    {
+      key: 'brightness',
+      label: 'Brightness',
+      min: 0.3,
+      max: 2.0,
+      step: 0.05,
+      initial: 1.0,
+      category: 'appearance',
+      description: 'Overall luminance',
+    },
+    {
+      key: 'rotationSpeed',
+      label: 'Rotation',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.15,
+      category: 'appearance',
+      description: 'Slow rotation animation',
+    },
+    {
+      key: 'fillOpacity',
+      label: 'Fill Opacity',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.3,
+      category: 'appearance',
+      description: 'Circle interior fill',
+    },
     // Audio mapping
-    { key: 'bassToPulse', label: 'Bass → Pulse', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Bass drives circle breathing' },
-    { key: 'midToDepth', label: 'Mid → Depth', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Mids reveal deeper structure' },
-    { key: 'highToGlow', label: 'High → Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Highs light up small circles' },
-    { key: 'rmsToFill', label: 'RMS → Fill', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Volume drives fill opacity' },
-    { key: 'beatToJolt', label: 'Beat → Jolt', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'Beats perturb inversions' },
+    {
+      key: 'bassToPulse',
+      label: 'Bass → Pulse',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Bass drives circle breathing',
+    },
+    {
+      key: 'midToDepth',
+      label: 'Mid → Depth',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Mids reveal deeper structure',
+    },
+    {
+      key: 'highToGlow',
+      label: 'High → Glow',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Highs light up small circles',
+    },
+    {
+      key: 'rmsToFill',
+      label: 'RMS → Fill',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Volume drives fill opacity',
+    },
+    {
+      key: 'beatToJolt',
+      label: 'Beat → Jolt',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Beats perturb inversions',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
@@ -50,6 +152,8 @@ const apollonianMetadata: VisualizerMetadata = {
 };
 
 export class ApollonianVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = apollonianMetadata;
 
   private unsub: Unsubscribe;
@@ -82,16 +186,19 @@ export class ApollonianVisualizer implements Visualizer {
     mid: new EMASmoothing(0.18),
     high: new EMASmoothing(0.25),
     rms: new EMASmoothing(0.15),
-    beatPulse: new EMASmoothing(0.4),
+    beatPulse: new EventEnvelope(),
   };
 
   private material: THREE.ShaderMaterial | null = null;
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
     this.smoothers.high.reset(0);
@@ -132,37 +239,49 @@ export class ApollonianVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
 
       if (f.beatOnset && this.userParams.beatToJolt > 0) {
         this.joltVelocity += 0.4 * this.userParams.beatToJolt;
       }
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     this.joltVelocity *= 0.92;
-    this.joltAccum += this.joltVelocity * (1 / 60);
+    this.joltAccum += this.joltVelocity * this.deltaSeconds;
 
     if (this.material) {
       const u = this.material.uniforms;
-      u.u_time.value = this.time * this.userParams.rotationSpeed;
+      u.u_time.value = this.phases.advance(
+        'animation',
+        this.userParams.rotationSpeed,
+        this.deltaSeconds,
+      );
       u.u_zoom.value = this._zoom;
       u.u_pan.value.set(this._panX, this._panY);
-      u.u_iterations.value = this.userParams.iterations + this.smoothers.mid.value * 3.0 * this.userParams.midToDepth;
+      u.u_iterations.value =
+        this.userParams.iterations +
+        this.smoothers.mid.value * 3.0 * this.userParams.midToDepth;
       u.u_lineWidth.value = this.userParams.lineWidth;
       u.u_colorCycles.value = this.userParams.colorCycles;
       u.u_brightness.value = this.userParams.brightness;
-      u.u_fillOpacity.value = this.userParams.fillOpacity + this.smoothers.rms.value * 0.3 * this.userParams.rmsToFill;
+      u.u_fillOpacity.value =
+        this.userParams.fillOpacity +
+        this.smoothers.rms.value * 0.3 * this.userParams.rmsToFill;
       u.u_bass.value = this.smoothers.bass.value;
       u.u_mid.value = this.smoothers.mid.value;
       u.u_high.value = this.smoothers.high.value;
@@ -177,7 +296,8 @@ export class ApollonianVisualizer implements Visualizer {
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -286,10 +406,10 @@ const FRAGMENT_SHADER = /* glsl */ `
     float r3 = 1.0 * breathe;
 
     // Positions of the three tangent circles (equilateral triangle arrangement)
-    float sep = 1.155; // sqrt(4/3) ≈ 1.155 for mutually tangent unit circles
+    float sep = 1.15470053838 * breathe; // sqrt(4/3) ≈ 1.155 for mutually tangent unit circles
     vec2 c1 = vec2(0.0, sep);
-    vec2 c2 = vec2(-1.0, -sep * 0.5);
-    vec2 c3 = vec2(1.0, -sep * 0.5);
+    vec2 c2 = vec2(-breathe, -sep * 0.5);
+    vec2 c3 = vec2(breathe, -sep * 0.5);
 
     int iters = int(min(u_iterations, float(MAX_ITERS)));
 
@@ -309,25 +429,23 @@ const FRAGMENT_SHADER = /* glsl */ `
       // Invert through each of the three circles
       // Track which inversion brings us closest to a circle
       float d1 = length(z - c1) - r1;
-      float d2 = length(z - c2) - r2;
-      float d3 = length(z - c3) - r3;
 
       // Fold into the nearest circle
       if (d1 < 0.0) {
         z = inversion(z, c1, r1);
         totalFold += 1.0;
       }
-      if (d2 < 0.0) {
+      if (length(z - c2) < r2) {
         z = inversion(z, c2, r2);
         totalFold += 1.0;
       }
-      if (d3 < 0.0) {
+      if (length(z - c3) < r3) {
         z = inversion(z, c3, r3);
         totalFold += 1.0;
       }
 
       // Also fold through the enclosing circle (inversion in outer boundary)
-      float outerR = 2.6 * breathe;
+      float outerR = (1.0 + 1.15470053838) * breathe;
       if (length(z) > outerR) {
         z = z * outerR * outerR / max(dot(z, z), 1e-8);
         totalFold += 1.0;

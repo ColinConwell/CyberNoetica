@@ -1,7 +1,12 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
 
@@ -29,15 +34,83 @@ const voronoiMetadata: VisualizerMetadata = {
   usesPerspective: false,
   params: [
     // Appearance
-    { key: 'cellScale', label: 'Cell Scale', min: 2, max: 12, step: 0.5, initial: 5, category: 'appearance' },
-    { key: 'edgeSharpness', label: 'Edge Sharpness', min: 0.5, max: 8.0, step: 0.5, initial: 3.0, category: 'appearance' },
-    { key: 'colorSaturation', label: 'Color Saturation', min: 0.0, max: 1.0, step: 0.05, initial: 0.7, category: 'appearance' },
-    { key: 'driftSpeed', label: 'Drift Speed', min: 0.0, max: 1.0, step: 0.05, initial: 0.3, category: 'appearance' },
+    {
+      key: 'cellScale',
+      label: 'Cell Scale',
+      min: 2,
+      max: 12,
+      step: 0.5,
+      initial: 5,
+      category: 'appearance',
+    },
+    {
+      key: 'edgeSharpness',
+      label: 'Edge Sharpness',
+      min: 0.5,
+      max: 8.0,
+      step: 0.5,
+      initial: 3.0,
+      category: 'appearance',
+    },
+    {
+      key: 'colorSaturation',
+      label: 'Color Saturation',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.7,
+      category: 'appearance',
+    },
+    {
+      key: 'driftSpeed',
+      label: 'Drift Speed',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.3,
+      category: 'appearance',
+    },
     // Audio mapping
-    { key: 'bassToJitter', label: 'Bass → Jitter', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly bass displaces cell centers' },
-    { key: 'midToHue', label: 'Mid → Hue Shift', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly mids rotate the color palette' },
-    { key: 'rmsToEdge', label: 'RMS → Edge Glow', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly volume brightens cell edges' },
-    { key: 'spectralToMetric', label: 'Spectral → Metric', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly spectral centroid blends Euclidean/Manhattan' },
+    {
+      key: 'bassToJitter',
+      label: 'Bass → Jitter',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How strongly bass displaces cell centers',
+    },
+    {
+      key: 'midToHue',
+      label: 'Mid → Hue Shift',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How strongly mids rotate the color palette',
+    },
+    {
+      key: 'rmsToEdge',
+      label: 'RMS → Edge Glow',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How strongly volume brightens cell edges',
+    },
+    {
+      key: 'spectralToMetric',
+      label: 'Centroid → Manhattan blend',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 0.0,
+      category: 'audio-mapping',
+      description: 'How strongly spectral centroid blends Euclidean/Manhattan',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
@@ -48,6 +121,8 @@ const voronoiMetadata: VisualizerMetadata = {
 };
 
 export class VoronoiVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = voronoiMetadata;
 
   private unsub: Unsubscribe;
@@ -62,7 +137,7 @@ export class VoronoiVisualizer implements Visualizer {
     bassToJitter: 1.0,
     midToHue: 1.0,
     rmsToEdge: 1.0,
-    spectralToMetric: 1.0,
+    spectralToMetric: 0.0,
   };
 
   private _centerX = 0;
@@ -76,16 +151,19 @@ export class VoronoiVisualizer implements Visualizer {
     high: new EMASmoothing(0.25),
     rms: new EMASmoothing(0.2),
     spectralCentroid: new EMASmoothing(0.1),
-    beatPulse: new EMASmoothing(0.45),
+    beatPulse: new EventEnvelope(),
   };
 
   private material: THREE.ShaderMaterial | null = null;
   private mesh: THREE.Mesh | null = null;
 
   constructor(private bus: MessageBus) {
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
 
     this.smoothers.bass.reset(0);
     this.smoothers.mid.reset(0);
@@ -96,10 +174,11 @@ export class VoronoiVisualizer implements Visualizer {
   }
 
   attach(scene: THREE.Scene): void {
-    this.material = new THREE.RawShaderMaterial({
+    this.material = new THREE.ShaderMaterial({
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
       uniforms: {
+        u_driftSpeedPhase: { value: 0 },
         u_time: { value: 0.0 },
         u_resolution: { value: new THREE.Vector2(1920, 1080) },
         u_cellScale: { value: 5.0 },
@@ -127,19 +206,26 @@ export class VoronoiVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
-      this.smoothers.bass.update(f.bass);
-      this.smoothers.mid.update(f.mid);
-      this.smoothers.high.update(f.high);
-      this.smoothers.rms.update(f.rms);
-      this.smoothers.spectralCentroid.update(f.spectralCentroid);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
     } else {
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     if (this.material) {
@@ -149,6 +235,11 @@ export class VoronoiVisualizer implements Visualizer {
       u.u_edgeSharpness.value = this.userParams.edgeSharpness;
       u.u_colorSaturation.value = this.userParams.colorSaturation;
       u.u_driftSpeed.value = this.userParams.driftSpeed;
+      u.u_driftSpeedPhase.value = this.phases.advance(
+        'u_driftSpeed',
+        u.u_driftSpeed.value,
+        this.deltaSeconds,
+      );
       u.u_bass.value = this.smoothers.bass.value;
       u.u_mid.value = this.smoothers.mid.value;
       u.u_high.value = this.smoothers.high.value;
@@ -165,7 +256,8 @@ export class VoronoiVisualizer implements Visualizer {
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
@@ -210,8 +302,6 @@ registerVisualizer({
 });
 
 const VERTEX_SHADER = /* glsl */ `
-  attribute vec3 position;
-  attribute vec2 uv;
   varying vec2 vUv;
   void main() {
     vUv = uv;
@@ -222,6 +312,7 @@ const VERTEX_SHADER = /* glsl */ `
 const FRAGMENT_SHADER = /* glsl */ `
   precision highp float;
 
+  uniform float u_driftSpeedPhase;
   uniform float u_time;
   uniform vec2 u_resolution;
   uniform float u_cellScale;
@@ -278,7 +369,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     float metricBlend = clamp(u_spectralCentroid * u_spectralToMetric, 0.0, 1.0);
 
     // Jitter amount driven by bass
-    float jitter = 0.3 + u_bass * 0.7 * u_bassToJitter;
+    float jitter = min(0.5, 0.3 + u_bass * 0.1 * u_bassToJitter);
 
     // Cell grid
     vec2 iSt = floor(st);
@@ -287,18 +378,22 @@ const FRAGMENT_SHADER = /* glsl */ `
     float minDist1 = 10.0;  // F1: nearest
     float minDist2 = 10.0;  // F2: second nearest
     vec2 nearestCell = vec2(0.0);
+    vec2 nearestOffset = vec2(0.0);
 
-    // Search 3x3 neighborhood
-    for (int y = -1; y <= 1; y++) {
-      for (int x = -1; x <= 1; x++) {
+    // Seeds remain in their cells. A 7x7 search bounds F1 and F2 even
+    // for the Manhattan metric; prune cells using their distance lower bound.
+    for (int y = -3; y <= 3; y++) {
+      for (int x = -3; x <= 3; x++) {
         vec2 neighbor = vec2(float(x), float(y));
+        vec2 lowerBound = max(max(neighbor - fSt, fSt - neighbor - 1.0), 0.0);
+        if (distMixed(vec2(0.0), lowerBound, metricBlend) >= minDist2) continue;
         vec2 cell = iSt + neighbor;
 
         // Pseudo-random seed point within cell
         vec2 point = hash2(cell);
 
         // Animate seed points
-        float t = u_time * u_driftSpeed;
+        float t = u_driftSpeedPhase;
         point = 0.5 + jitter * sin(t * (0.5 + point) * 6.2831 + point * 6.2831);
 
         // Distance from fragment to this seed
@@ -309,6 +404,7 @@ const FRAGMENT_SHADER = /* glsl */ `
           minDist2 = minDist1;
           minDist1 = d;
           nearestCell = cell;
+          nearestOffset = diff;
         } else if (d < minDist2) {
           minDist2 = d;
         }
@@ -319,7 +415,21 @@ const FRAGMENT_SHADER = /* glsl */ `
 
     // Edge detection (F2 - F1)
     float edge = minDist2 - minDist1;
-    float edgeIntensity = 1.0 - smoothstep(0.0, 0.15 / u_edgeSharpness, edge);
+    if (metricBlend < .001) {
+      edge = 10.0;
+      for (int y = -3; y <= 3; y++) for (int x = -3; x <= 3; x++) {
+        vec2 neighbor = vec2(float(x), float(y));
+        vec2 point = hash2(iSt + neighbor);
+        point = .5 + jitter * sin(u_driftSpeedPhase * (.5 + point) * 6.2831 + point * 6.2831);
+        vec2 candidate = neighbor + point - fSt;
+        vec2 difference = candidate - nearestOffset;
+        if (dot(difference, difference) > 1e-8) edge = min(edge, dot(.5 * (candidate + nearestOffset), normalize(difference)));
+      }
+    }
+    // Mixed-metric mode retains an explicitly artistic F2−F1 ridge.
+    float width = .075 / u_edgeSharpness;
+    float aa = max(fwidth(edge), 1e-5);
+    float edgeIntensity = 1.0 - smoothstep(max(0.0,width-aa), width+aa, edge);
 
     // Cell interior color based on cell ID
     vec2 cellHash = hash2(nearestCell);

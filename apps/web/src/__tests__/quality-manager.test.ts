@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { detectInitialTier, QualityManager } from '../managers/quality-manager.js';
+import {
+  detectInitialTier,
+  QualityManager,
+} from '../managers/quality-manager.js';
 import { MessageBus } from '@cybernoetica/core';
 
 describe('detectInitialTier', () => {
@@ -29,13 +32,21 @@ describe('detectInitialTier', () => {
 
   it('picks performance when touch-only', () => {
     // Touch-only bypasses renderer-string detection.
-    expect(detectInitialTier('Apple M1', { touchOnly: true })).toBe('performance');
+    expect(detectInitialTier('Apple M1', { touchOnly: true })).toBe(
+      'performance',
+    );
   });
 
   it('uses device memory/cpu as fallback when renderer is unknown', () => {
-    expect(detectInitialTier(null, { deviceMemory: 16, hwConcurrency: 12 })).toBe('high');
-    expect(detectInitialTier(null, { deviceMemory: 4, hwConcurrency: 4 })).toBe('balanced');
-    expect(detectInitialTier(null, { deviceMemory: 2, hwConcurrency: 2 })).toBe('performance');
+    expect(
+      detectInitialTier(null, { deviceMemory: 16, hwConcurrency: 12 }),
+    ).toBe('high');
+    expect(detectInitialTier(null, { deviceMemory: 4, hwConcurrency: 4 })).toBe(
+      'balanced',
+    );
+    expect(detectInitialTier(null, { deviceMemory: 2, hwConcurrency: 2 })).toBe(
+      'performance',
+    );
   });
 
   it('defaults to performance when no signals are available', () => {
@@ -53,5 +64,28 @@ describe('detectInitialTier', () => {
     expect(quality.getDebugSnapshot().avgFrameMs).toBeGreaterThan(0);
     quality.resetGovernor();
     expect(quality.getDebugSnapshot().avgFrameMs).toBe(0);
+  });
+});
+
+describe('governor at capped display cadence', () => {
+  it('can recover from a low tier on a 60 Hz display', () => {
+    const quality = new QualityManager({
+      bus: new MessageBus(),
+      applyTier: () => {},
+    });
+    for (let i = 1; i <= 360; i++) quality.tick(i * 25);
+    const low = quality.getTier();
+    quality.resetGovernor();
+    for (let i = 1; i <= 500; i++) quality.tick(10000 + (i * 1000) / 60);
+    const tiers = [
+      'sub-performance',
+      'performance',
+      'balanced',
+      'high',
+      'ultra',
+    ];
+    expect(tiers.indexOf(quality.getTier())).toBeGreaterThan(
+      tiers.indexOf(low),
+    );
   });
 });
