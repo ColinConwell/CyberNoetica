@@ -2,6 +2,15 @@
 
 GPU-accelerated audio visualization with 72 selectable models, simulations and artistic patterns. The Visual panel includes searchable controls and model explanations. The knowledge portal remains future work.
 
+## Hosted versions
+
+- [Stable production](https://cybernoetica.app) follows the reviewed `main` branch.
+- [Latest preview](https://demo.cybernoetica.app) follows `latest`, including changes that have not yet been reviewed for production.
+
+Merging `latest` into `main` triggers Railway to build and deploy production. Opening or approving the PR alone does not deploy it. Review the preview first and verify production health and sample audio after merging. Both services use the root Dockerfile and `/api/health` deployment check. Preview has no sample-audio volume; use Soundscape Loop or a local file. Production retains its existing `/data/audio` volume.
+
+`app.imbasso.com` and `app.imbasso.art` are retired. Deployment and audio-upload helpers default to `https://cybernoetica.app`; set `DEPLOY_HOST` explicitly to target another host. See the [release setup report](reports/2026-09-11-production-preview.md) for service mappings and validation.
+
 ## Run locally
 
 ```sh

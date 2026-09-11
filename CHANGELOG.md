@@ -2,6 +2,12 @@
 
 Changes are recorded in dated entries, newest first. Detailed reports are indexed in [reports/README.md](reports/README.md).
 
+## 2026-09-11 — Stable production and latest preview
+
+- Made `cybernoetica.app` the default production target and configured its Railway service to follow `main`; `demo.cybernoetica.app` follows `latest` on a separate service. Retired both Imbasso app domains and their DNS routing records while retaining the production audio volume.
+- Updated operational defaults, DNS helpers and deployment documentation. The release includes the committed OpenAstra visualizer. Merging `latest` into `main` triggers production deployment; creating or approving the PR alone does not.
+- Validation: 507 tests, TypeScript checks, production build, shell syntax, JUSTFile parsing and Git whitespace checks passed. Verified Railway branch configuration, preview deployment success, valid domain certificates and removed DNS records. Preview has no sample-audio volume; production verification remains required after merge. See the [release setup report](reports/2026-09-11-production-preview.md).
+
 ## 2026-09-11 — OpenAstra formation, infall and particle disturbances
 
 - Replaced the rigidly rotating spiral with individual particle transits from an outer source into the nucleus. A scattered birth cloud curls into formation over six seconds; stars accelerate and brighten inward, then fade before recycling at the source. Reset View replays the gathering sequence.

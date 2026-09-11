@@ -11,12 +11,12 @@
 #   verify                                 Check that tracks exist and report status
 #
 # Environment:
-#   DEPLOY_HOST   Server URL (default: https://app.imbasso.com)
+#   DEPLOY_HOST   Server URL (default: https://cybernoetica.app)
 #   GITHUB_TOKEN  GitHub PAT with push access (default: from gh auth token)
 
 set -euo pipefail
 
-DEPLOY_HOST="${DEPLOY_HOST:-https://cybernoetica-web-demo.up.railway.app}"
+DEPLOY_HOST="${DEPLOY_HOST:-https://cybernoetica.app}"
 GITHUB_TOKEN="${GITHUB_TOKEN:-$(gh auth token 2>/dev/null || echo "")}"
 AUDIO_EXTENSIONS="mp3|wav|ogg|flac|aac|m4a"
 
@@ -167,7 +167,7 @@ Commands:
   verify                                    Check track count and report status
 
 Environment:
-  DEPLOY_HOST   Server URL   (default: https://app.imbasso.com)
+  DEPLOY_HOST   Server URL   (default: https://cybernoetica.app)
   GITHUB_TOKEN  GitHub token (default: from gh auth token)
 EOF
 }

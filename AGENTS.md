@@ -368,7 +368,7 @@ See `guidebook/Design-Principles.md` for the full philosophy. Key points:
 
 The app deploys to Railway as a Dockerized Express server serving the Vite SPA build.
 
-- Single Railway service (`cybernoetica-web`) in the `Demo` environment
+- Two Railway services in `Demo`: `cybernoetica-web` follows `main` for production; `CyberNoetica` follows `latest` for preview
 - Express 5 server handles static files, audio streaming, auth, and COOP/COEP headers
 - Railway volume mounted at `/data/audio` stores sample music (84 tracks)
 - `AUDIO_DIR` env var (set in Railway and Dockerfile default) points to the volume mount
@@ -389,7 +389,7 @@ just reupload-tracks     # Re-upload all local audio (data/sample-music/)
 
 **Audio management** is handled by `scripts/upload-audio.sh` (subcommands: `upload`, `upload-dir`, `list`, `verify`). The JUSTFile commands are thin wrappers that pass `DEPLOY_HOST` and `GITHUB_TOKEN`.
 
-**Custom domains:** `cybernoetica.app` (Porkbun root ALIAS to `pst3byz3.up.railway.app`) and `app.imbasso.com` (CNAME to `wbbydzp1.up.railway.app`) are attached to the same Railway service. Use `scripts/manage-dns.sh railway-status <domain>` to retrieve each domain’s assigned routing target and certificate status. These targets are distinct from the public service hostname. Keep the ownership TXT record at `_railway-verify.cybernoetica.app`; Railway status exposes its name/value separately from the routing records.
+**Custom domains:** `cybernoetica.app` is the stable production URL on `cybernoetica-web` (Porkbun apex ALIAS to `pst3byz3.up.railway.app`). `demo.cybernoetica.app` is the potentially unstable `latest` preview on `CyberNoetica` (CNAME to `7bfn7u27.up.railway.app`, port 8080). The Imbasso app domains are retired. Keep each domain’s `_railway-verify` TXT record. Use `scripts/manage-dns.sh railway-status <domain> [projectId serviceId environmentId]` to retrieve assigned routing targets and certificate status; the script defaults to production. Merging `latest` into `main` triggers production deployment; opening/approving a PR does not. Preview has no sample-audio volume; use Soundscape Loop or local files. Production retains `/data/audio`.
 
 ## Known Issues
 
@@ -397,5 +397,5 @@ just reupload-tracks     # Re-upload all local audio (data/sample-music/)
 - **Waveform modes** — artistic layers, a triggered DC-removed oscilloscope, and calibrated log-frequency spectrum are separately selectable
 - **Knowledge portal** (GOAL.md Purpose 3) is entirely future work
 - **Cross-modal inputs** (webcam, wearables, gestures) not yet implemented
-- **Custom domain DNS** -- preserve both custom domains and use each domain’s Railway-assigned routing target; re-check DNS and HTTPS after domain changes.
+- **Custom domain DNS** -- preserve stable and preview domain separation and use each service’s Railway-assigned routing target; re-check DNS and HTTPS after domain changes.
 - **Railway volume persistence** -- volume data survives redeploys but not volume re-creation; use `just verify-tracks` after deploys and `just reupload-tracks` if empty

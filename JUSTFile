@@ -4,7 +4,7 @@
 set dotenv-filename := ".env.local"
 
 github_token := env("GITHUB_TOKEN", `gh auth token 2>/dev/null || echo ""`)
-deploy_host  := env("DEPLOY_HOST", "https://cybernoetica-web-demo.up.railway.app")
+deploy_host  := env("DEPLOY_HOST", "https://cybernoetica.app")
 
 # Default: show available commands
 default:
@@ -188,23 +188,23 @@ reupload-tracks:
 # ─── DNS ──────────────────────────────────────────────────────────────
 
 # List DNS records for a domain (requires PORKBUN_API_KEY in .env.local)
-dns-list domain="imbasso.com":
+dns-list domain="cybernoetica.app":
     ./scripts/manage-dns.sh list "{{domain}}"
 
 # Get a specific DNS record
 dns-get domain type subdomain:
     ./scripts/manage-dns.sh get "{{domain}}" "{{type}}" "{{subdomain}}"
 
-# Update the app.imbasso.com CNAME to the current Railway routing target
-dns-update-cname:
-    ./scripts/manage-dns.sh update imbasso.com CNAME app wbbydzp1.up.railway.app
+# Update a subdomain using its assigned Railway routing target (check status first)
+dns-update-cname subdomain target:
+    ./scripts/manage-dns.sh update cybernoetica.app CNAME "{{subdomain}}" "{{target}}"
 
 # List custom domains on the Railway service
 railway-domains:
     ./scripts/manage-dns.sh railway-list
 
 # Check Railway custom domain status
-railway-domain-status domain="app.imbasso.com":
+railway-domain-status domain="cybernoetica.app":
     ./scripts/manage-dns.sh railway-status "{{domain}}"
 
 # Type-check without emitting (catches errors Vite misses)
