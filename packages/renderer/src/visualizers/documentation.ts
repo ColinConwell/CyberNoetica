@@ -22,6 +22,15 @@ const AUDIO_WAVEFORM = [
 
 export const VISUALIZER_DOCUMENTATION: Record<string, VisualizerDocumentation> =
   {
+    openastra: {
+      summary: 'A scattered cloud gathers into a luminous galaxy. Stars stream from an outer source toward the bright nucleus; pointer wakes and audio waves perturb their paths before they settle back into the flow.',
+      math: 'Each particle follows a staggered transit phase s: r = 0.08 + 5.2(1−s)^0.72 and θ = 3.2(5.28−r) times winding. Stars brighten inward and fade at the recycling boundary. A six-second capture transition, bounded damped pointer impulses, bass waves, treble turbulence and onset shockwaves deform the GPU trajectories. This is an artistic attraction model, not an N-body gravitational simulation.',
+      references: [ref('Visual inspiration: GPT-6 Astra release page', 'https://openai.com/index/gpt-6-astra/')],
+      audioInputsUsed: ['bands', 'rms', 'beat'],
+      requiresFFT: false,
+      perfTier: 'low',
+      mobileSafe: true,
+    },
     'caustics-beta': {
       summary: 'Forward deposition of refracted light onto a receiver',
       math: 'Analytic height gradients, Snell refraction, Fresnel transmission and normalized photon deposition into a linear half-float light map.',
@@ -1222,6 +1231,7 @@ const simulations = new Set([
   'caustics-beta',
 ]);
 const artistic = new Set([
+  'openastra',
   'apollonian',
   'clifford',
   'kleinian',

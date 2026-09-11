@@ -128,7 +128,7 @@ export class VisualizerManager {
         : this.scene.camera;
       this.scene.setViewportCapabilities(this.activeViz.metadata.viewport);
       this.scene.setCursorMode(this.activeViz.getCursorMode?.() ?? 'default');
-      this.driftEnabled = true;
+      this.driftEnabled = this.activeViz.metadata.autoOrbit !== false;
       this.applyPerspectiveCamera();
 
       this.scene.precompile();

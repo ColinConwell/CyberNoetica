@@ -24,6 +24,7 @@ export interface VisualizerManifestEntry {
 
 /** Visualizers that drive the shared perspective camera (not fullscreen quads). */
 const PERSPECTIVE_TYPES = new Set([
+  'openastra',
   'orbital',
   'orbital-beta',
   'orbital-gamma',
@@ -111,6 +112,13 @@ const MANIFEST_ENTRIES: Omit<
     loader: () => import('./caustics/v02-beta.js'),
   },
   // --- Particle / 3D ---
+  {
+    type: 'openastra',
+    label: 'OpenAstra',
+    description: 'Luminous spiral galaxy inspired by the GPT-6 Astra star field',
+    group: 'particle',
+    loader: () => import('./openastra/v01-alpha.js'),
+  },
   {
     type: 'orbital',
     label: 'Orbital',

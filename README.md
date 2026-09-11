@@ -1,6 +1,6 @@
 # Cybernœtica
 
-GPU-accelerated audio visualization with 71 selectable models, simulations and artistic patterns. The Visual panel includes searchable controls and model explanations. The knowledge portal remains future work.
+GPU-accelerated audio visualization with 72 selectable models, simulations and artistic patterns. The Visual panel includes searchable controls and model explanations. The knowledge portal remains future work.
 
 ## Run locally
 

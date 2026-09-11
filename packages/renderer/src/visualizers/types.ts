@@ -70,6 +70,8 @@ export interface VisualizerMetadata {
   label: string;
   description: string;
   usesPerspective: boolean;
+  /** Defaults to true for perspective models; false keeps the camera user-owned. */
+  autoOrbit?: boolean;
   params: VisualizerParam[];
   viewport: ViewportCapabilities;
   viewStateFields: ViewStateField[];

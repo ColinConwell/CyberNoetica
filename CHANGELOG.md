@@ -2,6 +2,23 @@
 
 Changes are recorded in dated entries, newest first. Detailed reports are indexed in [reports/README.md](reports/README.md).
 
+## 2026-09-11 — OpenAstra formation, infall and particle disturbances
+
+- Replaced the rigidly rotating spiral with individual particle transits from an outer source into the nucleus. A scattered birth cloud curls into formation over six seconds; stars accelerate and brighten inward, then fade before recycling at the source. Reset View replays the gathering sequence.
+- Pointer movement now stirs nearby stars with bounded directional impulses. Up to eight GPU wakes persist briefly after movement stops and settle with damped oscillation. Pointer listeners detach on context replacement and disposal; camera-plane projection follows the current view, and touch cancellation/release clears pending input.
+- Bass produces radial waves, mids accelerate infall, treble introduces positional turbulence and onsets launch radial shockwaves. Added Infall Speed and Pointer Stirring controls, relabeled the audio controls to describe their new behavior, and retained optional Source Drift separately from particle transit.
+- Added an optional visualizer `autoOrbit` setting and disabled it for OpenAstra, keeping its camera still until the user orbits. Other perspective visualizers retain their existing automatic drift. Particle buffers remain immutable; GPU shaders handle formation, transit and disturbances in the existing two draw calls.
+- Validation: TypeScript and the production build passed; all 507 Vitest tests passed, including eight OpenAstra tests. The in-app browser verified the scattered startup, settled formation, pointer displacement/recovery, fixed default camera and muted Soundscape playback. Four production QA passes alternating OpenAstra and Orbital at 420 frames each passed shader compilation, parameter extrema, finite-geometry, visible-output and GPU-resource cleanup checks; native and audio checks passed with no console warnings/errors.
+- Limitations: attraction and damped disturbances are designed GPU trajectories, not an N-body gravitational simulation. Physical mobile devices and other browser engines remain untested; existing build warnings are unchanged.
+
+## 2026-09-11 — OpenAstra galaxy visualizer
+
+- Added **OpenAstra**, a new lazy-loaded particle visualizer inspired by the [GPT-6 Astra release-page star field](https://openai.com/index/gpt-6-astra/). Ten thousand seeded stars form a luminous spiral with blue-white and warm gold points, a soft nucleus and a sparse surrounding field. The catalog now contains 72 entries.
+- Added orbit/zoom, winding, scatter, star size, starlight and color-balance controls. Smoothed bass expands the galaxy, mids modulate its integrated rotation rate, highs add shimmer, volume brightens stars and single-consumption onset events pulse the core. Motion remains visible without audio.
+- Uses immutable particle buffers and two GPU draw calls, without downloaded media or bloom render targets. Disposal removes both objects, frees geometry/materials, unsubscribes from audio and restores the previous scene background. Model details identify this as an artistic interpretation and link the reference.
+- Validation: all 499 existing Vitest tests passed; five new tests cover seeded buffers, frame-rate-independent rotation, audio mappings/onset consumption, view/input handling and disposal. TypeScript checks and the production build passed. The in-app browser verified the 1280 × 720 rendering, catalog search, distance/winding controls, view reset and muted Soundscape playback. A production QA run alternated OpenAstra and Orbital across six passes with no shader/GL errors, nonfinite geometry, flat-output flags or retained GPU geometry/textures; native checks and audio validation also passed.
+- Limitations: this is an original continuous, audio-reactive interpretation, rather than a reproduction of the page's introductory camera sequence. Physical mobile devices and other browser engines remain untested; the attempted narrow viewport override did not take effect. Existing bundle-size and Browserslist warnings remain.
+
 ## 2026-09-08 — Custom domain and repository housekeeping
 
 - Added `cybernoetica.app` to the existing Railway service alongside `app.imbasso.com`. Configured the Porkbun apex ALIAS to Railway’s assigned `pst3byz3.up.railway.app` target and added the ownership verification TXT record.
