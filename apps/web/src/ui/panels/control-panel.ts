@@ -1,7 +1,21 @@
-import { el, sectionLabel, sectionDivider } from '../components.js';
-import { ACCENT, GLASS_BG, GLASS_BORDER, TEXT_DIM, TEXT_SECONDARY } from '../styles.js';
+import {
+  el,
+  sectionLabel,
+  sectionDivider,
+  toggleSwitch,
+} from '../components.js';
+import {
+  ACCENT,
+  GLASS_BORDER,
+  FONT,
+  TEXT_DIM,
+  TEXT_PRIMARY,
+  TEXT_SECONDARY,
+  glassBackground,
+} from '../styles.js';
 import type { AppSettings } from '../styles.js';
 import { isDebugEnabled, renderDebugPanel } from './debug-panel.js';
+import '../../globals.js';
 
 export interface ControlPanelOpts {
   settings: AppSettings;
@@ -9,26 +23,105 @@ export interface ControlPanelOpts {
   onSettingsChange: ((s: AppSettings) => void) | null;
   onResetFade: () => void;
   onDebugCleanup?: (cleanup: () => void) => void;
+  onEnergyCleanup?: (cleanup: () => void) => void;
+  keyboardOverlayVisible?: boolean;
+  onKeyboardOverlayToggle?: (visible: boolean) => void;
 }
 
-export function renderControlPanel(panel: HTMLElement, opts: ControlPanelOpts): void {
+export function renderControlPanel(
+  panel: HTMLElement,
+  opts: ControlPanelOpts,
+): void {
   panel.innerHTML = '';
+  const store = window.__cybernoetica?.store;
+  panel.appendChild(sectionLabel('Motion and flashes'));
+  for (const [key, label] of [
+    ['reducedMotion', 'Reduce motion'],
+    ['reduceFlashes', 'Reduce onset flashes'],
+  ] as const) {
+    const toggle = toggleSwitch({
+      label,
+      checked: store?.getState().ui[key] ?? false,
+      onChange: (value) => store?.setState({ ui: { [key]: value } }),
+    });
+    toggle.style.margin = '0 14px 12px 0';
+    panel.appendChild(toggle);
+  }
+  const saver = toggleSwitch({
+    label: 'Power Saver (30 FPS)',
+    checked: window.__cybernoetica?.powerSaver ?? false,
+    onChange: (value) => window.__cybernoetica?.setPowerSaver(value),
+  });
+  panel.appendChild(saver);
+  panel.appendChild(sectionDivider());
+
+  // ── Keyboard ────────────────────────────────────────────────────
+  panel.appendChild(sectionLabel('Keyboard'));
+  const shortcuts = el('div', {
+    fontSize: '12px',
+    color: TEXT_DIM,
+    lineHeight: '1.8',
+    marginBottom: '8px',
+  });
+  shortcuts.innerHTML = `
+    <div><span style="color:${TEXT_SECONDARY}">Space</span> — Toggle controls</div>
+    <div><span style="color:${TEXT_SECONDARY}">Escape</span> — Close panel</div>
+    <div><span style="color:${TEXT_SECONDARY}">R</span> — Reset visualizer</div>
+  `;
+  panel.appendChild(shortcuts);
+
+  const overlayToggle = toggleSwitch({
+    checked: opts.keyboardOverlayVisible ?? true,
+    label: 'Show shortcut bar',
+    onChange(checked) {
+      if (opts.onKeyboardOverlayToggle) opts.onKeyboardOverlayToggle(checked);
+    },
+  });
+  panel.appendChild(overlayToggle);
+
+  panel.appendChild(sectionDivider());
+
+  // ── Interface ───────────────────────────────────────────────────
   panel.appendChild(sectionLabel('Interface'));
 
   // Menu fade delay
   const fadeRow = el('div', {
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    marginBottom: '14px', fontSize: '12px', color: TEXT_SECONDARY,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: '14px',
+    fontSize: '12px',
+    color: TEXT_SECONDARY,
   });
   const fadeLabel = el('span', {});
   fadeLabel.textContent = 'Menu fade delay';
-  const fadeValue = el('div', { display: 'flex', alignItems: 'center', gap: '8px' });
-  const fadeSlider = el('input', { width: '100px', accentColor: ACCENT },
-    { type: 'range', min: '2', max: '30', step: '1', value: String(opts.settings.menuFadeDelay) });
-  const fadeNum = el('span', { fontSize: '11px', color: TEXT_DIM, minWidth: '28px' });
+  const fadeValue = el('div', {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  });
+  const fadeSlider = el(
+    'input',
+    { width: '100px', accentColor: ACCENT },
+    {
+      type: 'range',
+      'aria-label': 'Menu fade delay',
+      min: '2',
+      max: '30',
+      step: '1',
+      value: String(opts.settings.menuFadeDelay),
+    },
+  );
+  const fadeNum = el('span', {
+    fontSize: '11px',
+    color: TEXT_DIM,
+    minWidth: '28px',
+  });
   fadeNum.textContent = `${opts.settings.menuFadeDelay}s`;
   fadeSlider.addEventListener('input', () => {
-    opts.settings.menuFadeDelay = Number((fadeSlider as HTMLInputElement).value);
+    opts.settings.menuFadeDelay = Number(
+      (fadeSlider as HTMLInputElement).value,
+    );
     fadeNum.textContent = `${opts.settings.menuFadeDelay}s`;
     if (opts.onSettingsChange) opts.onSettingsChange(opts.settings);
     opts.onResetFade();
@@ -39,20 +132,45 @@ export function renderControlPanel(panel: HTMLElement, opts: ControlPanelOpts): 
 
   // Menu opacity
   const opacRow = el('div', {
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    marginBottom: '14px', fontSize: '12px', color: TEXT_SECONDARY,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: '14px',
+    fontSize: '12px',
+    color: TEXT_SECONDARY,
   });
   const opacLabel = el('span', {});
   opacLabel.textContent = 'Menu opacity';
-  const opacValue = el('div', { display: 'flex', alignItems: 'center', gap: '8px' });
-  const opacSlider = el('input', { width: '100px', accentColor: ACCENT },
-    { type: 'range', min: '50', max: '100', step: '5', value: String(Math.round(opts.settings.menuOpacity * 100)) });
-  const opacNum = el('span', { fontSize: '11px', color: TEXT_DIM, minWidth: '28px' });
+  const opacValue = el('div', {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  });
+  const opacSlider = el(
+    'input',
+    { width: '100px', accentColor: ACCENT },
+    {
+      type: 'range',
+      'aria-label': 'Menu opacity',
+      min: '50',
+      max: '100',
+      step: '5',
+      value: String(Math.round(opts.settings.menuOpacity * 100)),
+    },
+  );
+  const opacNum = el('span', {
+    fontSize: '11px',
+    color: TEXT_DIM,
+    minWidth: '28px',
+  });
   opacNum.textContent = `${Math.round(opts.settings.menuOpacity * 100)}%`;
   opacSlider.addEventListener('input', () => {
-    opts.settings.menuOpacity = Number((opacSlider as HTMLInputElement).value) / 100;
+    opts.settings.menuOpacity =
+      Number((opacSlider as HTMLInputElement).value) / 100;
     opacNum.textContent = `${Math.round(opts.settings.menuOpacity * 100)}%`;
-    opts.controlBar.style.background = GLASS_BG.replace('0.88', String(opts.settings.menuOpacity * 0.88 / 0.95));
+    opts.controlBar.style.background = glassBackground(
+      (opts.settings.menuOpacity * 0.88) / 0.95,
+    );
     if (opts.onSettingsChange) opts.onSettingsChange(opts.settings);
   });
   opacValue.append(opacSlider, opacNum);
@@ -60,13 +178,12 @@ export function renderControlPanel(panel: HTMLElement, opts: ControlPanelOpts): 
   panel.appendChild(opacRow);
 
   panel.appendChild(sectionDivider());
-  panel.appendChild(sectionLabel('Keyboard'));
-  const shortcuts = el('div', { fontSize: '12px', color: TEXT_DIM, lineHeight: '1.8' });
-  shortcuts.innerHTML = `
-    <div><span style="color:${TEXT_SECONDARY}">Space</span> — Toggle controls</div>
-    <div><span style="color:${TEXT_SECONDARY}">Escape</span> — Close panel</div>
-  `;
-  panel.appendChild(shortcuts);
+
+  // ── Energy / Performance ────────────────────────────────────────
+  panel.appendChild(sectionLabel('Performance'));
+
+  const energyCleanup = renderEnergySection(panel);
+  if (opts.onEnergyCleanup) opts.onEnergyCleanup(energyCleanup);
 
   if (isDebugEnabled()) {
     panel.appendChild(sectionDivider());
@@ -77,4 +194,299 @@ export function renderControlPanel(panel: HTMLElement, opts: ControlPanelOpts): 
     if (opts.onDebugCleanup) opts.onDebugCleanup(cleanup);
     panel.appendChild(debugSection);
   }
+}
+
+function renderEnergySection(container: HTMLElement): () => void {
+  const globals = window.__cybernoetica;
+  const debugInfo = () => window.__cybernoetica_debug ?? null;
+
+  function makeStatRow(label: string) {
+    const row = el('div', {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: '8px',
+      fontSize: '11px',
+      color: TEXT_SECONDARY,
+    });
+    const lbl = el('span', { color: TEXT_DIM });
+    lbl.textContent = label;
+    const val = el('span', {
+      color: TEXT_PRIMARY,
+      fontFamily: 'monospace',
+      fontSize: '11px',
+    });
+    row.append(lbl, val);
+    return { row, val };
+  }
+
+  function makeBar() {
+    const outer = el('div', {
+      height: '6px',
+      borderRadius: '3px',
+      background: 'rgba(255,255,255,0.06)',
+      overflow: 'hidden',
+      marginBottom: '8px',
+    });
+    const inner = el('div', {
+      height: '100%',
+      borderRadius: '3px',
+      transition: 'width 0.3s ease, background 0.3s ease',
+      width: '0%',
+      background: ACCENT,
+    });
+    outer.appendChild(inner);
+    return { outer, inner };
+  }
+
+  // FPS row with target
+  const fpsRow = makeStatRow('FPS');
+  container.appendChild(fpsRow.row);
+
+  // Frame budget bar
+  const budgetLabel = el('div', {
+    display: 'flex',
+    justifyContent: 'space-between',
+    fontSize: '11px',
+    color: TEXT_DIM,
+    marginBottom: '4px',
+  });
+  const budgetLabelText = el('span', {});
+  budgetLabelText.textContent = 'Frame budget';
+  const budgetVal = el('span', {
+    fontFamily: 'monospace',
+    color: TEXT_PRIMARY,
+  });
+  budgetLabel.append(budgetLabelText, budgetVal);
+  container.appendChild(budgetLabel);
+  const frameBudget = makeBar();
+  container.appendChild(frameBudget.outer);
+
+  // Power level indicator with scalar percentage
+  const powerRow = makeStatRow('Measured frame work');
+  container.appendChild(powerRow.row);
+  const percentileRow = makeStatRow('Work p50 / p95');
+  container.appendChild(percentileRow.row);
+
+  // GPU stats
+  const drawCallsRow = makeStatRow('Draw calls');
+  container.appendChild(drawCallsRow.row);
+  const trianglesRow = makeStatRow('Triangles');
+  container.appendChild(trianglesRow.row);
+
+  // GPU info (renderer name)
+  const gpuRow = makeStatRow('GPU');
+  container.appendChild(gpuRow.row);
+  try {
+    const renderer = globals?.scene?.getRenderer?.();
+    if (renderer) {
+      const gl = renderer.getContext();
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      if (ext) {
+        const gpuName = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL);
+        gpuRow.val.textContent =
+          gpuName.length > 30 ? gpuName.substring(0, 28) + '\u2026' : gpuName;
+        gpuRow.val.title = gpuName;
+      } else {
+        gpuRow.val.textContent = 'WebGL';
+      }
+    } else {
+      gpuRow.val.textContent = '\u2014';
+    }
+  } catch {
+    gpuRow.val.textContent = '\u2014';
+  }
+
+  // GPU memory (textures + geometries)
+  const gpuMemRow = makeStatRow('GPU objects');
+  container.appendChild(gpuMemRow.row);
+
+  // CPU info
+  const cpuRow = makeStatRow('CPU threads');
+  container.appendChild(cpuRow.row);
+  const cores = navigator.hardwareConcurrency ?? 0;
+  const wasmActive = globals?.store?.getState?.()?.audio?.wasm ?? false;
+  cpuRow.val.textContent =
+    cores > 0 ? `${cores} cores${wasmActive ? ' + WASM' : ''}` : '\u2014';
+
+  // Memory (Chrome only)
+  const hasMemory = !!(performance as any).memory;
+  let memoryBar: ReturnType<typeof makeBar> | null = null;
+  let memoryValEl: HTMLElement | null = null;
+  if (hasMemory) {
+    const memLabel = el('div', {
+      display: 'flex',
+      justifyContent: 'space-between',
+      fontSize: '11px',
+      color: TEXT_DIM,
+      marginBottom: '4px',
+      marginTop: '4px',
+    });
+    const memLabelText = el('span', {});
+    memLabelText.textContent = 'JS Heap';
+    memoryValEl = el('span', { fontFamily: 'monospace', color: TEXT_PRIMARY });
+    memLabel.append(memLabelText, memoryValEl);
+    container.appendChild(memLabel);
+    memoryBar = makeBar();
+    container.appendChild(memoryBar.outer);
+  }
+
+  // Quality mode selector (replaces the old binary power-saver toggle).
+  // The governor adjusts pixelRatio + frame cadence based on this setting.
+  const qualityContainer = el('div', {
+    marginTop: '8px',
+    marginBottom: '4px',
+  });
+  const qualityHeader = el('div', {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: '6px',
+    fontSize: '11px',
+    color: TEXT_DIM,
+  });
+  const qualityLabel = el('span', {});
+  qualityLabel.textContent = 'Quality';
+  const qualityTierLabel = el('span', {
+    fontFamily: 'monospace',
+    color: TEXT_PRIMARY,
+  });
+  qualityHeader.append(qualityLabel, qualityTierLabel);
+  qualityContainer.appendChild(qualityHeader);
+
+  const qualityRow = el('div', {
+    display: 'flex',
+    gap: '4px',
+    flexWrap: 'wrap',
+  });
+  const QUALITY_MODES: Array<{
+    key: 'auto' | 'performance' | 'balanced' | 'high' | 'ultra';
+    label: string;
+  }> = [
+    { key: 'auto', label: 'Auto' },
+    { key: 'performance', label: 'Perf' },
+    { key: 'balanced', label: 'Bal' },
+    { key: 'high', label: 'High' },
+    { key: 'ultra', label: 'Ultra' },
+  ];
+  const qualityButtons: Array<{ key: string; el: HTMLElement }> = [];
+  for (const mode of QUALITY_MODES) {
+    const btn = el('button', {
+      flex: '1 1 auto',
+      minWidth: '40px',
+      padding: '4px 6px',
+      fontSize: '10px',
+      fontFamily: FONT,
+      cursor: 'pointer',
+      borderRadius: '6px',
+      border: `1px solid ${GLASS_BORDER}`,
+      background: 'rgba(255,255,255,0.03)',
+      color: TEXT_SECONDARY,
+      transition: 'all 0.15s ease',
+    });
+    btn.textContent = mode.label;
+    btn.addEventListener('click', () => {
+      globals?.quality?.setMode(mode.key);
+      updateQualityUI();
+    });
+    qualityRow.appendChild(btn);
+    qualityButtons.push({ key: mode.key, el: btn });
+  }
+  qualityContainer.appendChild(qualityRow);
+
+  const qualityHint = el('div', {
+    fontSize: '10px',
+    color: TEXT_DIM,
+    marginTop: '4px',
+  });
+  qualityHint.textContent = 'Press Q to cycle';
+  qualityContainer.appendChild(qualityHint);
+
+  container.appendChild(qualityContainer);
+
+  function updateQualityUI() {
+    const mode = globals?.quality?.getMode() ?? 'auto';
+    const tier = globals?.quality?.getTier() ?? 'balanced';
+    qualityTierLabel.textContent =
+      mode === 'auto' ? `Auto \u2192 ${tier}` : tier;
+    for (const { key, el: btn } of qualityButtons) {
+      const active = key === mode;
+      btn.style.background = active
+        ? 'rgba(140, 160, 255, 0.2)'
+        : 'rgba(255,255,255,0.03)';
+      btn.style.color = active ? TEXT_PRIMARY : TEXT_SECONDARY;
+      btn.style.borderColor = active
+        ? 'rgba(140, 160, 255, 0.45)'
+        : GLASS_BORDER;
+    }
+  }
+  updateQualityUI();
+
+  const interval = setInterval(() => {
+    updateQualityUI();
+    const info = debugInfo();
+    const frameTime = Math.max(info?.cpuMs ?? 0, info?.gpuMs ?? 0);
+    const targetFps = info?.targetFps ?? 60;
+    const targetMs = 1000 / targetFps;
+    const usage = Math.min(frameTime / targetMs, 2.0);
+    const pct = Math.round(usage * 100);
+
+    // FPS with target
+    fpsRow.val.textContent = `${info?.fps ?? 0} / ${targetFps}`;
+
+    budgetVal.textContent = `${frameTime.toFixed(1)}ms / ${targetMs.toFixed(1)}ms (${pct}%)`;
+    frameBudget.inner.style.width = `${Math.min(pct, 100)}%`;
+
+    const workColor =
+      usage < 0.5
+        ? 'rgba(100,220,120,.8)'
+        : usage < 0.8
+          ? 'rgba(220,200,80,.8)'
+          : 'rgba(220,80,80,.8)';
+    frameBudget.inner.style.background = workColor;
+    powerRow.val.style.color = workColor;
+    const percentiles = globals?.scene.getTimingPercentiles();
+    const format = (stats: { p50: number; p95: number } | null | undefined) =>
+      stats
+        ? `${stats.p50.toFixed(1)} / ${stats.p95.toFixed(1)}ms`
+        : 'unavailable';
+    percentileRow.val.textContent = `CPU ${format(percentiles?.cpu)} · GPU ${format(percentiles?.gpu)}`;
+    powerRow.val.textContent = `CPU ${(info?.cpuMs ?? 0).toFixed(1)}ms · GPU ${info?.gpuMs == null ? 'unavailable' : `${info.gpuMs.toFixed(1)}ms`}`;
+    powerRow.val.title =
+      'CPU includes visualizer updates and draw submission; GPU is asynchronous elapsed time. These are not power measurements.';
+
+    const rendererInfo = globals?.scene?.getRendererInfo?.();
+    if (rendererInfo) {
+      const r = rendererInfo.render;
+      drawCallsRow.val.textContent = String(r.calls);
+      trianglesRow.val.textContent =
+        r.triangles > 1000
+          ? `${(r.triangles / 1000).toFixed(1)}k`
+          : String(r.triangles);
+
+      const mem = rendererInfo.memory;
+      if (mem) {
+        gpuMemRow.val.textContent = `${mem.geometries}g / ${mem.textures}t`;
+      }
+    } else {
+      drawCallsRow.val.textContent = '\u2014';
+      trianglesRow.val.textContent = '\u2014';
+      gpuMemRow.val.textContent = '\u2014';
+    }
+
+    if (hasMemory && memoryBar && memoryValEl) {
+      const mem = (performance as any).memory;
+      const usedMB = Math.round(mem.usedJSHeapSize / 1048576);
+      const totalMB = Math.round(mem.jsHeapSizeLimit / 1048576);
+      const memPct = Math.round(
+        (mem.usedJSHeapSize / mem.jsHeapSizeLimit) * 100,
+      );
+      memoryValEl.textContent = `${usedMB}MB / ${totalMB}MB`;
+      memoryBar.inner.style.width = `${memPct}%`;
+      memoryBar.inner.style.background =
+        memPct > 80 ? 'rgba(220, 80, 80, 0.6)' : ACCENT;
+    }
+  }, 500);
+
+  return () => clearInterval(interval);
 }

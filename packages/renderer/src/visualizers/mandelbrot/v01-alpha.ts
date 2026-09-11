@@ -1,9 +1,20 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
-import type { AudioFeatures, BusMessage, Unsubscribe } from '@cybernoetica/core';
-import { EMASmoothing } from '../../smoothing.js';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import type { Visualizer, VisualizerMetadata } from '../types.js';
 import { registerVisualizer } from '../registry.js';
+
+/**
+ * Math:
+ *   z_(n+1) = z_n^2 + c, with z_0 = 0 and c sampled from the complex plane.
+ * Reference: https://mathworld.wolfram.com/MandelbrotSet.html
+ */
 
 export interface MandelbrotUniforms {
   zoom: number;
@@ -32,9 +43,9 @@ const ZOOM_TARGETS = [
   // Antenna tip spirals
   { cx: -0.158, cy: 1.033, name: 'Antenna Spirals' },
   // Satellite mini-brot
-  { cx: 0.2820, cy: 0.0100, name: 'Satellite' },
+  { cx: 0.282, cy: 0.01, name: 'Satellite' },
   // Deep zoom needle
-  { cx: -0.7436447860, cy: 0.1318252536, name: 'Deep Needle' },
+  { cx: -0.743644786, cy: 0.1318252536, name: 'Deep Needle' },
   // Star pattern
   { cx: -0.0452407412, cy: 0.9868162205, name: 'Star Pattern' },
 ];
@@ -45,22 +56,79 @@ const mandelbrotMetadata: VisualizerMetadata = {
   description: 'Deep zoom into infinite fractal edges',
   usesPerspective: false,
   params: [
-    { key: 'zoomSpeed', label: 'Zoom Speed', min: 0.0002, max: 0.003, step: 0.0001, initial: 0.0008, category: 'appearance' },
-    { key: 'rotationSpeed', label: 'Rotation', min: 0.0, max: 0.015, step: 0.001, initial: 0.003, category: 'appearance' },
-    { key: 'bassToZoom', label: 'Bass \u2192 Zoom', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly bass drives zoom speed' },
-    { key: 'rmsToBrightness', label: 'RMS \u2192 Brightness', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly volume affects brightness' },
-    { key: 'centroidToWarmth', label: 'Centroid \u2192 Warmth', min: 0.0, max: 2.0, step: 0.1, initial: 1.0, category: 'audio-mapping', description: 'How strongly spectral centroid shifts color temperature' },
+    {
+      key: 'zoomSpeed',
+      label: 'Zoom Speed',
+      min: 0.0002,
+      max: 0.003,
+      step: 0.0001,
+      initial: 0.0008,
+      category: 'appearance',
+    },
+    {
+      key: 'rotationSpeed',
+      label: 'Rotation',
+      min: 0.0,
+      max: 0.015,
+      step: 0.001,
+      initial: 0.003,
+      category: 'appearance',
+    },
+    {
+      key: 'bassToZoom',
+      label: 'Bass \u2192 Zoom',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How strongly bass drives zoom speed',
+    },
+    {
+      key: 'rmsToBrightness',
+      label: 'RMS \u2192 Brightness',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How strongly volume affects brightness',
+    },
+    {
+      key: 'centroidToWarmth',
+      label: 'Centroid \u2192 Warmth',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'How strongly spectral centroid shifts color temperature',
+    },
   ],
   viewport: { pan: true, zoom: true, orbit: false },
   viewStateFields: [
-    { key: 'centerReal', label: 'Center (Real)', min: -2.5, max: 1.5, step: 0.001 },
-    { key: 'centerImaginary', label: 'Center (Imag)', min: -1.5, max: 1.5, step: 0.001 },
-    { key: 'zoom', label: 'Zoom', min: 0.5, max: 10000, step: 1 },
+    {
+      key: 'centerReal',
+      label: 'Center (Real)',
+      min: -2.5,
+      max: 1.5,
+      step: 0.001,
+    },
+    {
+      key: 'centerImaginary',
+      label: 'Center (Imag)',
+      min: -1.5,
+      max: 1.5,
+      step: 0.001,
+    },
+    { key: 'zoom', label: 'Zoom', min: 0.5, max: 1000, step: 1 },
     { key: 'rotation', label: 'Rotation', min: 0, max: 6.283, step: 0.01 },
   ],
 };
 
 export class MandelbrotVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
   readonly metadata = mandelbrotMetadata;
 
   private unsub: Unsubscribe;
@@ -85,17 +153,17 @@ export class MandelbrotVisualizer implements Visualizer {
 
   // Zoom cycle state: zoom in → peak → zoom out → switch target → zoom in
   private zoomDirection: 'in' | 'out' = 'in';
-  private maxZoom = 8000;         // stay within float32 precision
+  private maxZoom = 1000; // stay within float32 precision
   private minZoom = 0.8;
 
   // Smoothed audio parameters
   private smoothers = {
-    zoomRate: new EMASmoothing(0.08),   // bass drives how fast we zoom
+    zoomRate: new EMASmoothing(0.08), // bass drives how fast we zoom
     colorSpeed: new EMASmoothing(0.15),
     iterations: new EMASmoothing(0.05),
     brightness: new EMASmoothing(0.12),
     colorWarmth: new EMASmoothing(0.08),
-    beatPulse: new EMASmoothing(0.4),   // fast-decaying beat pulse
+    beatPulse: new EventEnvelope(), // fast-decaying beat pulse
   };
 
   private material: THREE.ShaderMaterial | null = null;
@@ -108,9 +176,12 @@ export class MandelbrotVisualizer implements Visualizer {
     this.cx = this.target.cx;
     this.cy = this.target.cy;
 
-    this.unsub = bus.subscribe('audio:features', (msg: BusMessage<AudioFeatures>) => {
-      this.latestFeatures = msg.payload;
-    });
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
 
     this.smoothers.zoomRate.reset(0.3);
     this.smoothers.colorSpeed.reset(0.5);
@@ -133,6 +204,7 @@ export class MandelbrotVisualizer implements Visualizer {
         u_brightness: { value: 0.8 },
         u_colorWarmth: { value: 0.5 },
         u_beatPulse: { value: 0.0 },
+        u_workBudget: { value: 1 },
         u_time: { value: 0.0 },
         u_resolution: { value: new THREE.Vector2(1920, 1080) },
       },
@@ -142,34 +214,49 @@ export class MandelbrotVisualizer implements Visualizer {
     scene.add(this.mesh);
   }
 
-  tick(): void {
-    this.time += 1 / 60;
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
 
     if (this.latestFeatures) {
-      const f = this.latestFeatures;
+      const f = takeAudioFrame(this.latestFeatures);
       const am = this.audioMapStrengths;
-      this.smoothers.zoomRate.update(0.2 + f.bass * 0.8 * am.bassToZoom);
-      this.smoothers.colorSpeed.update(0.3 + f.mid * 2.0);
-      this.smoothers.iterations.update(150 + f.high * 350);
-      this.smoothers.brightness.update(0.5 + f.rms * 0.8 * am.rmsToBrightness);
-      this.smoothers.colorWarmth.update(f.spectralCentroid * am.centroidToWarmth);
-      this.smoothers.beatPulse.update(f.beatOnset ? 1.0 : 0.0);
+      this.smoothers.zoomRate.update(
+        0.2 + f.bass * 0.8 * am.bassToZoom,
+        this.deltaSeconds,
+      );
+      this.smoothers.colorSpeed.update(0.3 + f.mid * 2.0, this.deltaSeconds);
+      this.smoothers.iterations.update(150 + f.high * 350, this.deltaSeconds);
+      this.smoothers.brightness.update(
+        0.5 + f.rms * 0.8 * am.rmsToBrightness,
+        this.deltaSeconds,
+      );
+      this.smoothers.colorWarmth.update(
+        f.spectralCentroid * am.centroidToWarmth,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
     } else {
       // Idle: gentle defaults
-      this.smoothers.zoomRate.update(0.3);
-      this.smoothers.beatPulse.update(0.0);
+      this.smoothers.zoomRate.update(0.3, this.deltaSeconds);
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
     }
 
     // Zoom cycle (only when not overridden by user)
     if (!this.viewOverrides.zoom) {
       const rate = this.zoomSpeed * this.smoothers.zoomRate.value;
       if (this.zoomDirection === 'in') {
-        this.zoomLevel *= (1.0 + rate);
+        this.zoomLevel *= Math.exp(Math.log1p(rate) * this.deltaSeconds * 60);
         if (this.zoomLevel >= this.maxZoom) {
           this.zoomDirection = 'out';
         }
       } else {
-        this.zoomLevel *= (1.0 - rate * 1.5);
+        this.zoomLevel *= Math.exp(
+          Math.log1p(-rate * 1.5) * this.deltaSeconds * 60,
+        );
         if (this.zoomLevel <= this.minZoom) {
           this.zoomDirection = 'in';
           if (!this.viewOverrides.center) {
@@ -185,11 +272,18 @@ export class MandelbrotVisualizer implements Visualizer {
 
     // Camera rotation — gentle spiral as we zoom
     if (this.rotationEnabled) {
-      this.rotation += this.rotationSpeed * (0.5 + this.smoothers.zoomRate.value * 0.5);
+      this.rotation +=
+        this.rotationSpeed *
+        (0.5 + this.smoothers.zoomRate.value * 0.5) *
+        this.deltaSeconds *
+        60;
     }
 
     // Increase iterations as we zoom deeper (needed for detail at depth)
-    const depthIterBoost = Math.min(Math.log2(Math.max(this.zoomLevel, 1)) * 25, 400);
+    const depthIterBoost = Math.min(
+      Math.log2(Math.max(this.zoomLevel, 1)) * 25,
+      400,
+    );
     const totalIterations = this.smoothers.iterations.value + depthIterBoost;
 
     // Update uniforms
@@ -197,10 +291,15 @@ export class MandelbrotVisualizer implements Visualizer {
       this.material.uniforms.u_zoom.value = this.zoomLevel;
       this.material.uniforms.u_center.value.set(this.cx, this.cy);
       this.material.uniforms.u_rotation.value = this.rotation;
-      this.material.uniforms.u_iterations.value = Math.round(Math.min(totalIterations, 1000));
-      this.material.uniforms.u_colorSpeed.value = this.smoothers.colorSpeed.value;
-      this.material.uniforms.u_brightness.value = this.smoothers.brightness.value + this.smoothers.beatPulse.value * 0.3;
-      this.material.uniforms.u_colorWarmth.value = this.smoothers.colorWarmth.value;
+      this.material.uniforms.u_iterations.value = Math.round(
+        Math.min(totalIterations, 1000),
+      );
+      this.material.uniforms.u_colorSpeed.value =
+        this.smoothers.colorSpeed.value;
+      this.material.uniforms.u_brightness.value =
+        this.smoothers.brightness.value + this.smoothers.beatPulse.value * 0.3;
+      this.material.uniforms.u_colorWarmth.value =
+        this.smoothers.colorWarmth.value;
       this.material.uniforms.u_beatPulse.value = this.smoothers.beatPulse.value;
       this.material.uniforms.u_time.value = this.time;
     }
@@ -240,7 +339,10 @@ export class MandelbrotVisualizer implements Visualizer {
       this.viewOverrides.center = true;
     }
     if ('zoom' in partial) {
-      this.zoomLevel = Math.max(this.minZoom, Math.min(this.maxZoom, partial.zoom));
+      this.zoomLevel = Math.max(
+        this.minZoom,
+        Math.min(this.maxZoom, partial.zoom),
+      );
       this.viewOverrides.zoom = true;
     }
     if ('rotation' in partial) {
@@ -249,12 +351,15 @@ export class MandelbrotVisualizer implements Visualizer {
   }
 
   setResolution(width: number, height: number): void {
-    if (this.material) this.material.uniforms.u_resolution.value.set(width, height);
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
   }
 
   setUserParam(key: string, value: number): void {
     switch (key) {
-      case 'zoomSpeed': this.zoomSpeed = value; break;
+      case 'zoomSpeed':
+        this.zoomSpeed = value;
+        break;
       case 'rotationSpeed':
         this.rotationSpeed = value;
         this.rotationEnabled = value > 0;
@@ -297,6 +402,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   uniform float u_brightness;
   uniform float u_colorWarmth;
   uniform float u_beatPulse;
+  uniform float u_workBudget;
   uniform float u_time;
   uniform vec2 u_resolution;
   varying vec2 vUv;
@@ -324,7 +430,7 @@ const FRAGMENT_SHADER = /* glsl */ `
     vec2 c = uv / u_zoom + u_center;
     vec2 z = vec2(0.0);
 
-    int maxIter = int(u_iterations);
+    int maxIter = int(clamp(u_iterations * u_workBudget, 32.0, 1000.0));
     int i;
     for (i = 0; i < 1000; i++) {
       if (i >= maxIter) break;

@@ -4,7 +4,7 @@
 set dotenv-filename := ".env.local"
 
 github_token := env("GITHUB_TOKEN", `gh auth token 2>/dev/null || echo ""`)
-deploy_host  := env("DEPLOY_HOST", "https://app.imbasso.com")
+deploy_host  := env("DEPLOY_HOST", "https://cybernoetica.app")
 
 # Default: show available commands
 default:
@@ -26,6 +26,35 @@ launch:
     sleep 2
     open http://localhost:5173
 
+# Start dev server with specific visualizer, audio source, and/or settings
+# Examples:
+#   just launch-with viz=mandelbrot
+#   just launch-with audio=system
+#   just launch-with audio=soundscape
+#   just launch-with viz=orbital audio=system log=stream
+launch-with +params="":
+    #!/usr/bin/env bash
+    query=""
+    for kv in {{params}}; do
+        key="${kv%%=*}"
+        val="${kv#*=}"
+        [ -n "$query" ] && query="${query}&"
+        query="${query}${key}=${val}"
+    done
+    url="http://localhost:5173"
+    [ -n "$query" ] && url="${url}?${query}"
+    pnpm dev &
+    sleep 2
+    open "$url"
+
+# Launch via the centralized launch script (supports --viz, --audio, --log, --debug, etc.)
+# Examples:
+#   just run --viz mandelbrot --audio system
+#   just run --debug --log stream
+#   just run --prod
+run +args="":
+    ./launch.sh {{args}}
+
 # ─── Build ────────────────────────────────────────────────────────────
 
 # Build all packages
@@ -36,9 +65,13 @@ build:
 wasm:
     cd crates/audio-analysis && wasm-pack build --target web --out-dir ../../packages/audio/wasm
 
+# Build the Voro++ WASM tessellator (requires emcc or Docker emscripten/emsdk)
+wasm-voro:
+    ./scripts/build-voro-wasm.sh
+
 # ─── Test ─────────────────────────────────────────────────────────────
 
-# Run all tests (95 Vitest + Rust)
+# Run all Vitest tests (58 tests across 4 packages; use test-rust for Rust)
 test:
     pnpm test
 
@@ -51,6 +84,23 @@ test-watch:
 # Run only Rust tests
 test-rust:
     cd crates/audio-analysis && cargo test
+
+# ─── Test / Dev Modes ─────────────────────────────────────────────────
+
+# Launch a muted visualizer test (audio drives visuals, no speaker output)
+# Examples:
+#   just test-viz                          # random viz + random track, muted
+#   just test-viz viz=mandelbrot           # specific viz, random track, muted
+#   just test-viz viz=orbital audio=system # specific viz + audio source, muted
+test-viz +params="":
+    #!/usr/bin/env bash
+    args="--mute --autostart"
+    for kv in {{params}}; do
+        key="${kv%%=*}"
+        val="${kv#*=}"
+        args="$args --$key $val"
+    done
+    ./launch.sh $args
 
 # ─── Install ──────────────────────────────────────────────────────────
 
@@ -78,9 +128,17 @@ build-prod:
 serve:
     cd apps/web && node server.mjs
 
-# Deploy to Railway
+# Deploy to Railway and verify tracks afterward
 deploy:
+    #!/usr/bin/env bash
     railway up
+    echo ""
+    echo "Waiting for deployment to stabilize..."
+    sleep 15
+    echo "Verifying tracks..."
+    DEPLOY_HOST="{{deploy_host}}" GITHUB_TOKEN="{{github_token}}" \
+        ./scripts/upload-audio.sh verify || \
+        echo "Warning: track verification failed -- you may need to re-upload audio"
 
 # Show Railway deployment status and logs
 deploy-status:
@@ -102,79 +160,62 @@ deploy-open:
 
 # ─── Audio Upload ────────────────────────────────────────────────────
 
-# Upload a single audio file (uses gh CLI token automatically)
+# Upload a single audio file
 upload file subdir="":
-    #!/usr/bin/env bash
-    name=$(basename "{{file}}")
-    printf "\033[1m%s\033[0m " "$name"
-    resp=$(curl -s -w "\n%{http_code}" -X POST "{{deploy_host}}/api/admin/upload" \
-        -H "Authorization: Bearer {{github_token}}" \
-        -F "file=@{{file}}" \
-        -F "subdir={{subdir}}")
-    code=$(echo "$resp" | tail -1)
-    body=$(echo "$resp" | sed '$d')
-    if [ "$code" = "200" ]; then
-        printf "\033[32mok\033[0m\n"
-    else
-        printf "\033[31mfailed (%s)\033[0m %s\n" "$code" "$body"
-    fi
+    DEPLOY_HOST="{{deploy_host}}" GITHUB_TOKEN="{{github_token}}" \
+        ./scripts/upload-audio.sh upload "{{file}}" --subdir "{{subdir}}"
 
 # Upload all audio files from a directory
 upload-dir dir subdir="":
-    #!/usr/bin/env bash
-    shopt -s nullglob globstar
-    files=()
-    for f in "{{dir}}"/**/*.{mp3,wav,ogg,flac,aac,m4a}; do
-        [ -f "$f" ] && files+=("$f")
-    done
-    total=${#files[@]}
-    if [ "$total" -eq 0 ]; then
-        echo "No audio files found in {{dir}}"
-        exit 0
-    fi
-    echo "Uploading $total files to {{deploy_host}}"
-    echo ""
-    ok=0; fail=0
-    for i in "${!files[@]}"; do
-        f="${files[$i]}"
-        n=$((i + 1))
-        name=$(basename "$f")
-        pct=$((n * 100 / total))
-        filled=$((pct / 2))
-        empty=$((50 - filled))
-        bar=$(printf '%0.s#' $(seq 1 $filled 2>/dev/null) || true)
-        gap=$(printf '%0.s-' $(seq 1 $empty 2>/dev/null) || true)
-        printf "\r[%-50s] %3d%% (%d/%d) %s" "$bar$gap" "$pct" "$n" "$total" "$name"
-        resp=$(curl -s -w "\n%{http_code}" -X POST "{{deploy_host}}/api/admin/upload" \
-            -H "Authorization: Bearer {{github_token}}" \
-            -F "file=@$f" \
-            -F "subdir={{subdir}}")
-        code=$(echo "$resp" | tail -1)
-        if [ "$code" = "200" ]; then
-            ok=$((ok + 1))
-        else
-            fail=$((fail + 1))
-            body=$(echo "$resp" | sed '$d')
-            printf "\n  \033[31mfailed (%s)\033[0m %s\n" "$code" "$body"
-        fi
-    done
-    printf "\r[%-50s] 100%% (%d/%d)\n" "$(printf '%0.s#' $(seq 1 50))" "$total" "$total"
-    echo ""
-    echo "Done: $ok succeeded, $fail failed"
+    DEPLOY_HOST="{{deploy_host}}" GITHUB_TOKEN="{{github_token}}" \
+        ./scripts/upload-audio.sh upload-dir "{{dir}}" --subdir "{{subdir}}"
 
 # List tracks on the deployed server
 list-tracks:
-    #!/usr/bin/env bash
-    resp=$(curl -s -w "\n%{http_code}" "{{deploy_host}}/api/admin/tracks" \
-        -H "Authorization: Bearer {{github_token}}")
-    code=$(echo "$resp" | tail -1)
-    body=$(echo "$resp" | sed '$d')
-    if [ "$code" = "200" ]; then
-        echo "$body" | python3 -m json.tool
-    else
-        echo "Error ($code): $body" >&2
-        exit 1
-    fi
+    DEPLOY_HOST="{{deploy_host}}" GITHUB_TOKEN="{{github_token}}" \
+        ./scripts/upload-audio.sh list
+
+# Verify that audio tracks are available on the server
+verify-tracks:
+    DEPLOY_HOST="{{deploy_host}}" GITHUB_TOKEN="{{github_token}}" \
+        ./scripts/upload-audio.sh verify
+
+# Re-upload all local audio to the server (from data/sample-music/)
+reupload-tracks:
+    DEPLOY_HOST="{{deploy_host}}" GITHUB_TOKEN="{{github_token}}" \
+        ./scripts/upload-audio.sh upload-dir data/sample-music
+
+# ─── DNS ──────────────────────────────────────────────────────────────
+
+# List DNS records for a domain (requires PORKBUN_API_KEY in .env.local)
+dns-list domain="cybernoetica.app":
+    ./scripts/manage-dns.sh list "{{domain}}"
+
+# Get a specific DNS record
+dns-get domain type subdomain:
+    ./scripts/manage-dns.sh get "{{domain}}" "{{type}}" "{{subdomain}}"
+
+# Update a subdomain using its assigned Railway routing target (check status first)
+dns-update-cname subdomain target:
+    ./scripts/manage-dns.sh update cybernoetica.app CNAME "{{subdomain}}" "{{target}}"
+
+# List custom domains on the Railway service
+railway-domains:
+    ./scripts/manage-dns.sh railway-list
+
+# Check Railway custom domain status
+railway-domain-status domain="cybernoetica.app":
+    ./scripts/manage-dns.sh railway-status "{{domain}}"
+
+# Type-check without emitting (catches errors Vite misses)
+typecheck:
+    pnpm typecheck
+
+# ─── Auditing ─────────────────────────────────────────────────────────
+
+# Audit CSS transitions and animations for consistency
+audit-animations:
+    npx tsx scripts/audit-ui-animations.ts
 
 # ─── Clean ────────────────────────────────────────────────────────────
 

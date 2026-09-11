@@ -1,0 +1,490 @@
+import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
+import * as THREE from 'three';
+import { MessageBus } from '@cybernoetica/core';
+import type {
+  AudioFeatures,
+  BusMessage,
+  Unsubscribe,
+} from '@cybernoetica/core';
+import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
+import type { Visualizer, VisualizerMetadata } from '../types.js';
+import { registerVisualizer } from '../registry.js';
+
+/**
+ * Soliton visualizer -- nonlinear wave interactions.
+ *
+ * Superposes sech² pulses with the single-soliton amplitude/width/speed
+ * relation for u_t + 6*u*u_x + u_xxx = 0. Periodic wrapping keeps waves visible.
+ * Multiple directions, wrapping, audio modulation, and linear superposition
+ * are artistic extensions, not an exact nonlinear multi-soliton solution.
+ *
+ * Audio: bass controls wave amplitude, mids adjust propagation speed,
+ * spectral centroid shifts the number of active solitons, beats spawn
+ * new wave pulses that interact with the existing field.
+ */
+
+const solitonMetadata: VisualizerMetadata = {
+  type: 'soliton',
+  label: 'Soliton',
+  description: 'Soliton-inspired periodic pulse superposition',
+  usesPerspective: false,
+  params: [
+    {
+      key: 'numWaves',
+      label: 'Wave Count',
+      min: 2,
+      max: 8,
+      step: 1,
+      initial: 5,
+      category: 'appearance',
+      description: 'Number of soliton waves',
+    },
+    {
+      key: 'amplitude',
+      label: 'Amplitude',
+      min: 0.3,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'appearance',
+      description: 'Wave amplitude',
+    },
+    {
+      key: 'speed',
+      label: 'Speed',
+      min: 0.1,
+      max: 2.0,
+      step: 0.1,
+      initial: 0.8,
+      category: 'appearance',
+      description: 'Propagation speed',
+    },
+    {
+      key: 'colorIntensity',
+      label: 'Color Intensity',
+      min: 0.3,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'appearance',
+      description: 'Color saturation and brightness',
+    },
+    {
+      key: 'trailLength',
+      label: 'Trail Length',
+      min: 0.0,
+      max: 1.0,
+      step: 0.05,
+      initial: 0.4,
+      category: 'appearance',
+      description: 'Wave trail persistence',
+    },
+    {
+      key: 'bassToAmplitude',
+      label: 'Bass -> Amplitude',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Bass drives wave height',
+    },
+    {
+      key: 'midToSpeed',
+      label: 'Mid -> Speed',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Mids modulate speed',
+    },
+    {
+      key: 'spectralToCount',
+      label: 'Spectral -> Count',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Spectral centroid adds waves',
+    },
+    {
+      key: 'beatToSpawn',
+      label: 'Beat -> Spawn',
+      min: 0.0,
+      max: 2.0,
+      step: 0.1,
+      initial: 1.0,
+      category: 'audio-mapping',
+      description: 'Beats spawn wave pulses',
+    },
+  ],
+  viewport: { pan: true, zoom: true, orbit: false },
+  viewStateFields: [
+    { key: 'centerX', label: 'Center X', min: -5, max: 5, step: 0.05 },
+    { key: 'centerY', label: 'Center Y', min: -5, max: 5, step: 0.05 },
+    { key: 'zoom', label: 'Zoom', min: 0.2, max: 4.0, step: 0.05 },
+  ],
+};
+
+export class SolitonVisualizer implements Visualizer {
+  private deltaSeconds = 1 / 60;
+  private phases = new PhaseClock();
+  readonly metadata = solitonMetadata;
+
+  private unsub: Unsubscribe;
+  private latestFeatures: AudioFeatures | null = null;
+  private time = 0;
+
+  private userParams: Record<string, number> = {
+    numWaves: 5,
+    amplitude: 1.0,
+    speed: 0.8,
+    colorIntensity: 1.0,
+    trailLength: 0.4,
+    bassToAmplitude: 1.0,
+    midToSpeed: 1.0,
+    spectralToCount: 1.0,
+    beatToSpawn: 1.0,
+  };
+
+  private _centerX = 0;
+  private _centerY = 0;
+  private _zoom = 1.0;
+  private viewOverrides: Record<string, boolean> = {};
+
+  private smoothers = {
+    bass: new EMASmoothing(0.12),
+    mid: new EMASmoothing(0.18),
+    high: new EMASmoothing(0.22),
+    rms: new EMASmoothing(0.15),
+    spectralCentroid: new EMASmoothing(0.08),
+    beatPulse: new EventEnvelope(),
+  };
+
+  private material: THREE.ShaderMaterial | null = null;
+  private mesh: THREE.Mesh | null = null;
+
+  constructor(private bus: MessageBus) {
+    this.unsub = bus.subscribe(
+      'audio:features',
+      (msg: BusMessage<AudioFeatures>) => {
+        this.latestFeatures = { ...msg.payload };
+      },
+    );
+
+    this.smoothers.bass.reset(0);
+    this.smoothers.mid.reset(0);
+    this.smoothers.high.reset(0);
+    this.smoothers.rms.reset(0.1);
+    this.smoothers.spectralCentroid.reset(0.5);
+    this.smoothers.beatPulse.reset(0);
+  }
+
+  attach(scene: THREE.Scene): void {
+    this.material = new THREE.ShaderMaterial({
+      vertexShader: VERTEX_SHADER,
+      fragmentShader: FRAGMENT_SHADER,
+      uniforms: {
+        u_time: { value: 0.0 },
+        u_resolution: { value: new THREE.Vector2(1920, 1080) },
+        u_center: { value: new THREE.Vector2(0, 0) },
+        u_zoom: { value: 1.0 },
+        u_numWaves: { value: 5.0 },
+        u_amplitude: { value: 1.0 },
+        u_speed: { value: 0.8 },
+        u_colorIntensity: { value: 1.0 },
+        u_trailLength: { value: 0.4 },
+        u_bass: { value: 0.0 },
+        u_mid: { value: 0.0 },
+        u_high: { value: 0.0 },
+        u_rms: { value: 0.1 },
+        u_spectralCentroid: { value: 0.5 },
+        u_beatPulse: { value: 0.0 },
+      },
+      transparent: true,
+    });
+
+    const geometry = new THREE.PlaneGeometry(2, 2);
+    this.mesh = new THREE.Mesh(geometry, this.material);
+    scene.add(this.mesh);
+  }
+
+  tick(deltaSeconds = 1 / 60): void {
+    this.deltaSeconds = frameDelta(deltaSeconds);
+    this.time += this.deltaSeconds;
+
+    if (this.latestFeatures) {
+      const f = takeAudioFrame(this.latestFeatures);
+      this.smoothers.bass.update(f.bass, this.deltaSeconds);
+      this.smoothers.mid.update(f.mid, this.deltaSeconds);
+      this.smoothers.high.update(f.high, this.deltaSeconds);
+      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.spectralCentroid.update(
+        f.spectralCentroid,
+        this.deltaSeconds,
+      );
+      this.smoothers.beatPulse.update(
+        f.beatOnset ? 1.0 : 0.0,
+        this.deltaSeconds,
+      );
+    } else {
+      this.smoothers.beatPulse.update(0.0, this.deltaSeconds);
+    }
+
+    const effectiveAmp =
+      this.userParams.amplitude +
+      this.smoothers.bass.value * 0.5 * this.userParams.bassToAmplitude;
+
+    const effectiveSpeed =
+      this.userParams.speed +
+      this.smoothers.mid.value * 0.4 * this.userParams.midToSpeed;
+
+    const effectiveWaves =
+      this.userParams.numWaves +
+      this.smoothers.spectralCentroid.value *
+        2.0 *
+        this.userParams.spectralToCount;
+
+    if (this.material) {
+      const u = this.material.uniforms;
+      u.u_time.value = this.time;
+      u.u_center.value.set(this._centerX, this._centerY);
+      u.u_zoom.value = this._zoom;
+      u.u_numWaves.value = effectiveWaves;
+      u.u_amplitude.value = effectiveAmp;
+      u.u_speed.value = effectiveSpeed;
+      u.u_colorIntensity.value = this.userParams.colorIntensity;
+      u.u_trailLength.value = this.userParams.trailLength;
+      u.u_bass.value = this.smoothers.bass.value;
+      u.u_mid.value = this.smoothers.mid.value;
+      u.u_high.value = this.smoothers.high.value;
+      u.u_rms.value = this.smoothers.rms.value;
+      u.u_spectralCentroid.value = this.smoothers.spectralCentroid.value;
+      u.u_beatPulse.value =
+        this.smoothers.beatPulse.value * this.userParams.beatToSpawn;
+    }
+  }
+
+  setResolution(width: number, height: number): void {
+    if (this.material)
+      this.material.uniforms.u_resolution.value.set(width, height);
+  }
+
+  setUserParam(key: string, value: number): void {
+    if (key in this.userParams) {
+      this.userParams[key] = value;
+    }
+  }
+
+  getViewState(): Record<string, number> {
+    return {
+      centerX: this._centerX,
+      centerY: this._centerY,
+      zoom: this._zoom,
+    };
+  }
+
+  setViewState(partial: Record<string, number>): void {
+    if ('centerX' in partial) {
+      this._centerX = Math.max(-5, Math.min(5, partial.centerX));
+      this.viewOverrides.pan = true;
+    }
+    if ('centerY' in partial) {
+      this._centerY = Math.max(-5, Math.min(5, partial.centerY));
+      this.viewOverrides.pan = true;
+    }
+    if ('zoom' in partial) {
+      this._zoom = Math.max(0.2, Math.min(4.0, partial.zoom));
+      this.viewOverrides.zoom = true;
+    }
+  }
+
+  dispose(): void {
+    this.unsub();
+    this.material?.dispose();
+    this.mesh?.geometry.dispose();
+  }
+}
+
+registerVisualizer({
+  metadata: solitonMetadata,
+  create: (bus) => new SolitonVisualizer(bus),
+});
+
+const VERTEX_SHADER = /* glsl */ `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = vec4(position, 1.0);
+  }
+`;
+
+const FRAGMENT_SHADER = /* glsl */ `
+  precision highp float;
+
+  #define PI 3.14159265359
+  #define TAU 6.28318530718
+  #define MAX_WAVES 8
+
+  uniform float u_time;
+  uniform vec2 u_resolution;
+  uniform vec2 u_center;
+  uniform float u_zoom;
+  uniform float u_numWaves;
+  uniform float u_amplitude;
+  uniform float u_speed;
+  uniform float u_colorIntensity;
+  uniform float u_trailLength;
+  uniform float u_bass;
+  uniform float u_mid;
+  uniform float u_high;
+  uniform float u_rms;
+  uniform float u_spectralCentroid;
+  uniform float u_beatPulse;
+
+  varying vec2 vUv;
+
+  // HSV to RGB
+  #include <cyber_hsv2rgb>
+
+  // KdV single soliton: u(x,t) = A * sech²(k * (x - v*t - x0))
+  // For u_t + 6*u*u_x + u_xxx = 0: k = sqrt(A/2), v = 2*A.
+  // sech²(x) = 1/cosh²(x)
+  float soliton(float x, float amplitude, float width) {
+    float e = exp(-abs(x / width));
+    float sech = 2.0 * e / (1.0 + e * e);
+    return amplitude * sech * sech;
+  }
+
+  // 2D soliton along a direction
+  float soliton2D(vec2 p, vec2 dir, float phase, float amplitude, float width) {
+    float proj = mod(dot(p, dir) - phase + 20.0, 40.0) - 20.0;
+    return soliton(proj, amplitude, width);
+  }
+
+  // Smooth noise for organic variation
+  float hash(float n) {
+    return fract(sin(n) * 43758.5453123);
+  }
+
+  void main() {
+    vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution) / min(u_resolution.x, u_resolution.y);
+    uv = uv / u_zoom + u_center;
+
+    int numWaves = int(min(u_numWaves, float(MAX_WAVES)));
+
+    // Accumulate soliton field
+    float field = 0.0;
+    float fieldMax = 0.0;
+    vec3 colorAccum = vec3(0.0);
+    float totalWeight = 0.0;
+
+    for (int i = 0; i < MAX_WAVES; i++) {
+      if (i >= numWaves) break;
+
+      float fi = float(i);
+
+      // Each soliton has unique direction, speed, amplitude, and width
+      float angle = fi * TAU / float(numWaves) + sin(u_time * 0.1 + fi) * 0.2;
+      vec2 dir = vec2(cos(angle), sin(angle));
+
+      // KdV relationship: taller solitons travel faster
+      float amp = u_amplitude * (0.6 + hash(fi * 7.13) * 0.6);
+      float width = sqrt(2.0 / max(amp, 1e-6));
+      float speed = u_speed * 2.0 * amp;
+
+      // Phase: position along propagation direction
+      float phase = u_time * speed + hash(fi * 23.71) * 10.0;
+
+      // Beat spawns: add extra pulse offset on beats
+      phase += u_beatPulse * sin(u_time * 3.0 + fi * 1.5) * 2.0;
+
+      // Evaluate soliton
+      float s = soliton2D(uv * 5.0, dir, phase, amp, width);
+
+      field += s;
+      fieldMax = max(fieldMax, s);
+
+      // Per-wave color contribution
+      float hue = fract(fi * 0.618033 + u_time * 0.03 + u_spectralCentroid * 0.3);
+      vec3 waveColor = hsv2rgb(vec3(hue, 0.7, 1.0));
+      colorAccum += waveColor * s;
+      totalWeight += s + 0.001;
+    }
+
+    // Normalize weighted color
+    vec3 baseColor = colorAccum / totalWeight;
+
+    // Field intensity mapping — sharper contrast
+    float intensity = field * 1.2;
+    float peakIntensity = fieldMax * 1.5;
+
+    // Interaction regions: where solitons overlap, special coloring
+    float overlap = max(0.0, field - fieldMax * 1.05);
+    float interactionGlow = smoothstep(0.0, 0.3, overlap);
+
+    // --- Rendering ---
+
+    // Base field: dark ocean-like background
+    vec3 bgDeep = vec3(0.005, 0.008, 0.02);
+    vec3 bgWave = vec3(0.015, 0.025, 0.06);
+    vec3 bg = mix(bgDeep, bgWave, smoothstep(0.0, 0.05, intensity));
+
+    // Wave crests: bright colored peaks
+    vec3 crestColor = baseColor * u_colorIntensity;
+    float crestMask = smoothstep(0.02, 0.15, intensity);
+
+    // Bright core of each wave
+    float coreMask = smoothstep(0.3, 0.8, peakIntensity);
+    vec3 coreColor = mix(crestColor, vec3(1.0, 0.95, 0.9), 0.5);
+
+    // Interaction highlight: where waves collide, golden/white flash
+    vec3 interColor = mix(
+      vec3(1.0, 0.8, 0.3),
+      vec3(1.0, 1.0, 1.0),
+      interactionGlow * 0.5
+    );
+
+    // Compose layers
+    vec3 color = bg;
+    color = mix(color, crestColor * 0.4, crestMask * 0.6);
+    color += coreColor * coreMask * 0.5;
+    color += interColor * interactionGlow * 0.4 * u_colorIntensity;
+
+    // Trailing wake effect using gradient
+    float grad = length(vec2(
+      dFdx(field),
+      dFdy(field)
+    ));
+    float wake = smoothstep(0.0, 2.0, grad) * u_trailLength;
+    color += baseColor * wake * 0.15;
+
+    // RMS overall brightness boost
+    color *= 0.7 + u_rms * 0.5;
+
+    // High frequency sparkle on peaks
+    float sparkle = smoothstep(0.5, 1.0, peakIntensity) * u_high;
+    color += vec3(sparkle * 0.2);
+
+    // Beat flash: radial pulse from center
+    float beatDist = length(uv);
+    float beatWave = exp(-beatDist * 2.0) * u_beatPulse;
+    color += vec3(0.3, 0.5, 1.0) * beatWave * 0.3;
+
+    // Vignette
+    float aspect = u_resolution.x / u_resolution.y;
+    vec2 screenUv = gl_FragCoord.xy / u_resolution;
+    float vignette = 1.0 - 0.3 * length((screenUv - 0.5) * vec2(aspect, 1.0));
+    color *= vignette;
+
+    // Ensure minimum visibility
+    color = max(color, vec3(0.005, 0.005, 0.01));
+
+    // Tone mapping
+    color = color / (0.9 + color);
+
+    gl_FragColor = vec4(color, 1.0);
+  }
+`;

@@ -1,7 +1,6 @@
-FROM node:20-alpine AS builder
+FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS builder
 WORKDIR /app
-
-RUN corepack enable && corepack prepare pnpm@10 --activate
+RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY apps/web/package.json apps/web/
@@ -10,27 +9,21 @@ COPY packages/renderer/package.json packages/renderer/
 COPY packages/audio/package.json packages/audio/
 RUN pnpm install --frozen-lockfile
 
-COPY tsconfig.base.json ./
+COPY tsconfig.base.json settings.json ./
 COPY apps/web/ apps/web/
 COPY packages/ packages/
-
-RUN mkdir -p packages/audio/wasm && \
-    printf 'export default async function init() {}\nexport class AudioAnalyzer { constructor() { throw new Error("WASM not built"); } }\n' \
-    > packages/audio/wasm/audio_analysis.js
-
+# The complete shared DSP is bundled into the AudioWorklet and compatibility
+# path. No generated audio WASM or throwing production stub is required.
 RUN pnpm build
-RUN pnpm --filter @cybernoetica/web build:server
 
-# ── Runtime ──────────────────────────────────────────────────────────
-FROM node:20-alpine
+FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf
 WORKDIR /app
-
 COPY --from=builder /app/apps/web/dist ./dist
-COPY --from=builder /app/apps/web/server.mjs ./server.mjs
+COPY --from=builder /app/apps/web/server.cjs ./server.cjs
 COPY --from=builder /app/apps/web/auth-page.html ./auth-page.html
-
-RUN npm install --no-save express compression cookie-session multer
-
+# Server dependencies are bundled from the frozen pnpm lockfile; no runtime install.
 ENV NODE_ENV=production
+ENV AUDIO_DIR=/data/audio
+ENV TRUST_PROXY_HOPS=1
 EXPOSE 3000
-CMD ["node", "server.mjs"]
+CMD ["node", "server.cjs"]

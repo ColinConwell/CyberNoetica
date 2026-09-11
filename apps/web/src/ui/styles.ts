@@ -58,24 +58,37 @@ function getActiveTheme(): ThemeValues {
 }
 
 // ---------------------------------------------------------------------------
-// Exported constants (backward-compatible, theme-aware)
+// Exported constants (resolved from active theme at module load)
 // ---------------------------------------------------------------------------
 
-export const FONT = 'system-ui, -apple-system, sans-serif';
+const _active = getActiveTheme();
+
+export const FONT = _active.font;
+export const GLASS_BG = _active.glassBg;
+export const GLASS_BORDER = _active.glassBorder;
+export const GLASS_BLUR = _active.glassBlur;
+export const TEXT_PRIMARY = _active.textPrimary;
+export const TEXT_SECONDARY = _active.textSecondary;
+export const TEXT_DIM = _active.textDim;
+export const ACCENT = _active.accent;
+export const TRANSITION = _active.transition;
 
 export function theme(): ThemeValues {
-  return getActiveTheme();
+  return _active;
 }
 
-// Static exports for files that import named constants (backward compat)
-export const GLASS_BG = 'rgba(8, 8, 16, 0.88)';
-export const GLASS_BORDER = 'rgba(255, 255, 255, 0.12)';
-export const GLASS_BLUR = 'blur(20px)';
-export const TEXT_PRIMARY = 'rgba(255, 255, 255, 0.92)';
-export const TEXT_SECONDARY = 'rgba(255, 255, 255, 0.5)';
-export const TEXT_DIM = 'rgba(255, 255, 255, 0.3)';
-export const ACCENT = 'rgba(140, 160, 255, 0.6)';
-export const TRANSITION = 'all 0.25s ease';
+/**
+ * Generate a glass background rgba string with a custom opacity.
+ * Parses the theme's glassBg to extract the base RGB values.
+ */
+export function glassBackground(opacity: number): string {
+  const match = _active.glassBg.match(/rgba?\(([^)]+)\)/);
+  if (match) {
+    const parts = match[1].split(',').map(s => s.trim());
+    return `rgba(${parts[0]}, ${parts[1]}, ${parts[2]}, ${opacity})`;
+  }
+  return _active.glassBg;
+}
 
 // ---------------------------------------------------------------------------
 // App Settings

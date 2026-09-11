@@ -1,7 +1,6 @@
 export interface FadeManagerOpts {
   controlBar: HTMLElement;
   panel: HTMLElement;
-  title: HTMLElement;
   getActivePanel: () => string | null;
   getIsPlaying: () => boolean;
   getFadeDelay: () => number;
@@ -29,7 +28,12 @@ export function createFadeManager(opts: FadeManagerOpts): FadeManager {
   }
 
   function hide() {
-    if (opts.getActivePanel()) return;
+    if (
+      opts.getActivePanel() ||
+      opts.controlBar.contains(document.activeElement) ||
+      opts.panel.contains(document.activeElement)
+    )
+      return;
     opts.controlBar.style.opacity = '0';
     opts.controlBar.style.pointerEvents = 'none';
     barVisible = false;
@@ -58,13 +62,24 @@ export function createFadeManager(opts: FadeManagerOpts): FadeManager {
     }
   };
 
+  const onFocus = () => {
+    show();
+    if (fadeTimer) clearTimeout(fadeTimer);
+  };
+  opts.controlBar.addEventListener('focusin', onFocus);
+  opts.controlBar.addEventListener('focusout', reset);
+
   document.addEventListener('mousemove', onMouseMove);
   document.addEventListener('click', onClick);
   document.addEventListener('keydown', onKeyDown);
 
-  opts.controlBar.addEventListener('mouseenter', () => { if (fadeTimer) clearTimeout(fadeTimer); });
+  opts.controlBar.addEventListener('mouseenter', () => {
+    if (fadeTimer) clearTimeout(fadeTimer);
+  });
   opts.controlBar.addEventListener('mouseleave', reset);
-  opts.panel.addEventListener('mouseenter', () => { if (fadeTimer) clearTimeout(fadeTimer); });
+  opts.panel.addEventListener('mouseenter', () => {
+    if (fadeTimer) clearTimeout(fadeTimer);
+  });
   opts.panel.addEventListener('mouseleave', reset);
 
   return {
@@ -74,6 +89,8 @@ export function createFadeManager(opts: FadeManagerOpts): FadeManager {
     isVisible: () => barVisible,
     destroy() {
       if (fadeTimer) clearTimeout(fadeTimer);
+      opts.controlBar.removeEventListener('focusin', onFocus);
+      opts.controlBar.removeEventListener('focusout', reset);
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('click', onClick);
       document.removeEventListener('keydown', onKeyDown);

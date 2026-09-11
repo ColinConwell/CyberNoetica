@@ -2,7 +2,17 @@
 
 ## Overview
 
-**Cybernoetica** is a high-aesthetic, GPU-accelerated audio-reactive visualizer and knowledge portal. It delivers 4 visualizer families (each with versioned subvariants) driven by real-time audio analysis, with a glass-morphism control interface and formal playback state management.
+**Cybernoetica** is a high-aesthetic, GPU-accelerated audio-reactive visualizer and knowledge portal. It delivers 71 registered visualizers across versioned families driven by real-time audio analysis, with a glass-morphism control interface, measured CPU/GPU performance monitoring, and formal playback state management.
+
+## Change documentation
+
+Record completed changes in new dated entries (`YYYY-MM-DD`) in `CHANGELOG.md`, newest first. Include the resulting behavior, validation performed and known limitations; preserve historical entries. For dense updates, add a dated Markdown report at `reports/YYYY-MM-DD-topic.md`, index it with a dated link and summary in `reports/README.md`, and link it from a concise changelog entry. Do not recreate `IMPLEMENTATION.md` or introduce a separate root-level implementation ledger. Keep secrets and raw generated evidence out of reports.
+
+## Review implementation (September 2026)
+
+See `CHANGELOG.md`, `docs/audio-features.md` and `docs/runtime-validation.md` for the current formulation and validation contracts. Nine faithful variants supplement the original catalog. Sampled curves, density textures, shared RK4 ribbons, an explicit terrain height mesh and GPU Hopf fibers replace repeated per-pixel geometry construction. Voronoi foam runs in a bounded worker queue with stable seed IDs. Metadata distinguishes mathematical constructions, numerical simulations and artistic patterns.
+
+Audio production uses a complete stereo TypeScript DSP in an AudioWorklet, with the same DSP in its compatibility path. Rust remains a reference implementation only. Source transactions own generation checks and fetch cancellation at commit time. Microphone/system monitoring is disabled to avoid feedback. The performance panel reports measured CPU/GPU work and percentiles; it does not estimate electrical power.
 
 ## Directory Structure
 
@@ -20,21 +30,26 @@ CyberNoetica/
 │           ├── app.ts                    # Coordinator: wires bus, store, managers, UI
 │           ├── store.ts                  # AppState + createAppStore()
 │           ├── settings-loader.ts        # Dev settings from settings.json overrides
+│           ├── globals.ts                # Typed window.__cybernoetica interfaces
 │           ├── managers/
 │           │   ├── audio-pipeline.ts     # WASM/JS audio analysis, feature push
 │           │   ├── track-manager.ts      # Track loading (generation counter), auto-play
-│           │   ├── visualizer-manager.ts  # Switching, camera, viewport delegation
+│           │   ├── visualizer-manager.ts  # Switching with generation guard + scene teardown
+│           │   ├── quality-manager.ts    # Pixel-ratio tiers + adaptive governor
 │           │   └── playback-state.ts     # Formal playback state machine
 │           ├── utils/
-│           │   └── track-display.ts      # Track name formatting, folder grouping
+│           │   ├── track-display.ts      # Track name formatting, folder grouping
+│           │   └── launch-params.ts      # URL param + settings.json launch config
 │           ├── ui/
 │           │   ├── index.ts              # createUI() compositor, UIControls
+│           │   ├── constants.ts          # Z-index, spacing, timing, dimensions
 │           │   ├── styles.ts             # Theme system, glass-morphism constants
-│           │   ├── components.ts         # el(), glassButton(), toggleSwitch(), etc.
+│           │   ├── components.ts         # el(), glassButton(), toggleSwitch(), paramSlider(), etc.
 │           │   ├── start-screen.ts       # Start overlay with pulsing button
 │           │   ├── control-bar.ts        # 4-button bar (Pause/Visual/Sound/Control)
 │           │   ├── fade-manager.ts       # Auto-fade timer, mouse/key re-show
-│           │   ├── log-display.ts        # Log capture + 3 display modes
+│           │   ├── keyboard-overlay.ts   # Floating keyboard shortcut bar
+│           │   ├── log-display.ts        # Log capture + 3 display modes (Stream/Float/Fixed)
 │           │   └── panels/
 │           │       ├── visual-panel.ts   # Visualizer picker + categorized controls
 │           │       ├── sound-panel.ts    # Sources, hierarchical track list, toggles
@@ -43,7 +58,9 @@ CyberNoetica/
 │           └── __tests__/
 │               ├── playback-state.test.ts
 │               ├── settings-loader.test.ts
-│               └── track-display.test.ts
+│               ├── track-display.test.ts
+│               ├── launch-params.test.ts
+│               └── quality-manager.test.ts
 ├── packages/
 │   ├── core/                             # @cybernoetica/core
 │   │   └── src/
@@ -55,17 +72,19 @@ CyberNoetica/
 │   │           ├── message-bus.test.ts
 │   │           └── store.test.ts
 │   ├── renderer/                         # @cybernoetica/renderer
-│   │   └── src/
+│   │   ├── src/
 │   │       ├── index.ts
 │   │       ├── scene-manager.ts          # Three.js lifecycle, pointer+touch viewport
 │   │       ├── smoothing.ts              # EMA smoothing for audio-reactive params
 │   │       ├── __tests__/
-│   │       └── visualizers/
+│   │       ├── visualizers/
 │   │           ├── types.ts              # Visualizer interface, param taxonomy
 │   │           ├── registry.ts           # VisualizerEntry, registerVisualizer()
 │   │           ├── index.ts              # Barrel imports from subfolder barrels
 │   │           ├── orbital/
-│   │           │   ├── v01-alpha.ts      # 5K particle system
+│   │           │   ├── v01-alpha.ts      # 5K particle vortex
+│   │           │   ├── v02-beta.ts       # Chaotic drifting orbits (7 emitters, 3D tangents)
+│   │           │   ├── v03-gamma.ts      # Interactive sculpt mode (force fields)
 │   │           │   └── index.ts
 │   │           ├── mandelbrot/
 │   │           │   ├── v01-alpha.ts      # Deep fractal zoom
@@ -73,23 +92,57 @@ CyberNoetica/
 │   │           ├── julia/
 │   │           │   ├── v01-alpha.ts      # Shape-shifting Julia set
 │   │           │   └── index.ts
-│   │           └── waveform/
-│   │               ├── v01-alpha.ts      # Neon soundwaves
+│   │           ├── waveform/
+│   │           │   ├── v01-alpha.ts      # Neon soundwaves
+│   │           │   └── index.ts
+│   │           ├── voronoi/
+│   │           │   ├── v01-alpha.ts      # Animated Voronoi cells (2D distance field)
+│   │           │   ├── v02-beta.ts       # 3D polyhedral foam (Voro++ WASM, box)
+│   │           │   ├── v03-gamma.ts      # Periodic crystal foam
+│   │           │   ├── v04-delta.ts      # Radical / Laguerre weighted cells
+│   │           │   ├── v05-epsilon.ts    # Spherical-wall foam globe
+│   │           │   ├── foam-engine.ts    # Shared 3D foam renderer for β–ε
+│   │           │   └── index.ts
+│   │           ├── lorenz/
+│   │           │   ├── v01-alpha.ts      # Lorenz 1963 butterfly (RK4 trails)
+│   │           │   ├── v02-beta.ts       # Rössler single-scroll attractor
+│   │           │   ├── v03-gamma.ts      # Chen dual-wing attractor
+│   │           │   ├── engine.ts         # Shared RK4 flow + additive trail renderer
+│   │           │   └── index.ts
+│   │           ├── lissajous/
+│   │           │   ├── v01-alpha.ts      # Harmonograph light curves
+│   │           │   └── index.ts
+│   │           └── kaleidoscope/
+│   │               ├── v01-alpha.ts      # Psychedelic mandala symmetry
 │   │               └── index.ts
+│   │       └── voro/
+│   │           ├── backend.ts            # Voro++ WASM loader + packed-mesh types
+│   │           └── voro-module.d.ts
+│   │   └── wasm/
+│   │       └── voro/                     # Committed Voro++ WASM (voro.js + voro.wasm)
 │   └── audio/                            # @cybernoetica/audio
 │       ├── src/
 │       │   ├── index.ts
-│       │   ├── audio-source.ts           # Web Audio: file, mic, system (with cleanup)
-│       │   └── audio-processor.ts        # Publishes AudioFeatures to bus
-│       └── wasm/
+│       │   ├── audio-source.ts           # Web Audio: file, mic, system, soundscape
+│       │   ├── audio-processor.ts        # Publishes AudioFeatures to bus
+│       │   └── soundscape-loop.ts        # Parametric looping probe (gains vs phase)
 ├── crates/
 │   └── audio-analysis/                   # Rust -> WASM via wasm-pack
+├── native/
+│   └── voro-wasm/
+│       └── wrapper.cpp                   # C ABI around Voro++ for WASM
+├── third_party/
+│   └── voro++/                           # Vendored Voro++ library (modified BSD)
+├── scripts/
+│   ├── upload-audio.sh                   # Audio upload/list/verify for Railway
+│   └── build-voro-wasm.sh                # emcc/Docker build for Voro++ WASM
 ├── data/
 │   └── sample-music/                     # .gitignored audio tracks
 ├── guidebook/
 │   ├── README.md
 │   └── Design-Principles.md             # Core design philosophy
-├── settings.json                         # Dev overrides (title, theme, track display)
+├── settings.json                         # Dev + prod overrides (title, theme, launch config)
+├── launch.sh                             # Centralized launch script (--viz, --audio, --mute, --debug, etc.)
 ├── CLAUDE.md                             # Claude Code project instructions
 ├── JUSTFile                              # Development + deployment commands
 ├── Dockerfile
@@ -109,6 +162,7 @@ CyberNoetica/
 | 3D rendering     | Three.js (r175+), GLSL shaders                       |
 | Testing          | Vitest (jsdom for renderer + web app tests)          |
 | Rust / WASM      | Cargo, wasm-bindgen, rustfft; built via wasm-pack    |
+| C++ / WASM       | Voro++ via Emscripten (`just wasm-voro`)             |
 | Deployment       | Railway (Docker), Express 5 production server        |
 | PWA              | vite-plugin-pwa, Workbox service worker               |
 
@@ -125,16 +179,26 @@ CyberNoetica/
 **Audio source cleanup.** `AudioSource` now calls `stopCurrentSource()` before switching to any new source, properly stopping `MediaStream` tracks (mic/system) and disconnecting nodes. This prevents stream leaks when switching from mic/system audio to file playback.
 
 **Data flow:**
-1. `AudioSource` captures audio (file, microphone, or system audio via getDisplayMedia)
-2. `AudioPipeline` extracts features (via Rust/WASM FFT or JS fallback) and publishes via `AudioProcessor` on `audio:features`
+1. `AudioSource` captures audio (file, microphone, system audio via getDisplayMedia, or the parametric Soundscape Loop)
+2. `AudioPipeline` extracts features (via the shared 4096-sample/512-hop stereo AudioWorklet DSP or its complete main-thread fallback) and publishes via `AudioProcessor` on `audio:features`
 3. Visualizers subscribe to audio features and modulate their parameters
 4. `SceneManager` drives the Three.js render loop with pointer/touch viewport interaction
 
-**Visualizer system:** Self-registering visualizers organized in versioned folders. Each family (orbital, mandelbrot, julia, waveform) has a folder with `v{NN}-{greek}.ts` files. Parameters are categorized as `'appearance'` or `'audio-mapping'`. The UI groups controls accordingly.
+**Visualizer switching.** `VisualizerManager.switchTo()` uses a generation counter (same idea as track loading) so a stale lazy-load cannot attach after a newer switch. Teardown calls `setInteractionContext(null)`, `dispose()`, then `SceneManager.clearScene()`, which traverses leftover children, disposes geometries/materials/textures, resets the perspective camera, and clears the renderer target. Perspective camera pose is applied immediately from the new viz `getViewState()` (not deferred to the next rAF). `QualityManager.resetGovernor()` clears the auto-tier window so a heavy viz does not leave a cheap viz stuck on a low tier. WebGL context restore is serialized: SceneManager does not `start()` until VisualizerManager has rebuilt the active viz.
 
-**View state.** Each visualizer exposes a per-family coordinate system via `getViewState()` / `setViewState()`. The coordinates have intuitive, domain-specific names (e.g., Mandelbrot uses `centerReal`/`centerImaginary`/`zoom`/`rotation`; Orbital uses `orbitAngle`/`elevation`/`distance`). User interactions (drag, scroll, pinch) flow from SceneManager as raw deltas through VisualizerManager, which translates them into the appropriate `setViewState()` calls. The Visual Panel shows live coordinate readouts with editable inputs. Setting a coordinate via `setViewState()` pauses the autonomous animation for that axis.
+**Visualizer system:** Self-registering visualizers organized in versioned folders. Each family has a folder with `v{NN}-{greek}.ts` files. Parameters are categorized as `'appearance'` or `'audio-mapping'`. The UI groups controls accordingly. The orbital family has three versions: alpha (classic), beta (chaotic with drift), and gamma (interactive sculpt mode with user-placeable force fields). Orbital α/β/γ and Hopf use `THREE.ShaderMaterial` (not `RawShaderMaterial`) so Three.js injects `modelViewMatrix` / `projectionMatrix`; particle `Points` set `frustumCulled = false`. The voronoi family has five versions: alpha (2D Worley/F1-F2 shader), beta (non-periodic 3D foam), gamma (periodic crystal), delta (radical/Laguerre weighted cells), and epsilon (spherical-wall globe). Beta through epsilon share `foam-engine.ts` and tessellate via Voro++ compiled to WASM; foam re-checks `disposed` after `await loadVoroBackend()` and early-returns from `tick()` when disposed. The lorenz family has three versions: alpha (Lorenz 1963 butterfly), beta (Rössler single-scroll), and gamma (Chen dual-wing). All three share `engine.ts` (RK4 integration + additive 3D trails). `listVisualizers()` copies `usesPerspective` from the static manifest onto stubs so the Visual panel View section is correct before a lazy module loads.
 
-**Settings override system.** `settings.json` at repo root provides dev-time overrides (app title, UI theme, track display format). The `settings-loader.ts` module loads it via fetch with graceful fallback to defaults.
+**View state.** Each visualizer exposes a per-family coordinate system via `getViewState()` / `setViewState()`. The coordinates have intuitive, domain-specific names (e.g., Mandelbrot uses `centerReal`/`centerImaginary`/`zoom`/`rotation`; Orbital uses `orbitAngle`/`elevation`/`distance`; Voronoi alpha uses `centerX`/`centerY`/`zoom`; Voronoi beta through epsilon and Lorenz alpha through gamma use `orbitAngle`/`elevation`/`distance`). User interactions (drag, scroll, pinch) flow from SceneManager as raw deltas through VisualizerManager, which translates them into the appropriate `setViewState()` calls. The pan handler in VisualizerManager supports multiple field name patterns: `centerReal`/`centerImaginary` (Mandelbrot), `centerX`/`centerY` (Voronoi, Lissajous), and `seedReal`/`seedImaginary` (Julia). The canvas shows a crosshair cursor with surrounding circle on hover when drag is available, with a brighter variant while dragging. SceneManager supports context-sensitive cursor modes (`pan`, `orbit`, `sculpt`, `default`) via `setCursorMode()`, with a dedicated blue crosshair cursor for sculpt mode.
+
+**Settings override system.** `settings.json` at repo root provides overrides (app title, UI theme, track display format, launch config). The `settings-loader.ts` module loads it via fetch with graceful fallback to defaults. In production builds, `settings.json` is emitted to `dist/` via a Vite plugin `generateBundle` hook and also copied in the Dockerfile.
+
+**Energy monitoring.** The Control panel includes a Performance section (always visible, not just debug) showing FPS with target, frame budget (color-coded bar with percentage), power draw (Low/Medium/High with scalar %), GPU name (via `WEBGL_debug_renderer_info`), GPU object counts, CPU thread count (via `hardwareConcurrency`), draw calls, triangles, JS heap memory (Chrome), and a Power Saver toggle that caps the render loop to ~30fps.
+
+**UI constants and typed globals.** All z-index values, spacing, timing, and dimension constants are centralized in `apps/web/src/ui/constants.ts`. Global state (`window.__cybernoetica`, `window.__cybernoetica_debug`) is typed via interfaces in `apps/web/src/globals.ts` -- never use `(window as any)`. Theme-resolved exports (`GLASS_BG`, `TEXT_PRIMARY`, etc.) come from `styles.ts` which resolves the active theme at module load. For custom glass opacity, use `glassBackground(opacity)`.
+
+**Bottom stack layout.** Fixed-position elements at the viewport bottom are coordinated by `updateBottomLayout()` in `ui/index.ts`. The stack order (bottom to top): fixed log panel, keyboard overlay, control bar, panel/stream. When elements appear/disappear, all positions recalculate with smooth `bottom` transitions. Height constants are in `constants.ts` under `STACK`.
+
+**Launch configuration.** The app supports auto-starting with a specific visualizer, audio source, and/or UI settings. Configuration sources (in ascending priority): `settings.json` `launch` block, URL search params (`?viz=`, `&audio=`, `&log=`, `&autostart`). When a visualizer or audio source is specified, the start screen is skipped and playback begins immediately. See "Launch Configuration" section below.
 
 ## Development
 
@@ -143,8 +207,9 @@ export PATH="$HOME/.volta/bin:$HOME/.cargo/bin:$PATH"
 
 pnpm install          # Install all workspace dependencies
 pnpm dev              # Start Vite dev server (apps/web, port 5173)
-pnpm test             # Run all Vitest suites (95 tests)
+pnpm test             # Run all Vitest suites
 pnpm build            # Build all packages
+just wasm-voro        # Rebuild Voro++ WASM (emcc or Docker emscripten/emsdk)
 ```
 
 ### Debug Panel and Logging
@@ -154,10 +219,11 @@ In dev mode or with `?debug` URL parameter, the Control panel shows:
 - Live audio feature bars
 - Visualizer params and state dump
 - Bus message rate
-- Log display with level filtering and 3 display modes:
-  - **Stream** -- Star Wars-style fading text overlay
-  - **Floating** -- draggable modal window
-  - **Docked** -- panel locked to bottom/left/right edge
+- Log display with level filtering (All/Debug/Info/Warn/Error), styling (Raw/Clean), and 3 placement modes:
+  - **Stream** -- Star Wars-style fading text overlay below control bar
+  - **Float** -- draggable modal window
+  - **Fixed** -- compact container below control panel
+- Keyboard shortcut overlay bar below the control bar (toggle-able)
 
 ### Settings Override (settings.json)
 
@@ -176,6 +242,47 @@ The `settings.json` file at the repo root provides dev-time overrides. If absent
 
 Available themes: `glass-dark` (default), `glass-light`, `minimal`.
 Track formats: `raw`, `hyphen-to-space`, `parenthetical`, `track-number`.
+
+### Launch Configuration
+
+The app can auto-start with a specific visualizer and/or audio source, skipping the start screen. Configuration can come from `settings.json` or URL params.
+
+**URL params** (highest priority):
+- `?viz=mandelbrot` -- start with a specific visualizer type
+- `?audio=system` -- use system audio capture
+- `?audio=mic` -- use microphone
+- `?audio=soundscape` (or `loop`) -- parametric Soundscape Loop (cycle/energy/brightness/BPM in the Sound panel)
+- `?audio=track-name` -- play a specific sample track (fuzzy match)
+- `?log=stream` -- show log display (stream, floating, or docked)
+- `?mute` -- mute speaker output (audio still drives visualizers)
+- `?autostart` -- skip start screen (implied when viz or audio is set)
+- `?debug` -- enable debug panel
+
+**settings.json** `launch` block:
+```json
+{
+  "launch": {
+    "visualizer": "mandelbrot",
+    "audio_source": "system",
+    "show_log": "stream",
+    "auto_start": true,
+    "mute": true
+  }
+}
+```
+
+**JUSTFile shortcuts:**
+```bash
+just launch-with viz=mandelbrot audio=system log=stream
+just launch-with audio=soundscape      # parametric looping probe (Sound panel sliders)
+just test-viz                          # random viz + random track, muted
+just test-viz viz=mandelbrot           # specific viz, random track, muted
+just test-viz viz=orbital audio=system # specific viz + audio source, muted
+```
+
+### Dev Refresh Button
+
+In dev mode (`import.meta.env.DEV`), a small glass-morphism button appears in the top-right corner showing the platform-appropriate reload shortcut (Cmd+R on macOS, Ctrl+R elsewhere). Clicking it triggers `location.reload()` for a full refresh.
 
 ## Adding a New Visualizer
 
@@ -212,8 +319,32 @@ Every visualizer must implement `getViewState()` and `setViewState(partial)` and
 | Julia | `seedReal`, `seedImaginary`, `zoom` | c-parameter and magnification |
 | Orbital | `orbitAngle`, `elevation`, `distance` | Spherical camera coordinates |
 | Waveform | `verticalShift` | Vertical offset of the waveform stack |
+| Voronoi | `centerX`, `centerY`, `zoom` | 2D pan + zoom |
+| Voronoi β | `orbitAngle`, `elevation`, `distance` | Spherical camera around the foam |
+| Voronoi γ | `orbitAngle`, `elevation`, `distance` | Spherical camera around the periodic crystal |
+| Voronoi δ | `orbitAngle`, `elevation`, `distance` | Spherical camera around the radical foam |
+| Voronoi ε | `orbitAngle`, `elevation`, `distance` | Spherical camera around the foam globe |
+| Lorenz | `orbitAngle`, `elevation`, `distance` | Spherical camera around the butterfly |
+| Lorenz β | `orbitAngle`, `elevation`, `distance` | Spherical camera around the Rössler scroll |
+| Lorenz γ | `orbitAngle`, `elevation`, `distance` | Spherical camera around the Chen dual-wing |
+| Hopf | `orbitAngle`, `elevation`, `distance` | Spherical camera around the fiber bundle |
+| Lissajous | `centerX`, `centerY`, `zoom`, `phase` | 2D pan + zoom (phase is read-only) |
+| Kaleidoscope | `zoom`, `rotation` | Zoom + fold rotation |
 
 When a user sets a view state value, the visualizer should pause its autonomous animation for that axis. The UI's "Reset View" button re-creates the visualizer to restore all defaults.
+
+### Interactivity
+
+Visualizers can optionally declare an `interactivity` field in their metadata:
+
+```typescript
+interactivity?: {
+  description: string;    // Hint text shown below the title
+  toggleParam?: string;   // Param key that enables/disables interactivity
+};
+```
+
+When a visualizer with interactivity is active, a fading hint text appears below the title, and the keyboard overlay shows relevant shortcuts. The cursor mode also changes (e.g., sculpt cursor for orbital gamma's force field placement).
 
 ### Versioning scheme
 
@@ -237,25 +368,34 @@ See `guidebook/Design-Principles.md` for the full philosophy. Key points:
 
 The app deploys to Railway as a Dockerized Express server serving the Vite SPA build.
 
-- Single Railway service (`cybernoetica-web`) in the `Demo` environment
+- Two Railway services in `Demo`: `cybernoetica-web` follows `main` for production; `CyberNoetica` follows `latest` for preview
 - Express 5 server handles static files, audio streaming, auth, and COOP/COEP headers
-- Railway volume at `/data/audio` stores sample music (~458MB, 84 tracks)
+- Railway volume mounted at `/data/audio` stores sample music (84 tracks)
+- `AUDIO_DIR` env var (set in Railway and Dockerfile default) points to the volume mount
+- Server logs audio dir path, existence, and track count at startup for diagnostics
 - PWA service worker pre-caches JS/CSS/WASM
 - Auth gate: email whitelist + universal password, cookie-session based
 
 **Key commands:**
 ```bash
-just deploy              # Deploy to Railway
+just deploy              # Deploy to Railway + verify tracks
 just deploy-auth "a@b.com,c@d.com" "password"
-just upload file.mp3     # Upload audio
+just upload file.mp3     # Upload a single audio file
+just upload-dir dir/     # Upload all audio from a directory
 just list-tracks         # List deployed tracks
+just verify-tracks       # Check that tracks are available
+just reupload-tracks     # Re-upload all local audio (data/sample-music/)
 ```
 
-**Custom domain:** `app.imbasso.com` (CNAME to Railway).
+**Audio management** is handled by `scripts/upload-audio.sh` (subcommands: `upload`, `upload-dir`, `list`, `verify`). The JUSTFile commands are thin wrappers that pass `DEPLOY_HOST` and `GITHUB_TOKEN`.
+
+**Custom domains:** `cybernoetica.app` is the stable production URL on `cybernoetica-web` (Porkbun apex ALIAS to `pst3byz3.up.railway.app`). `demo.cybernoetica.app` is the potentially unstable `latest` preview on `CyberNoetica` (CNAME to `7bfn7u27.up.railway.app`, port 8080). The Imbasso app domains are retired. Keep each domain’s `_railway-verify` TXT record. Use `scripts/manage-dns.sh railway-status <domain> [projectId serviceId environmentId]` to retrieve assigned routing targets and certificate status; the script defaults to production. Merging `latest` into `main` triggers production deployment; opening/approving a PR does not. Preview has no sample-audio volume; use Soundscape Loop or local files. Production retains `/data/audio`.
 
 ## Known Issues
 
-- **No integration tests** or visual regression tests yet
-- **Waveform vertical positioning** -- bass layer creates visual weight imbalance
+- **Cross-device validation** — HTTP integration tests and an in-app browser shader/resource matrix exist; physical mobile devices and other browser engines still need coverage
+- **Waveform modes** — artistic layers, a triggered DC-removed oscilloscope, and calibrated log-frequency spectrum are separately selectable
 - **Knowledge portal** (GOAL.md Purpose 3) is entirely future work
 - **Cross-modal inputs** (webcam, wearables, gestures) not yet implemented
+- **Custom domain DNS** -- preserve stable and preview domain separation and use each service’s Railway-assigned routing target; re-check DNS and HTTPS after domain changes.
+- **Railway volume persistence** -- volume data survives redeploys but not volume re-creation; use `just verify-tracks` after deploys and `just reupload-tracks` if empty

@@ -12,13 +12,23 @@ export class TrackManager {
 
   async fetchSampleTracks(): Promise<string[]> {
     try {
-      const res = await fetch('/sample-music/__list');
-      this.sampleTracks = await res.json();
-    } catch { /* no samples available */ }
+      const res = await fetch('/sample-music/__list', {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!res.ok) return [];
+      const tracks: unknown = await res.json();
+      this.sampleTracks = Array.isArray(tracks)
+        ? tracks.filter((t): t is string => typeof t === 'string')
+        : [];
+    } catch {
+      /* no samples available */
+    }
     return this.sampleTracks;
   }
 
-  getSampleTracks(): string[] { return this.sampleTracks; }
+  getSampleTracks(): string[] {
+    return this.sampleTracks;
+  }
 
   /**
    * Load and start a track. Returns false if the request was superseded
@@ -26,27 +36,24 @@ export class TrackManager {
    */
   async loadTrack(url: string): Promise<boolean> {
     const gen = ++this.loadGeneration;
-    await this.audioSource.resume();
-    const response = await fetch(url);
-    if (gen !== this.loadGeneration) return false;
-    const buffer = await response.arrayBuffer();
-    if (gen !== this.loadGeneration) return false;
-    const blob = new Blob([buffer], { type: 'audio/mpeg' });
-    const name = url.split('/').pop() || 'track.mp3';
-    const file = new File([blob], name, { type: 'audio/mpeg' });
-    await this.audioSource.loadFile(file);
-    if (gen !== this.loadGeneration) return false;
-    return true;
+    const loaded = await this.audioSource.loadURL(url);
+    return loaded && gen === this.loadGeneration;
   }
 
   cancelPendingLoad(): void {
     this.loadGeneration++;
+    this.audioSource.cancelPendingLoad();
   }
 
   getRandomTrack(): { url: string; name: string } | null {
     if (this.sampleTracks.length === 0) return null;
-    const track = this.sampleTracks[Math.floor(Math.random() * this.sampleTracks.length)];
-    const name = track.split('/').pop()?.replace(/\.[^.]+$/, '') || track;
+    const track =
+      this.sampleTracks[Math.floor(Math.random() * this.sampleTracks.length)];
+    const name =
+      track
+        .split('/')
+        .pop()
+        ?.replace(/\.[^.]+$/, '') || track;
     this.trackIndex = this.sampleTracks.indexOf(track);
     return { url: `/sample-music/${track}`, name };
   }
@@ -55,16 +62,25 @@ export class TrackManager {
     if (this.sampleTracks.length === 0) return null;
     let idx: number;
     if (this.shuffleEnabled) {
-      if (this.playedTracks.size >= this.sampleTracks.length) this.playedTracks.clear();
-      do { idx = Math.floor(Math.random() * this.sampleTracks.length); }
-      while (this.playedTracks.has(idx) && this.playedTracks.size < this.sampleTracks.length);
+      if (this.playedTracks.size >= this.sampleTracks.length)
+        this.playedTracks.clear();
+      do {
+        idx = Math.floor(Math.random() * this.sampleTracks.length);
+      } while (
+        this.playedTracks.has(idx) &&
+        this.playedTracks.size < this.sampleTracks.length
+      );
       this.playedTracks.add(idx);
     } else {
       idx = (this.trackIndex + 1) % this.sampleTracks.length;
     }
     this.trackIndex = idx;
     const track = this.sampleTracks[idx];
-    const name = track.split('/').pop()?.replace(/\.[^.]+$/, '') || track;
+    const name =
+      track
+        .split('/')
+        .pop()
+        ?.replace(/\.[^.]+$/, '') || track;
     return { url: `/sample-music/${track}`, name };
   }
 
@@ -73,5 +89,7 @@ export class TrackManager {
     this.shuffleEnabled = shuffle;
   }
 
-  isAutoPlayEnabled(): boolean { return this.autoPlayEnabled; }
+  isAutoPlayEnabled(): boolean {
+    return this.autoPlayEnabled;
+  }
 }

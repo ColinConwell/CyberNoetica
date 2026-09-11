@@ -1,19 +1,45 @@
-// Side-effect imports trigger self-registration
-import './orbital/index.js';
-import './waveform/index.js';
-import './julia/index.js';
-import './mandelbrot/index.js';
-
-// Registry API
-export { registerVisualizer, getVisualizerEntry, listVisualizers, getVisualizerTypes } from './registry.js';
+// Registry API — lazy-loaded. Visualizer modules are NOT imported at module
+// eval time; they are dynamically imported on demand via `loadVisualizer`. The
+// manifest provides enough metadata (type/label/description) to render a picker
+// without loading any visualizer code.
+export {
+  registerVisualizer,
+  getVisualizerEntry,
+  listVisualizers,
+  getVisualizerTypes,
+  loadVisualizer,
+  isVisualizerLoaded,
+} from './registry.js';
 export type { VisualizerEntry } from './registry.js';
 
-// Types
-export type { Visualizer, VisualizerMetadata, VisualizerParam, ViewStateField, ViewportCapabilities } from './types.js';
+// Manifest API — catalog of available visualizers + their loaders.
+export {
+  VISUALIZER_MANIFEST,
+  getManifestEntry,
+  listManifestEntries,
+  listManifestTypes,
+} from './manifest.js';
+export type { VisualizerManifestEntry } from './manifest.js';
 
-// Direct class exports (backward compat -- prefer registry for new code)
-export { MandelbrotVisualizer } from './mandelbrot/index.js';
-export type { MandelbrotUniforms } from './mandelbrot/index.js';
-export { OrbitalVisualizer } from './orbital/index.js';
-export { WaveformVisualizer } from './waveform/index.js';
-export { JuliaVisualizer } from './julia/index.js';
+// Documentation API — math notes, references, audio-input expectations.
+export {
+  VISUALIZER_DOCUMENTATION,
+  getVisualizerDocumentation,
+  listVisualizerDocumentation,
+} from './documentation.js';
+
+// Types
+export type {
+  Visualizer,
+  VisualizerAudioInput,
+  VisualizerCursorMode,
+  VisualizerDocumentation,
+  VisualizerInteractionContext,
+  VisualizerPerfTier,
+  VisualizerReference,
+  VisualizerMetadata,
+  VisualizerParam,
+  ViewStateField,
+  ViewportCapabilities,
+  VisualizerInteractivity,
+} from './types.js';

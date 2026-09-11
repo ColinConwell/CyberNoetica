@@ -1,23 +1,10 @@
 import { defineConfig } from 'vite';
+import { createAudioRouter } from './server/audio-files.js';
+import express from 'express';
+import { createValidationReportRouter } from './server/validation-report.js';
 import { VitePWA } from 'vite-plugin-pwa';
 import { resolve } from 'path';
-import { readdirSync, statSync, existsSync, createReadStream } from 'fs';
-
-/** Recursively scan a directory for audio files */
-function scanAudioFiles(dir: string, base = ''): string[] {
-  const results: string[] = [];
-  if (!existsSync(dir)) return results;
-  for (const entry of readdirSync(dir)) {
-    const full = resolve(dir, entry);
-    const rel = base ? `${base}/${entry}` : entry;
-    if (statSync(full).isDirectory()) {
-      results.push(...scanAudioFiles(full, rel));
-    } else if (/\.(mp3|wav|ogg|flac|aac|m4a)$/i.test(entry)) {
-      results.push(rel);
-    }
-  }
-  return results;
-}
+import { existsSync, createReadStream, readFileSync } from 'fs';
 
 export default defineConfig({
   server: {
@@ -27,8 +14,18 @@ export default defineConfig({
       'Cross-Origin-Embedder-Policy': 'require-corp',
     },
   },
+  worker: { format: 'es' },
   build: {
     target: 'es2022',
+    rollupOptions:
+      process.env.CYBER_QA === '1'
+        ? {
+            input: {
+              main: resolve(__dirname, 'index.html'),
+              validation: resolve(__dirname, 'validation.html'),
+            },
+          }
+        : undefined,
   },
   optimizeDeps: {
     exclude: ['@cybernoetica/audio'],
@@ -39,17 +36,14 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,wasm}'],
         navigateFallback: 'index.html',
-        runtimeCaching: [
-          {
-            urlPattern: /\/sample-music\/.*/,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'audio-cache',
-              expiration: { maxEntries: 50, maxAgeSeconds: 7 * 24 * 60 * 60 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
+        cleanupOutdatedCaches: true,
+        navigateFallbackDenylist: [
+          /^\/sample-music(?:\/|$)/,
+          /^\/(?:api|auth|assets)(?:\/|$)/,
         ],
+        // Audio is intentionally network-only: automatic multi-megabyte downloads
+        // cannot be bounded by entry count and may cache authenticated responses.
+        runtimeCaching: [],
       },
       manifest: {
         name: 'Cybernoetica',
@@ -60,7 +54,12 @@ export default defineConfig({
         display: 'standalone',
         orientation: 'any',
         icons: [
-          { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+          {
+            src: '/icon.svg',
+            sizes: 'any',
+            type: 'image/svg+xml',
+            purpose: 'any',
+          },
         ],
       },
     }),
@@ -78,31 +77,39 @@ export default defineConfig({
           createReadStream(settingsPath).pipe(res);
         });
       },
+      generateBundle() {
+        const settingsPath = resolve(__dirname, '../../settings.json');
+        if (existsSync(settingsPath)) {
+          this.emitFile({
+            type: 'asset',
+            fileName: 'settings.json',
+            source: readFileSync(settingsPath, 'utf-8'),
+          });
+        }
+      },
     },
     {
       name: 'sample-music',
       configureServer(server) {
-        const musicDir = resolve(__dirname, '../../data/sample-music');
-        server.middlewares.use('/sample-music', (req, res, next) => {
-          if (!req.url) return next();
-          if (req.url === '/__list') {
-            const files = scanAudioFiles(musicDir);
-            res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify(files));
-            return;
-          }
-          // Serve audio files directly via fs
-          const filePath = resolve(musicDir, decodeURIComponent(req.url.slice(1)));
-          if (!filePath.startsWith(musicDir)) { res.statusCode = 403; res.end(); return; }
-          if (!existsSync(filePath) || statSync(filePath).isDirectory()) { return next(); }
-          const ext = filePath.split('.').pop()?.toLowerCase() || '';
-          const mimeTypes: Record<string, string> = {
-            mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg',
-            flac: 'audio/flac', aac: 'audio/aac', m4a: 'audio/mp4',
-          };
-          res.setHeader('Content-Type', mimeTypes[ext] || 'application/octet-stream');
-          createReadStream(filePath).pipe(res);
-        });
+        server.middlewares.use(
+          '/sample-music',
+          express().use(
+            createAudioRouter(resolve(__dirname, '../../data/sample-music')),
+          ),
+        );
+      },
+      configurePreviewServer(server) {
+        server.middlewares.use(
+          '/sample-music',
+          express().use(
+            createAudioRouter(resolve(__dirname, '../../data/sample-music')),
+          ),
+        );
+        if (process.env.CYBER_QA === '1')
+          server.middlewares.use(
+            '/__validation',
+            express().use(createValidationReportRouter()),
+          );
       },
     },
   ],

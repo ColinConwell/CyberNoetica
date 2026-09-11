@@ -1,88 +1,145 @@
-import { AudioSource, AudioProcessor, loadWasmAnalyzer } from '@cybernoetica/audio';
+import {
+  AudioSource,
+  AudioProcessor,
+  SpectrumAnalyzer,
+  ANALYSIS_HOP_SIZE,
+} from '@cybernoetica/audio';
 import type { MessageBus, AudioFeatures } from '@cybernoetica/core';
 
-function bandAvg(data: Float32Array, from: number, to: number): number {
-  if (from >= to) return 0;
-  let sum = 0;
-  const end = Math.min(to, data.length);
-  for (let i = from; i < end; i++) sum += data[i];
-  return sum / (end - from);
-}
-
-function fallbackFeatures(freqData: Float32Array): AudioFeatures {
-  const len = freqData.length;
-  const linear = new Float32Array(len);
-  let totalEnergy = 0;
-  for (let i = 0; i < len; i++) {
-    linear[i] = Math.max(0, (freqData[i] + 100) / 100);
-    totalEnergy += linear[i];
-  }
-  const bassEnd = Math.floor(250 / 21);
-  const midEnd = Math.floor(4000 / 21);
-  return {
-    fftBins: linear,
-    bass: bandAvg(linear, 1, bassEnd),
-    mid: bandAvg(linear, bassEnd, midEnd),
-    high: bandAvg(linear, midEnd, len),
-    spectralCentroid: totalEnergy > 0
-      ? Array.from(linear).reduce((sum, v, i) => sum + v * i, 0) / totalEnergy / len : 0,
-    spectralFlux: 0,
-    rms: totalEnergy / len,
-    beatOnset: false,
-    beatConfidence: 0,
-    degraded: true,
-  };
-}
-
+/** Analysis follows the audio clock. Publishing follows presentation cadence. */
 export class AudioPipeline {
-  readonly source: AudioSource;
+  readonly source = new AudioSource();
   private processor: AudioProcessor;
-  private wasmAnalyzer: any = null;
+  private analyzer: SpectrumAnalyzer | null = null;
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private worklet = false;
+  private latest: AudioFeatures | null = null;
+  private pendingOnset = false;
+  private pendingConfidence = 0;
+  private lastAnalysisTime = -Infinity;
+  private generation = 0;
+  private sourceRevision = -1;
 
-  constructor(bus: MessageBus) {
-    this.source = new AudioSource();
+  constructor(private bus: MessageBus) {
     this.processor = new AudioProcessor(bus);
   }
 
   async init(): Promise<void> {
+    const generation = ++this.generation;
     await this.source.init();
-    this.wasmAnalyzer = await loadWasmAnalyzer();
-    if (this.wasmAnalyzer) console.log('CyberNoetica: WASM audio analyzer loaded');
+    if (generation !== this.generation) return;
+    this.analyzer = new SpectrumAnalyzer(this.source.getSampleRate() ?? 48000);
+    this.worklet = await this.source.startAnalysis(
+      (features) => {
+        if (generation === this.generation) this.accept(features);
+      },
+      () => {
+        if (generation === this.generation) {
+          this.worklet = false;
+          this.publishBackend();
+        }
+      },
+    );
+    if (generation !== this.generation) return;
+    this.publishBackend();
+    this.timer = setInterval(() => {
+      if (!this.worklet) this.analyzeFallback();
+    }, 8);
   }
 
-  pushFrame(): void {
-    if (this.wasmAnalyzer) {
-      const samples = this.source.getSamples();
-      if (samples) {
-        try {
-          const f = this.wasmAnalyzer.analyze(samples);
-          this.processor.pushFeatures({
-            fftBins: new Float32Array(0),
-            bass: f.bass, mid: f.mid, high: f.high,
-            spectralCentroid: f.spectral_centroid,
-            spectralFlux: f.spectral_flux,
-            rms: f.rms,
-            beatOnset: f.beat_onset,
-            beatConfidence: f.beat_confidence,
-            degraded: false,
-          });
-        } catch { /* skip frame */ }
-      }
-    } else {
-      const freqData = this.source.getFrequencyData();
-      if (freqData) this.processor.pushFeatures(fallbackFeatures(freqData));
+  private publishBackend(): void {
+    this.bus.publish('audio:backend', { backend: this.getBackend() });
+  }
+
+  private accept(features: AudioFeatures): void {
+    this.refreshSource();
+    this.latest = features;
+    if (features.beatOnset) {
+      this.pendingOnset = true;
+      this.pendingConfidence = Math.max(
+        this.pendingConfidence,
+        features.beatConfidence,
+      );
     }
   }
 
+  private analyzeFallback(): void {
+    this.refreshSource();
+    if (!this.analyzer) return;
+    const time = this.source.getCurrentTime();
+    if (
+      time - this.lastAnalysisTime <
+      ANALYSIS_HOP_SIZE / this.analyzer.sampleRate
+    )
+      return;
+    const stereo = this.source.getStereoSamples();
+    const samples = stereo?.[0] ?? this.source.getSamples();
+    if (!samples) return;
+    this.lastAnalysisTime = time;
+    this.accept(this.analyzer.analyze(samples, time, stereo?.[1]));
+  }
+
+  pushFrame(suppressOnsets = false): void {
+    this.refreshSource();
+    if (!this.worklet) this.analyzeFallback();
+    if (!this.latest) {
+      this.pushSilent();
+      return;
+    }
+    this.processor.pushFeatures({
+      ...this.latest,
+      beatOnset: this.pendingOnset && !suppressOnsets,
+      beatConfidence: suppressOnsets ? 0 : this.pendingConfidence,
+    });
+    this.pendingOnset = false;
+    this.pendingConfidence = 0;
+  }
+
   pushSilent(rms = 0): void {
+    this.pendingOnset = false;
+    this.pendingConfidence = 0;
     this.processor.pushFeatures({
       fftBins: new Float32Array(0),
-      bass: 0, mid: 0, high: 0,
-      spectralCentroid: 0.5, spectralFlux: 0,
+      spectrum: new Float32Array(0),
+      waveform: new Float32Array(0),
+      bass: 0,
+      mid: 0,
+      high: 0,
+      spectralCentroid: 0,
+      spectralFlux: 0,
       rms,
-      beatOnset: false, beatConfidence: 0, degraded: true,
+      beatOnset: false,
+      beatConfidence: 0,
+      degraded: false,
+      timestamp: this.source.getCurrentTime(),
+      onsetId: this.latest?.onsetId ?? 0,
+      sampleRate: this.analyzer?.sampleRate,
+      fftSize: this.analyzer?.fftSize,
+      hopSize: ANALYSIS_HOP_SIZE,
     });
   }
 
-  isWasm(): boolean { return this.wasmAnalyzer !== null; }
+  getBackend(): 'worklet' | 'main-thread' {
+    return this.worklet ? 'worklet' : 'main-thread';
+  }
+  private refreshSource(): void {
+    const revision = this.source.getSourceRevision();
+    if (revision === this.sourceRevision) return;
+    this.sourceRevision = revision;
+    this.latest = null;
+    this.pendingOnset = false;
+    this.pendingConfidence = 0;
+    this.lastAnalysisTime = -Infinity;
+    this.analyzer?.reset();
+  }
+  isWasm(): boolean {
+    return false;
+  } // Retained for stored preferences from older versions.
+
+  destroy(): void {
+    this.generation++;
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    this.source.destroy();
+  }
 }
