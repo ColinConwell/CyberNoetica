@@ -1,3 +1,4 @@
+import type { JourneyController } from './managers/journey-controller.js';
 import type { MessageBus, Store } from '@cybernoetica/core';
 import type { SceneManager, QualityTier } from '@cybernoetica/renderer';
 import type { QualityMode } from './store.js';
@@ -11,6 +12,7 @@ import type { QualityMode } from './store.js';
 // ---------------------------------------------------------------------------
 
 export interface CyberNoeticaGlobals {
+  journey?: JourneyController;
   store: Store<any>;
   bus: MessageBus;
   scene: SceneManager;

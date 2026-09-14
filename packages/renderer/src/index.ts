@@ -38,3 +38,10 @@ export type {
 
 export { loadVoroBackend } from './voro/backend.js';
 export type { VoroMesh } from './voro/backend.js';
+
+export * from './journey/types.js';
+export * from './journey/definition.js';
+export { JourneyVisualizer } from './journey/journey.js';
+export { GuidanceEngine } from './journey/guidance.js';
+
+export { retainJourneyWeights } from './journey/definition.js';

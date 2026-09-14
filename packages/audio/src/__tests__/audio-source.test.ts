@@ -27,6 +27,7 @@ function setup() {
   );
   const ctx = {
     state: 'running',
+    currentTime: 0,
     sampleRate: 48000,
     destination: node(),
     close: vi.fn(),
@@ -56,7 +57,7 @@ function setup() {
   const source = new AudioSource();
   const file = (byte: number) =>
     ({ arrayBuffer: async () => new Uint8Array([byte]).buffer }) as File;
-  return { source, nodes, decode, file };
+  return { source, nodes, decode, file, ctx };
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -134,4 +135,47 @@ describe('source transactions', () => {
     vi.stubGlobal('fetch', async () => new Response('', { status: 404 }));
     await expect(source.loadURL('/missing')).rejects.toThrow('404');
   });
+});
+
+describe('file media transport', () => {
+  it('seeks without changing the analysis clock and rejects stale source completion', async () => {
+    const { source, nodes, decode, file, ctx } = setup();
+    await source.init();
+    decode.mockResolvedValue({ duration: 20 } as AudioBuffer);
+    await source.loadFile(file(1));
+    ctx.currentTime = 3;
+    expect(source.getTransport().position).toBe(3);
+    expect(source.getCurrentTime()).toBe(3);
+    const ended = vi.fn();
+    source.onEnded(ended);
+    const stale = nodes[0].onended!;
+    expect(source.seek(10)).toBe(true);
+    expect(nodes[1].start).toHaveBeenCalledWith(0, 10);
+    expect(source.getCurrentTime()).toBe(3);
+    ctx.currentTime = 5;
+    expect(source.getTransport().position).toBe(12);
+    expect(source.getTransport().seekRevision).toBe(1);
+    stale();
+    expect(ended).not.toHaveBeenCalled();
+    source.destroy();
+    expect(source.getDecodedBuffer()).toBeNull();
+  });
+});
+
+it('seeking the committed file does not strand a pending source transaction', async () => {
+  const { source, decode, file, nodes } = setup();
+  await source.init();
+  decode.mockResolvedValueOnce({ duration: 20 } as AudioBuffer);
+  await source.loadFile(file(1));
+  const pending = deferred<AudioBuffer>();
+  decode.mockImplementationOnce(() => pending.promise);
+  const loading = source.loadFile(file(2));
+  await vi.waitFor(() => expect(decode).toHaveBeenCalledTimes(2));
+  expect(source.seek(4)).toBe(true);
+  pending.resolve({ duration: 30 } as AudioBuffer);
+  expect(await loading).toBe(true);
+  expect(source.getTransport().duration).toBe(30);
+  expect(source.getTransport().position).toBe(0);
+  expect(nodes).toHaveLength(3);
+  source.destroy();
 });

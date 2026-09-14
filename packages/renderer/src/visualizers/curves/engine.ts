@@ -204,6 +204,10 @@ export class CurveVisualizer implements Visualizer {
     }
     this.accumulator = 1;
   }
+  getTransitionComponents() {
+    return this.batch ? [this.batch.component(this.metadata.type)] : [];
+  }
+
   dispose(): void {
     this.unsub();
     this.batch?.dispose();

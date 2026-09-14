@@ -1,3 +1,4 @@
+import { JOURNEY_TYPES } from '../journey/types.js';
 /**
  * Visualizer manifest — the catalog of available visualizers with a lazy loader
  * per entry. Importing this file does NOT evaluate any visualizer module; each
@@ -18,6 +19,7 @@ export interface VisualizerManifestEntry {
   description: string;
   group: 'fractal' | '3d' | 'pattern' | 'particle' | 'wave';
   usesPerspective: boolean;
+  transition?: boolean;
   documentation: VisualizerDocumentation;
   loader: () => Promise<unknown>;
 }
@@ -115,7 +117,8 @@ const MANIFEST_ENTRIES: Omit<
   {
     type: 'openastra',
     label: 'OpenAstra',
-    description: 'Luminous spiral galaxy inspired by the GPT-6 Astra star field',
+    description:
+      'Luminous spiral galaxy inspired by the GPT-6 Astra star field',
     group: 'particle',
     loader: () => import('./openastra/v01-alpha.js'),
   },
@@ -601,6 +604,9 @@ export const VISUALIZER_MANIFEST: VisualizerManifestEntry[] =
       ...entry,
       documentation,
       usesPerspective: PERSPECTIVE_TYPES.has(entry.type),
+      transition: JOURNEY_TYPES.includes(
+        entry.type as (typeof JOURNEY_TYPES)[number],
+      ),
     };
   });
 

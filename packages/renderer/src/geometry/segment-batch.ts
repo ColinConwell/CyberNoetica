@@ -1,3 +1,4 @@
+import type { ComponentFrame } from '../journey/types.js';
 import { AdditiveBlending, DynamicDrawUsage } from 'three';
 import type { InterleavedBufferAttribute } from 'three';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
@@ -47,6 +48,18 @@ export class SegmentBatch {
           'instanceColorStart',
         ) as InterleavedBufferAttribute
       ).data.needsUpdate = true;
+  }
+  component(id = 'curves'): ComponentFrame {
+    return {
+      id,
+      kind: 'curves',
+      revision: this.geometry.instanceCount,
+      count: this.geometry.instanceCount,
+      positions: this.positions,
+      colors: this.colors,
+      object: this.object,
+      opacity: this.material.opacity,
+    };
   }
   setResolution(w: number, h: number): void {
     this.material.resolution.set(w, h);

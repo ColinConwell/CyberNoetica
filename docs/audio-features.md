@@ -25,3 +25,9 @@ Sound-to-geometry mappings are design choices unless the visualizer explicitly i
 The Control panel's Reduce onset flashes preference suppresses onset events delivered to visualizers while retaining continuous level and timbre features. No Audio continues autonomous animation with silent features. Microphone and system capture are analyzed without speaker monitoring, avoiding feedback or duplicated playback; file and Soundscape output follow the user's mute setting.
 
 Tests include deterministic tones, silence, pulse trains, stereo phase inversion, sample-rate changes, calibrated band power, pitch confidence, event retention, and backend fallback. A 4096-sample FFT cannot resolve adjacent low bass notes perfectly; frequency-selective displays should interpolate bins and expose resonance bandwidth instead of claiming precision finer than the measurement.
+
+## Journey clocks and synthesis (2026-09-13)
+
+`AudioSource.getCurrentTime()` remains the AudioContext analysis clock. `getTransport()` reports file position/duration and source/seek revisions; `getDecodedBuffer()` supports cancellable chunked analysis. `audio:timing` carries onset events before reduced-flash processing of `audio:features`. Estimated beat/onset grids, energy summaries and editable cues are compact file metadata, not live analysis frames.
+
+`SoundscapeEngine` owns synthesis separately from source selection. Versioned patches contain three voices, noise, envelopes, two LFOs, up to eight routes and synchronized delay/output settings. The original tempo pulse and four macros remain. Audio-clock curves interpolate modulation from 320 Hz knots, with smoothed edits. Synth envelope/LFO signals can guide Journey through the generic provider interface. Speaker mute remains downstream of analysis, and analysis gain stays independent. See the [Journey report](../reports/2026-09-13-journey.md) for verification and numerical limits.

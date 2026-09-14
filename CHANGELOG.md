@@ -2,6 +2,13 @@
 
 Changes are recorded in dated entries, newest first. Detailed reports are indexed in [reports/README.md](reports/README.md).
 
+## 2026-09-13 — Journey transitions, musical routes and Soundscape synthesis
+
+- Added Individual / Journey modes with Character and Unified presentation, live adapters for ten particle/curve/surface visualizers, bounded sparse transport, adaptive shared geometry budgets, editable seeded routes, layered stops and displacement blends. The original 72-entry catalog remains available through a clustered picker.
+- Added full-file analysis, media seeking, estimated/manual beat timing and editable transition cues, plus progressive Soundscape voice, envelope, filter, LFO, modulation and delay controls. Audio analysis remains independent of speaker mute.
+- Validation: 538 Vitest tests, 18 desktop/mobile Playwright cases, 540 directed rendering/style/audio cases, the 72-visualizer regression matrix, offline audio fixtures, TypeScript and production builds. A 100-transition run retained zero geometries/textures. M3 Max probes held 60 FPS with no warm >50 ms tasks; integrated-laptop and physical-phone timing gates remain unqualified.
+- Architecture, exact test coverage, measured performance and approximation limits are recorded in the [Journey report](reports/2026-09-13-journey.md).
+
 ## 2026-09-11 — Stable production and latest preview
 
 - Made `cybernoetica.app` the default production target and configured its Railway service to follow `main`; `demo.cybernoetica.app` follows `latest` on a separate service. Retired both Imbasso app domains and their DNS routing records while retaining the production audio volume.

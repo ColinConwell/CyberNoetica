@@ -107,7 +107,12 @@ export class SpectrumAnalyzer {
     }
   }
 
-  analyze(left: Float32Array, timestamp: number, right = left): AudioFeatures {
+  analyze(
+    left: Float32Array,
+    timestamp: number,
+    right = left,
+    detailed = true,
+  ): AudioFeatures {
     const n = this.fftSize;
     const bins = n / 2;
     const width = this.sampleRate / n;
@@ -186,7 +191,7 @@ export class SpectrumAnalyzer {
       this.onsetId++;
     }
     this.history[this.historyCount++ % this.history.length] = novelty;
-    if (this.sequence % 8 === 0) this.estimatePitch(left, rms);
+    if (detailed && this.sequence % 8 === 0) this.estimatePitch(left, rms);
     const bandLevels = {
       bass: Math.sqrt(powers[0]),
       mid: Math.sqrt(powers[1]),

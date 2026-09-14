@@ -11,6 +11,7 @@ export type QualityMode =
 
 export interface AppState {
   visualizer: {
+    mode: 'individual' | 'journey';
     type: string;
     userParams: Record<string, number>;
   };
@@ -39,7 +40,7 @@ export interface AppState {
 const STORAGE_KEY = 'cybernoetica:state';
 
 const INITIAL_STATE: AppState = {
-  visualizer: { type: '', userParams: {} },
+  visualizer: { mode: 'individual', type: '', userParams: {} },
   audio: {
     source: 'none',
     trackName: '',

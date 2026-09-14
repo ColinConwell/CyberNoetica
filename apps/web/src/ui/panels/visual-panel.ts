@@ -1,5 +1,8 @@
+import { renderJourneyControls } from '../journey-controls.js';
+import type { JourneyController } from '../../managers/journey-controller.js';
 import {
   listVisualizers,
+  VISUALIZER_MANIFEST,
   getVisualizerDocumentation,
 } from '@cybernoetica/renderer';
 import type { ViewStateField } from '@cybernoetica/renderer';
@@ -20,6 +23,7 @@ import {
 } from '../styles.js';
 
 export interface VisualPanelOpts {
+  journey?: JourneyController;
   currentVizType: string;
   onRandomViz: (() => void) | null;
   onVizChange: ((type: string) => void) | null;
@@ -41,6 +45,18 @@ export function renderVisualPanel(
 ): void {
   (panel as VisualPanelElement).__viewStateCleanup?.();
   panel.innerHTML = '';
+  const root = panel,
+    legacy = el('div', {}),
+    extension = el('div', {});
+  root.append(extension, legacy);
+  const cleanup = opts.journey
+    ? renderJourneyControls(extension, legacy, opts.journey)
+    : () => {};
+  (root as VisualPanelElement).__viewStateCleanup = () => {
+    cleanup();
+    (legacy as VisualPanelElement).__viewStateCleanup?.();
+  };
+  panel = legacy;
 
   let vizViewMode: 'grid' | 'list' = 'grid';
 
@@ -107,32 +123,62 @@ export function renderVisualPanel(
     }
 
     if (vizViewMode === 'grid') {
-      const grid = el('div', {
-        display: 'flex',
-        gap: '8px',
-        justifyContent: 'center',
-        flexWrap: 'wrap',
-      });
-      for (const viz of vizOptions.filter((viz) =>
-        `${viz.label} ${viz.description} ${viz.type}`
-          .toLocaleLowerCase()
-          .includes(query),
-      )) {
-        const btn = glassButton(viz.label, {
-          active: viz.type === opts.currentVizType,
-        });
-        btn.title = viz.description;
-        btn.setAttribute(
-          'aria-pressed',
-          String(viz.type === opts.currentVizType),
+      const groups = [
+        ['particle', 'Particles'],
+        ['fractal', 'Fractals'],
+        ['pattern', 'Patterns'],
+        ['3d', '3D forms'],
+        ['wave', 'Waves'],
+      ] as const;
+      for (const [group, label] of groups) {
+        const entries = vizOptions.filter(
+          (v) =>
+            VISUALIZER_MANIFEST.find((m) => m.type === v.type)?.group ===
+              group &&
+            `${v.label} ${v.description} ${v.type}`
+              .toLocaleLowerCase()
+              .includes(query),
         );
-        btn.addEventListener('click', () => {
-          if (opts.onVizChange) opts.onVizChange(viz.type);
-          opts.onClose();
+        if (!entries.length) continue;
+        const details = el('details', {
+          border: `1px solid ${GLASS_BORDER}`,
+          borderRadius: '12px',
+          marginBottom: '7px',
+          padding: '8px 10px',
         });
-        grid.appendChild(btn);
+        details.open =
+          Boolean(query) || entries.some((v) => v.type === opts.currentVizType);
+        const summary = el('summary', {
+          cursor: 'pointer',
+          color: TEXT_PRIMARY,
+          fontSize: '12px',
+          padding: '4px',
+        });
+        summary.textContent = `${label} · ${entries.length}`;
+        const grid = el('div', {
+          display: 'flex',
+          gap: '6px',
+          flexWrap: 'wrap',
+          paddingTop: '10px',
+        });
+        for (const viz of entries) {
+          const button = glassButton(viz.label, {
+            active: viz.type === opts.currentVizType,
+          });
+          button.title = viz.description;
+          button.setAttribute(
+            'aria-pressed',
+            String(viz.type === opts.currentVizType),
+          );
+          button.addEventListener('click', () => {
+            opts.onVizChange?.(viz.type);
+            opts.onClose();
+          });
+          grid.append(button);
+        }
+        details.append(summary, grid);
+        vizContainer.append(details);
       }
-      vizContainer.appendChild(grid);
     } else {
       const list = el('div', {
         display: 'flex',

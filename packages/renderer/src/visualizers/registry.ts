@@ -1,3 +1,5 @@
+import { createTransitionAdapter } from '../journey/adapter.js';
+import type { TransitionAdapter } from '../journey/types.js';
 import type { MessageBus } from '@cybernoetica/core';
 import type {
   Visualizer,
@@ -13,6 +15,10 @@ import {
 export interface VisualizerEntry {
   metadata: VisualizerMetadata;
   create(bus: MessageBus): Visualizer;
+  createTransitionAdapter?: (
+    visualizer: Visualizer,
+    count: number,
+  ) => TransitionAdapter;
 }
 
 const entries = new Map<string, VisualizerEntry>();
@@ -37,14 +43,32 @@ export function registerVisualizer(entry: VisualizerEntry): void {
   const create = entry.create;
   entries.set(entry.metadata.type, {
     ...entry,
+    createTransitionAdapter: manifest?.transition
+      ? (visualizer, count) => {
+          if (!visualizer.getTransitionComponents)
+            throw new Error('Missing transition geometry');
+          return createTransitionAdapter(
+            {
+              getTransitionComponents: () =>
+                visualizer.getTransitionComponents!(),
+            },
+            count,
+          );
+        }
+      : entry.createTransitionAdapter,
     create(bus) {
       const visualizer = create(bus);
+      const values = Object.fromEntries(
+        visualizer.metadata.params.map((p) => [p.key, p.initial]),
+      );
+      visualizer.getUserParams = () => ({ ...values });
       const setParam = visualizer.setUserParam.bind(visualizer);
       visualizer.setUserParam = (key, value) => {
         const definition = visualizer.metadata.params.find(
           (param) => param.key === key,
         );
         if (!definition || !Number.isFinite(value)) return;
+        values[key] = Math.max(definition.min, Math.min(definition.max, value));
         setParam(
           key,
           Math.max(definition.min, Math.min(definition.max, value)),

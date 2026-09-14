@@ -1,3 +1,4 @@
+import type { ComponentFrame } from '../../journey/types.js';
 import * as THREE from 'three';
 import type {
   AudioFeatures,
@@ -196,6 +197,30 @@ export class TorusKnotVisualizer implements Visualizer {
     scene.add(this.root);
     this.tick(0);
   }
+  getTransitionComponents(): ComponentFrame[] {
+    return this.root.children.map((child, i) => {
+      const mesh = child as THREE.Mesh;
+      const center = mesh.geometry.getAttribute('center'),
+        normal = mesh.geometry.getAttribute('normal');
+      const radius = this.material?.uniforms.radius.value ?? 0.14,
+        major = this.material?.uniforms.major.value ?? 1;
+      return {
+        id: `tube-${i}`,
+        kind: 'surface',
+        revision: this.shape,
+        count: center.count,
+        indices: mesh.geometry.index?.array,
+        positions: center.array,
+        object: mesh,
+        vertex: (index: number, out: Float32Array) => {
+          out[0] = center.getX(index) * major + normal.getX(index) * radius;
+          out[1] = center.getY(index) * major + normal.getY(index) * radius;
+          out[2] = center.getZ(index) * major + normal.getZ(index) * radius;
+        },
+      };
+    });
+  }
+
   private rebuild(): void {
     const p = Math.round(this.params.knotP),
       q = Math.round(this.params.knotQ),

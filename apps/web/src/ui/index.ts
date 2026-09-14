@@ -1,3 +1,4 @@
+import type { JourneyController } from '../managers/journey-controller.js';
 import { el } from './components.js';
 import { setButtonActive } from './components.js';
 import {
@@ -47,6 +48,7 @@ export type VisualizerType = string;
 export type { AppSettings } from './styles.js';
 
 export interface UIControls {
+  setJourneyController: (controller: JourneyController) => void;
   onStart: (handler: () => void) => void;
   onPause: (handler: () => void) => void;
   onResume: (handler: () => void) => void;
@@ -95,6 +97,7 @@ export interface UIControls {
 }
 
 export function createUI(): UIControls {
+  let journeyController: JourneyController | undefined;
   installLogInterceptor();
 
   const settings = { ...DEFAULT_SETTINGS };
@@ -390,6 +393,7 @@ export function createUI(): UIControls {
     if (type === 'visual') {
       const vizMeta = listVisualizers().find((v) => v.type === currentVizType);
       renderVisualPanel(panel, {
+        journey: journeyController,
         currentVizType,
         onRandomViz: randomVizHandler,
         onVizChange: vizChangeHandler,
@@ -408,6 +412,7 @@ export function createUI(): UIControls {
         foldersInitialized = true;
       }
       renderSoundPanel(panel, {
+        journey: journeyController,
         activeTrackName,
         sampleTracks,
         autoPlay,
@@ -552,6 +557,9 @@ export function createUI(): UIControls {
   updateBottomLayout();
 
   return {
+    setJourneyController(controller) {
+      journeyController = controller;
+    },
     onStart(h) {
       startScreen.onStart(h);
     },

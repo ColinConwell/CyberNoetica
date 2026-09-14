@@ -1,3 +1,4 @@
+import { JourneyController } from './managers/journey-controller.js';
 import { MessageBus } from '@cybernoetica/core';
 import { SceneManager, getVisualizerTypes } from '@cybernoetica/renderer';
 import { createUI } from './ui/index.js';
@@ -66,6 +67,12 @@ export async function createApp(container: HTMLElement): Promise<void> {
       store.setState({ audio: { backend: message.payload.backend } }),
   );
   await audio.init();
+  try {
+    const patch = localStorage.getItem('cybernoetica:soundscape:v1');
+    if (patch) audio.source.setSoundscapePatch(JSON.parse(patch));
+  } catch {
+    /* invalid patches use defaults */
+  }
   if (disposed) return;
   store.setState({ audio: { wasm: false, backend: audio.getBackend() } });
 
@@ -175,11 +182,15 @@ export async function createApp(container: HTMLElement): Promise<void> {
       step: number;
       initial: number;
     },
-    viz: { setUserParam(key: string, value: number): void },
+    viz: {
+      setUserParam(key: string, value: number): void;
+      getUserParams?(): Record<string, number>;
+    },
   ) {
     ctr.appendChild(
       paramSlider({
         ...param,
+        initial: viz.getUserParams?.()[param.key] ?? param.initial,
         onChange: (key, val) => viz.setUserParam(key, val),
       }),
     );
@@ -249,6 +260,20 @@ export async function createApp(container: HTMLElement): Promise<void> {
   // UI
   const ui = createUI();
   cleanups.push(() => ui.destroy());
+  const journey = new JourneyController(vizManager, audio.source, (type) => {
+    ui.setActiveVisualizer(type);
+    updateAppearanceControls();
+    store.setState({
+      visualizer: {
+        type,
+        mode: type === 'journey' ? 'journey' : 'individual',
+        userParams: {},
+      },
+    });
+  });
+  cleanups.push(() => journey.dispose());
+  ui.setJourneyController(journey);
+  window.__cybernoetica!.journey = journey;
   vizManager.onSwitch((type, state, error) => {
     if (state !== 'error') return;
     ui.showControls();
@@ -538,6 +563,11 @@ export async function createApp(container: HTMLElement): Promise<void> {
       audio.pushSilent(pauseFade * 0.05);
     }
     scene.setFlashReduction(preferences.reduceFlashes);
+    journey.tick(
+      playback.isPlaying,
+      preferences.reduceFlashes,
+      preferences.reducedMotion,
+    );
     vizManager.tick(
       Math.min(0.1, frameTime / 1000) * (preferences.reducedMotion ? 0.25 : 1),
     );

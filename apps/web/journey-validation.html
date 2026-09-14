@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="icon" href="/icon.svg" />
+    <title>Journey validation</title>
+    <style>
+      body {
+        background: #10131b;
+        color: #dbe4ff;
+        font: 14px system-ui;
+        margin: 24px;
+      }
+      button {
+        padding: 10px;
+      }
+      canvas {
+        max-width: 100%;
+        display: block;
+      }
+      pre {
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Journey validation</h1>
+    <p>
+      Deterministic geometry, shader, continuity and resource checks. QA only.
+    </p>
+    <button id="run">Run matrix</button>
+    <div id="canvas"></div>
+    <pre id="status">Ready</pre>
+    <script type="module" src="/src/validation-journey.ts"></script>
+  </body>
+</html>

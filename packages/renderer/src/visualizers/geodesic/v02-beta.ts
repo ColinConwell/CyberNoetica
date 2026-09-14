@@ -1,3 +1,4 @@
+import type { ComponentFrame } from '../../journey/types.js';
 import * as THREE from 'three';
 import type { MessageBus } from '@cybernoetica/core';
 import { ModelVisualizer, MODEL_PARAMS, MODEL_VIEW_3D } from '../model-base.js';
@@ -38,6 +39,23 @@ export class IcosahedralVisualizer extends ModelVisualizer {
     });
     this.mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.material);
     this.root.add(this.mesh);
+  }
+  getTransitionComponents(): ComponentFrame[] {
+    const mesh = this.mesh,
+      position = mesh?.geometry.getAttribute('position');
+    return mesh && position
+      ? [
+          {
+            id: 'sphere',
+            kind: 'surface',
+            revision: this.detail,
+            count: position.count,
+            positions: position.array,
+            indices: mesh.geometry.index?.array,
+            object: mesh,
+          },
+        ]
+      : [];
   }
   protected update(_dt: number): void {
     if (!this.mesh || !this.material) return;

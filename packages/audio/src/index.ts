@@ -16,3 +16,9 @@ export {
   ANALYSIS_HOP_SIZE,
   visualLevel,
 } from './spectrum-analyzer.js';
+
+export * from './track-analysis.js';
+export { TrackAnalysisClient } from './track-analysis-client.js';
+
+export * from './soundscape-patch.js';
+export { SoundscapeEngine } from './soundscape-engine.js';

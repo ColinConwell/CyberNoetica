@@ -157,6 +157,13 @@ function disposeObject3D(root: THREE.Object3D): void {
 }
 
 export class SceneManager {
+  private renderDelegate: ((renderer: THREE.WebGLRenderer) => void) | null =
+    null;
+  setRenderDelegate(
+    delegate: ((renderer: THREE.WebGLRenderer) => void) | null,
+  ): void {
+    this.renderDelegate = delegate;
+  }
   public width: number;
   public height: number;
   readonly scene: THREE.Scene;
@@ -177,6 +184,10 @@ export class SceneManager {
       cpu: this.cpuStatistics.percentiles(),
       gpu: this.gpuTimer?.statistics.percentiles() ?? null,
     };
+  }
+  private contextLostHook: (() => void) | null = null;
+  onContextLost(callback: (() => void) | null): void {
+    this.contextLostHook = callback;
   }
   private reduceFlashes = false;
   setFlashReduction(value: boolean): void {
@@ -359,6 +370,7 @@ export class SceneManager {
     // ── WebGL Context Loss Handling ───────────────────────────────
     canvas.addEventListener('webglcontextlost', (e) => {
       e.preventDefault();
+      this.contextLostHook?.();
       this.gpuTimer?.dispose();
       console.warn('CyberNoetica: WebGL context lost. Pausing render loop.');
       this.stop();
@@ -499,7 +511,9 @@ export class SceneManager {
             }[this.qualityTier];
         }
       });
-      this.renderer?.render(this.scene, this.activeCamera);
+      if (this.renderer && this.renderDelegate)
+        this.renderDelegate(this.renderer);
+      else this.renderer?.render(this.scene, this.activeCamera);
       this.gpuTimer?.end();
       this.cpuMs = performance.now() - workStart;
       this.cpuStatistics.add(this.cpuMs);

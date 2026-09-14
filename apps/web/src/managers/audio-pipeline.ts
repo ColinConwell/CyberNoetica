@@ -86,6 +86,11 @@ export class AudioPipeline {
       this.pushSilent();
       return;
     }
+    this.bus.publish('audio:timing', {
+      onset: this.pendingOnset,
+      timestamp: this.latest.timestamp,
+      onsetId: this.latest.onsetId,
+    });
     this.processor.pushFeatures({
       ...this.latest,
       beatOnset: this.pendingOnset && !suppressOnsets,

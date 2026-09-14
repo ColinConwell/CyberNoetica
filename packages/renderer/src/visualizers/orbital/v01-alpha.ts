@@ -1,3 +1,4 @@
+import type { ComponentFrame } from '../../journey/types.js';
 import {
   frameDelta,
   takeAudioFrame,
@@ -613,6 +614,28 @@ export class OrbitalVisualizer implements Visualizer {
       this.particleMaterial.uniforms.u_glowIntensity.value = glowIntensity;
       this.particleMaterial.uniforms.u_time.value = this.time;
     }
+  }
+
+  getTransitionComponents(): ComponentFrame[] {
+    return [
+      {
+        id: 'particles',
+        kind: 'particles',
+        revision: 0,
+        count: this.ages.length,
+        positions: this.positions,
+        object: this.particlePoints ?? undefined,
+        visible: (i) => this.alive[i] === 1,
+        sampleAlpha: (i) => {
+          const life = this.ages[i] / this.lifetimes[i];
+          const smooth = (v: number) => {
+            const t = Math.max(0, Math.min(1, v));
+            return t * t * (3 - 2 * t);
+          };
+          return smooth(life / 0.05) * (1 - smooth((life - 0.5) / 0.5));
+        },
+      },
+    ];
   }
 
   setResolution(_width: number, _height: number): void {

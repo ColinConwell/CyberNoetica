@@ -1,3 +1,5 @@
+import { JourneyVisualizer } from '@cybernoetica/renderer';
+import type { JourneyDefinition } from '@cybernoetica/renderer';
 import type { MessageBus } from '@cybernoetica/core';
 import {
   SceneManager,
@@ -33,6 +35,12 @@ export class VisualizerManager {
   private activeViz: Visualizer | null = null;
   private activeType = '';
   private driftEnabled = true;
+  private pendingJourney: JourneyVisualizer | null = null;
+  cancelJourneyPreparation(): void {
+    this.pendingJourney?.dispose();
+    this.pendingJourney = null;
+    this.switchGen++;
+  }
   private pendingType: string | null = null;
   private switchGen = 0;
   private switchHook: SwitchHook | null = null;
@@ -47,6 +55,11 @@ export class VisualizerManager {
     scene.onViewportDrag((dx, dy) => this.handleDrag(dx, dy));
     scene.onViewportZoom((delta) => this.handleZoom(delta));
     scene.onViewportReset(() => this.handleReset());
+    scene.onContextLost(() => {
+      if (this.activeViz instanceof JourneyVisualizer)
+        this.activeViz.suspendPreparation();
+      this.pendingJourney?.suspendPreparation();
+    });
     scene.onContextRestored(() => {
       const type = this.activeType;
       if (!type) {
@@ -71,7 +84,11 @@ export class VisualizerManager {
   }
 
   async switchTo(type: string): Promise<Visualizer | null> {
+    if (type === 'journey' && this.activeViz instanceof JourneyVisualizer)
+      return this.switchJourney(this.activeViz.definition);
     if (this.disposed) return null;
+    this.pendingJourney?.dispose();
+    this.pendingJourney = null;
     const gen = ++this.switchGen;
     this.pendingType = type;
     let entry = getVisualizerEntry(type);
@@ -152,6 +169,88 @@ export class VisualizerManager {
     }
   }
 
+  async switchJourney(
+    definition: JourneyDefinition,
+  ): Promise<JourneyVisualizer | null> {
+    if (this.disposed) return null;
+    this.pendingJourney?.dispose();
+    const previous =
+      this.activeViz instanceof JourneyVisualizer ? this.activeViz : null;
+    const resume = previous
+      ? {
+          index: previous.state.index,
+          offset:
+            previous.state.progress > 0
+              ? previous.definition.stops[previous.state.index].hold +
+                previous.state.progress *
+                  previous.definition.stops[previous.state.index].transition
+              : previous.state.elapsed,
+          paused: previous.isPaused(),
+          view: previous.getViewState(),
+        }
+      : null;
+    const gen = ++this.switchGen;
+    this.pendingType = 'journey';
+    const initialView =
+      this.activeType === definition.stops[0]?.layers[0]?.type
+        ? this.activeViz?.getViewState()
+        : undefined;
+    const tier = this.scene.getQualityTier();
+    const samples =
+      tier === 'sub-performance' || tier === 'performance'
+        ? 1024
+        : tier === 'balanced'
+          ? 2048
+          : 4096;
+    const journey = new JourneyVisualizer(
+      this.bus,
+      definition,
+      samples,
+      initialView,
+    );
+    this.pendingJourney = journey;
+    const renderer = this.scene.getRenderer();
+    if (renderer) journey.setRenderer(renderer);
+    const size = this.scene.getDrawingBufferSize();
+    journey.setResolution(size.width, size.height);
+    this.switchHook?.('journey', 'loading');
+    await journey.initialize(resume?.index ?? 0, resume?.offset ?? 0);
+    if (resume) {
+      journey.setPaused(resume.paused);
+      journey.setViewState(resume.view);
+    }
+    if (this.pendingJourney === journey) this.pendingJourney = null;
+    if (gen !== this.switchGen || this.disposed || !journey.ready) {
+      const error = journey.state.error;
+      journey.dispose();
+      if (error && gen === this.switchGen)
+        this.switchHook?.('journey', 'error', new Error(error));
+      return null;
+    }
+    if (!previous && this.activeViz)
+      journey.captureEntry(this.scene.scene, this.scene.activeCamera);
+    this.teardownActive();
+    this.activeViz = journey;
+    this.activeType = 'journey';
+    this.scene.activeCamera = this.scene.camera;
+    this.scene.setViewportCapabilities(journey.metadata.viewport);
+    this.scene.setRenderDelegate((r) => {
+      const tier = this.scene.getQualityTier();
+      journey.setSampleBudget(
+        tier === 'performance' || tier === 'sub-performance'
+          ? 1024
+          : tier === 'balanced'
+            ? 2048
+            : 4096,
+      );
+      journey.renderFrame(r);
+    });
+    this.driftEnabled = false;
+    this.resetGovernor?.();
+    this.switchHook?.('journey', 'ready');
+    return journey;
+  }
+
   async switchRandom(exclude?: string): Promise<Visualizer | null> {
     const types = getVisualizerTypes();
     const candidates = exclude ? types.filter((t) => t !== exclude) : types;
@@ -200,6 +299,9 @@ export class VisualizerManager {
 
   dispose(): void {
     this.disposed = true;
+    this.pendingJourney?.dispose();
+    this.pendingJourney = null;
+    this.scene.onContextLost(null);
     this.switchGen++;
     this.pendingType = null;
     this.scene.onViewportDrag(null);
@@ -212,6 +314,7 @@ export class VisualizerManager {
   }
 
   private teardownActive(): void {
+    this.scene.setRenderDelegate(null);
     if (this.activeViz) {
       this.activeViz.setInteractionContext?.(null);
       this.activeViz.dispose();

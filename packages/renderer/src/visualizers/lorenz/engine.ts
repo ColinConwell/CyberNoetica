@@ -406,6 +406,10 @@ export class FlowVisualizer implements Visualizer {
       this._distance = Math.max(4, Math.min(24, partial.distance));
   }
 
+  getTransitionComponents() {
+    return this.batch ? [this.batch.component(this.metadata.type)] : [];
+  }
+
   dispose(): void {
     this.unsub();
     this.batch?.dispose();

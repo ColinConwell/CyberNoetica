@@ -1,3 +1,4 @@
+import type { ComponentFrame } from '../journey/types.js';
 import type { PerspectiveCamera, Scene, WebGLRenderer } from 'three';
 
 export interface VisualizerParam {
@@ -91,4 +92,7 @@ export interface Visualizer {
   setRenderer?(renderer: WebGLRenderer): void;
   setInteractionContext?(context: VisualizerInteractionContext | null): void;
   getCursorMode?(): VisualizerCursorMode;
+  getUserParams?(): Record<string, number>;
+  getTransitionComponents?(): ComponentFrame[];
+  renderFrame?(renderer: WebGLRenderer): void;
 }

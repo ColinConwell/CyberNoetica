@@ -1,19 +1,21 @@
 /// <reference path="./worklet-url.d.ts" />
+import type { AudioTransport } from './track-analysis.js';
+import { SoundscapeEngine } from './soundscape-engine.js';
+import {
+  DEFAULT_SOUNDSCAPE_PATCH,
+  validateSoundscapePatch,
+} from './soundscape-patch.js';
+import type { SoundscapePatch } from './soundscape-patch.js';
 import analysisWorkletUrl from './analysis-worklet.ts?worker&url';
 import { ANALYSIS_FFT_SIZE } from './spectrum-analyzer.js';
 import type { AudioFeatures } from '@cybernoetica/core';
 import {
   clampSoundscapeParams,
   DEFAULT_SOUNDSCAPE_PARAMS,
-  soundscapeGainsAt,
-  soundscapePhase,
-  soundscapeBeatIndex,
   type SoundscapeParams,
 } from './soundscape-loop.js';
 
 export type AudioSourceType = 'none' | 'file' | 'mic' | 'system' | 'soundscape';
-
-type Stoppable = { stop: (when?: number) => void };
 
 export class AudioSource {
   private audioContext: AudioContext | null = null;
@@ -33,6 +35,10 @@ export class AudioSource {
       this.analysisGainNode.gain.value = this.analysisGain;
   }
   private sourceNode: AudioNode | null = null;
+  private mediaBuffer: AudioBuffer | null = null;
+  private mediaOffset = 0;
+  private mediaStart = 0;
+  private seekRevision = 0;
   private activeStream: MediaStream | null = null;
   private timeDomainData: Float32Array<ArrayBuffer> | null = null;
   private onEndedCallback: (() => void) | null = null;
@@ -47,20 +53,11 @@ export class AudioSource {
   private analysisNode: AudioWorkletNode | null = null;
   private frequencyData: Float32Array<ArrayBuffer> | null = null;
 
-  private extraNodes: AudioNode[] = [];
-  private stoppables: Stoppable[] = [];
-  private soundscapeTimer: ReturnType<typeof setInterval> | null = null;
+  private soundscapeEngine: SoundscapeEngine | null = null;
+  private soundscapePatch: SoundscapePatch = structuredClone(
+    DEFAULT_SOUNDSCAPE_PATCH,
+  );
   private soundscapeParams: SoundscapeParams = { ...DEFAULT_SOUNDSCAPE_PARAMS };
-  private soundscapeOrigin = 0;
-  private lastBeatIndex = -1;
-  private bassGainNode: GainNode | null = null;
-  private midGainNode: GainNode | null = null;
-  private highGainNode: GainNode | null = null;
-  private noiseGainNode: GainNode | null = null;
-  private clickGainNode: GainNode | null = null;
-  private bassFilter: BiquadFilterNode | null = null;
-  private midFilter: BiquadFilterNode | null = null;
-  private highFilter: BiquadFilterNode | null = null;
 
   get sourceType(): AudioSourceType {
     return this._sourceType;
@@ -171,39 +168,15 @@ export class AudioSource {
   }
 
   private stopCurrentSource(): void {
+    this.mediaBuffer = null;
+    this.mediaOffset = 0;
     this.sourceRevision++;
     this.analysisNode?.port.postMessage({
       type: 'reset',
       revision: this.sourceRevision,
     });
-    if (this.soundscapeTimer !== null) {
-      clearInterval(this.soundscapeTimer);
-      this.soundscapeTimer = null;
-    }
-    for (const node of this.stoppables) {
-      try {
-        node.stop();
-      } catch {
-        /* already stopped */
-      }
-    }
-    this.stoppables = [];
-    for (const node of this.extraNodes) {
-      try {
-        node.disconnect();
-      } catch {
-        /* already disconnected */
-      }
-    }
-    this.extraNodes = [];
-    this.bassGainNode = null;
-    this.midGainNode = null;
-    this.highGainNode = null;
-    this.noiseGainNode = null;
-    this.clickGainNode = null;
-    this.bassFilter = null;
-    this.midFilter = null;
-    this.highFilter = null;
+    this.soundscapeEngine?.dispose();
+    this.soundscapeEngine = null;
 
     if (this.sourceNode) {
       if ('onended' in this.sourceNode)
@@ -281,6 +254,9 @@ export class AudioSource {
       source.connect(analyser);
       this.sourceNode = source;
       this._sourceType = 'file';
+      this.mediaBuffer = buffer;
+      this.mediaStart = this.getCurrentTime();
+      this.mediaOffset = 0;
       this.setMuted(this._muted);
       source.onended = () => {
         if (
@@ -376,140 +352,34 @@ export class AudioSource {
       params ?? {},
       DEFAULT_SOUNDSCAPE_PARAMS,
     );
-
-    const ctx = this.audioContext;
-    const mix = ctx.createGain();
-    mix.gain.value = 0.85;
-    mix.connect(this.analyserNode);
-    this.sourceNode = mix;
-    this.extraNodes.push(mix);
-
-    const noise = ctx.createBufferSource();
-    noise.buffer = this.createNoiseBuffer(ctx);
-    noise.loop = true;
-    const noiseFilter = ctx.createBiquadFilter();
-    noiseFilter.type = 'bandpass';
-    noiseFilter.frequency.value = 1200;
-    noiseFilter.Q.value = 0.7;
-    const noiseGain = ctx.createGain();
-    noiseGain.gain.value = 0.08;
-    noise.connect(noiseFilter);
-    noiseFilter.connect(noiseGain);
-    noiseGain.connect(mix);
-    this.noiseGainNode = noiseGain;
-    this.extraNodes.push(noise, noiseFilter, noiseGain);
-    this.stoppables.push(noise);
-    noise.start();
-
-    this.bassFilter = this.makeOscBand(ctx, mix, 70, 'lowpass', 0.18);
-    this.midFilter = this.makeOscBand(ctx, mix, 420, 'bandpass', 0.16);
-    this.highFilter = this.makeOscBand(ctx, mix, 2400, 'highpass', 0.1);
-
-    const click = ctx.createOscillator();
-    click.type = 'square';
-    click.frequency.value = 180;
-    const clickGain = ctx.createGain();
-    clickGain.gain.value = 0.0001;
-    click.connect(clickGain);
-    clickGain.connect(mix);
-    this.clickGainNode = clickGain;
-    this.extraNodes.push(click, clickGain);
-    this.stoppables.push(click);
-    click.start();
-
-    this.soundscapeOrigin = ctx.currentTime;
-    this.lastBeatIndex = -1;
+    this.soundscapeEngine = new SoundscapeEngine(
+      this.audioContext,
+      this.soundscapeParams,
+      this.soundscapePatch,
+    );
+    this.soundscapeEngine.output.connect(this.analyserNode);
+    this.sourceNode = this.soundscapeEngine.output;
     this._sourceType = 'soundscape';
     this.setMuted(this._muted);
-    this.tickSoundscape();
-    this.soundscapeTimer = setInterval(() => this.tickSoundscape(), 40);
   }
-
   setSoundscapeParams(partial: Partial<SoundscapeParams>): void {
     this.soundscapeParams = clampSoundscapeParams(
       partial,
       this.soundscapeParams,
     );
+    this.soundscapeEngine?.setParams(this.soundscapeParams);
   }
-
-  private makeOscBand(
-    ctx: AudioContext,
-    mix: AudioNode,
-    freq: number,
-    filterType: BiquadFilterType,
-    initialGain: number,
-  ): BiquadFilterNode {
-    const osc = ctx.createOscillator();
-    osc.type = freq < 120 ? 'sine' : freq < 800 ? 'triangle' : 'sawtooth';
-    osc.frequency.value = freq;
-    const filter = ctx.createBiquadFilter();
-    filter.type = filterType;
-    filter.frequency.value = freq;
-    filter.Q.value = filterType === 'bandpass' ? 1.1 : 0.7;
-    const gain = ctx.createGain();
-    gain.gain.value = initialGain;
-    osc.connect(filter);
-    filter.connect(gain);
-    gain.connect(mix);
-    this.extraNodes.push(osc, filter, gain);
-    this.stoppables.push(osc);
-    osc.start();
-    if (filterType === 'lowpass') this.bassGainNode = gain;
-    else if (filterType === 'bandpass') this.midGainNode = gain;
-    else this.highGainNode = gain;
-    return filter;
+  getSoundscapePatch(): SoundscapePatch {
+    return structuredClone(this.soundscapePatch);
   }
-
-  private createNoiseBuffer(ctx: AudioContext): AudioBuffer {
-    const length = ctx.sampleRate * 2;
-    const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
-    return buffer;
+  setSoundscapePatch(patch: SoundscapePatch): void {
+    this.soundscapePatch = validateSoundscapePatch(patch);
+    this.soundscapeEngine?.setPatch(this.soundscapePatch);
   }
-
-  private tickSoundscape(): void {
-    const ctx = this.audioContext;
-    if (!ctx || this._sourceType !== 'soundscape') return;
-    const elapsed = Math.max(0, ctx.currentTime - this.soundscapeOrigin);
-    const phase = soundscapePhase(elapsed, this.soundscapeParams.cycleLength);
-    const beatIndex = soundscapeBeatIndex(
-      elapsed,
-      this.soundscapeParams.beatRate,
+  getSynthSignals(): Record<string, number> {
+    return (
+      this.soundscapeEngine?.signals() ?? { lfo1: 0, lfo2: 0, envelope: 0 }
     );
-    const gains = soundscapeGainsAt(
-      phase,
-      this.soundscapeParams,
-      elapsed,
-      this.lastBeatIndex,
-    );
-    this.lastBeatIndex = beatIndex;
-
-    const now = ctx.currentTime;
-    const ramp = 0.05;
-    this.bassGainNode?.gain.setTargetAtTime(gains.bass * 0.45, now, ramp);
-    this.midGainNode?.gain.setTargetAtTime(gains.mid * 0.28, now, ramp);
-    this.highGainNode?.gain.setTargetAtTime(gains.high * 0.16, now, ramp);
-    this.noiseGainNode?.gain.setTargetAtTime(gains.noise * 0.22, now, ramp);
-
-    const cutoffHz = 280 + gains.cutoff * 4200;
-    this.midFilter?.frequency.setTargetAtTime(cutoffHz * 0.35, now, ramp);
-    this.highFilter?.frequency.setTargetAtTime(
-      900 + gains.cutoff * 5000,
-      now,
-      ramp,
-    );
-
-    if (gains.beat && this.clickGainNode) {
-      const g = this.clickGainNode.gain;
-      g.cancelScheduledValues(now);
-      g.setValueAtTime(0.0001, now);
-      g.exponentialRampToValueAtTime(
-        0.35 * this.soundscapeParams.energy + 0.05,
-        now + 0.004,
-      );
-      g.exponentialRampToValueAtTime(0.0001, now + 0.05);
-    }
   }
 
   getStereoSamples():
@@ -531,6 +401,66 @@ export class AudioSource {
     if (!this.analyserNode || !this.frequencyData) return null;
     this.analyserNode.getFloatFrequencyData(this.frequencyData);
     return this.frequencyData;
+  }
+
+  getDecodedBuffer(): AudioBuffer | null {
+    return this.mediaBuffer;
+  }
+  getTransport(): AudioTransport {
+    const duration = this.mediaBuffer?.duration ?? 0;
+    return {
+      position: Math.min(
+        duration,
+        this.mediaOffset + Math.max(0, this.getCurrentTime() - this.mediaStart),
+      ),
+      duration,
+      playing:
+        this._sourceType !== 'none' &&
+        this.audioContext?.state === 'running' &&
+        (!duration ||
+          this.mediaOffset +
+            Math.max(0, this.getCurrentTime() - this.mediaStart) <
+            duration),
+      revision: this.sourceRevision,
+      seekRevision: this.seekRevision,
+    };
+  }
+  seek(position: number): boolean {
+    const buffer = this.mediaBuffer,
+      ctx = this.audioContext;
+    if (!buffer || !ctx || !this.analyserNode || !Number.isFinite(position))
+      return false;
+    // Seek the committed file without cancelling a separately requested source transaction.
+    const offset = Math.max(0, Math.min(buffer.duration, position));
+    const previous = this.sourceNode as AudioBufferSourceNode | null;
+    if (previous) {
+      previous.onended = null;
+      try {
+        previous.stop();
+      } catch {
+        /* ended */
+      }
+      previous.disconnect();
+    }
+    const node = ctx.createBufferSource();
+    node.buffer = buffer;
+    node.connect(this.analyserNode);
+    this.sourceNode = node;
+    this.mediaStart = this.getCurrentTime();
+    this.mediaOffset = offset;
+    this.seekRevision++;
+    const generation = this.sourceGeneration;
+    node.onended = () => {
+      if (this.sourceNode === node && generation === this.sourceGeneration)
+        this.onEndedCallback?.();
+    };
+    this.sourceRevision++;
+    this.analysisNode?.port.postMessage({
+      type: 'reset',
+      revision: this.sourceRevision,
+    });
+    node.start(0, offset);
+    return true;
   }
 
   getSampleRate(): number | null {

@@ -1,3 +1,6 @@
+import { renderSoundscapeControls } from '../soundscape-controls.js';
+import { renderTrackTimeline, disclosure } from '../journey-controls.js';
+import type { JourneyController } from '../../managers/journey-controller.js';
 import {
   el,
   glassButton,
@@ -23,6 +26,7 @@ import type { AudioSourceType } from '@cybernoetica/audio';
 import type { SoundscapeParams } from '@cybernoetica/audio';
 
 export interface SoundPanelOpts {
+  journey?: JourneyController;
   analysisGain: number;
   onAnalysisGainChange: (gain: number) => void;
   activeTrackName: string;
@@ -207,6 +211,12 @@ export function renderSoundPanel(
     );
   }
 
+  if (loopActive && opts.journey) {
+    const synth = el('div', {});
+    panel.append(synth);
+    renderSoundscapeControls(synth, opts.journey.source);
+  }
+
   if (opts.trackListExpanded && opts.sampleTracks.length > 0) {
     const trackList = el('div', {
       maxHeight: '220px',
@@ -312,6 +322,13 @@ export function renderSoundPanel(
     panel.appendChild(trackList);
   }
 
+  if (opts.journey && opts.activeSource === 'file') {
+    const timeline = disclosure('Track timeline');
+    panel.append(timeline);
+    (
+      panel as HTMLElement & { __viewStateCleanup?: () => void }
+    ).__viewStateCleanup = renderTrackTimeline(timeline, opts.journey);
+  }
   panel.appendChild(sectionLabel('Playback'));
   const playbackRow = el('div', {
     display: 'flex',
