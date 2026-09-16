@@ -17,6 +17,7 @@ import {
 import type { AppSettings } from '../styles.js';
 import { isDebugEnabled, renderDebugPanel } from './debug-panel.js';
 import '../../globals.js';
+import { field, selectControl } from '../journey-controls.js';
 
 export interface ControlPanelOpts {
   settings: AppSettings;
@@ -35,8 +36,9 @@ export function renderControlPanel(
 ): void {
   panel.innerHTML = '';
   const store = window.__cybernoetica?.store;
-  const agentButton = glassButton('Open AI studio');
-  agentButton.onclick = () => window.dispatchEvent(new Event('cybernoetica:assistant'));
+  const agentButton = glassButton('Open AI Studio');
+  agentButton.onclick = () =>
+    window.dispatchEvent(new Event('cybernoetica:assistant'));
   panel.append(agentButton, sectionDivider());
   panel.appendChild(sectionLabel('Motion and flashes'));
   for (const [key, label] of [
@@ -88,6 +90,33 @@ export function renderControlPanel(
   // ── Interface ───────────────────────────────────────────────────
   panel.appendChild(sectionLabel('Interface'));
 
+  panel.append(
+    field(
+      'Control Visibility',
+      selectControl(
+        [
+          ['always', 'Always Visible'],
+          ['auto', 'Hover & Fade'],
+        ],
+        store?.getState().ui.controlsVisibility ??
+          (import.meta.env.DEV ? 'always' : 'auto'),
+        (value) => {
+          store?.setState({
+            ui: { controlsVisibility: value as 'always' | 'auto' },
+          });
+          opts.onResetFade();
+        },
+      ),
+    ),
+  );
+  const navigation = el('p', {
+    fontSize: '12px',
+    lineHeight: '1.7',
+    color: TEXT_SECONDARY,
+  });
+  navigation.textContent =
+    'Navigate: middle-drag to orbit (or pan in 2D); Shift + middle-drag to pan; Ctrl + middle-drag to zoom. Alt + left-drag emulates the middle button. Scroll or pinch to zoom; Shift + scroll to pan; Alt + scroll to orbit or rotate where supported. Double-click to reset. Left-click sculpting remains available.';
+  panel.append(navigation);
   // Menu fade delay
   const fadeRow = el('div', {
     display: 'flex',

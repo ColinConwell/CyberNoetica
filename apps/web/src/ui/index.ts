@@ -311,7 +311,9 @@ export function createUI(): UIControls {
     cbar.bar.style.bottom = `${cursor}px`;
     cursor += (cbar.bar.offsetHeight || CONTROL_BAR_HEIGHT) + LAYOUT_GAP;
     getAppSurface().style.setProperty('--controls-top', `${cursor}px`);
-    if (getAppSurface().dataset.devLauncher === 'above') cursor += 40;
+    if (getAppSurface().dataset.devLauncher === 'above')
+      cursor +=
+        (document.getElementById('studio-controls')?.offsetHeight ?? 30) + 10;
 
     panel.style.bottom = `${cursor}px`;
 
@@ -350,6 +352,9 @@ export function createUI(): UIControls {
     getActivePanel: () => activePanel,
     getIsPlaying: () => isPlaying,
     getFadeDelay: () => settings.menuFadeDelay,
+    getPinned: () =>
+      (window.__cybernoetica?.store.getState().ui.controlsVisibility ??
+        (import.meta.env.DEV ? 'always' : 'auto')) === 'always',
   });
 
   let panelTrigger: HTMLElement | null = null;
@@ -524,7 +529,8 @@ export function createUI(): UIControls {
         !e.metaKey &&
         !e.ctrlKey &&
         !e.altKey &&
-        e.target === document.body
+        (e.target === document.body ||
+          (e.target instanceof HTMLCanvasElement && e.target.closest('#app')))
       ) {
         if (resetVisualizerHandler) resetVisualizerHandler();
       }
@@ -555,6 +561,8 @@ export function createUI(): UIControls {
 
   const barObserver = new ResizeObserver(updateBottomLayout);
   barObserver.observe(cbar.bar);
+  const studioGroup = document.getElementById('studio-controls');
+  if (studioGroup) barObserver.observe(studioGroup);
   window.addEventListener('cybernoetica:layout', updateBottomLayout);
 
   // Initial layout

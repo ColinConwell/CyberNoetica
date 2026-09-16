@@ -557,7 +557,7 @@ export function mountDeveloperWorkbench(): () => void {
     paragraph(
       'Inspect and improve with an assistant, or create a new procedural visualizer. Source edits become handoffs.',
     ),
-    button('Open AI studio', () =>
+    button('Open AI Studio', () =>
       window.dispatchEvent(new Event('cybernoetica:assistant')),
     ),
   );

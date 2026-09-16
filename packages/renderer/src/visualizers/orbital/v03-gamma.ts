@@ -827,6 +827,7 @@ export class OrbitalGammaVisualizer implements Visualizer {
     canvas: HTMLCanvasElement,
     fieldType: 'attractor' | 'repulsor',
   ): void {
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
     if (this.userParams.sculptMode < 0.5 || this.multiPointerGesture) return;
     if (e.target !== canvas) return;
 

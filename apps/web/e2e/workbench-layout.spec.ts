@@ -20,7 +20,7 @@ async function open(page: Page) {
 }
 test('launcher positions match main buttons and persist', async ({ page }) => {
   const { panel, errors } = await open(page);
-  const launch = page.locator('.dev-launch'),
+  const launch = page.locator('#studio-controls'),
     bar = page.locator('#control-bar');
   await expect(launch).toHaveAttribute('data-position', 'above');
   await expect
@@ -52,19 +52,21 @@ test('launcher positions match main buttons and persist', async ({ page }) => {
     'above',
   ]) {
     await panel
-      .getByLabel('Developer button position', { exact: true })
+      .getByLabel('Studio Controls Position', { exact: true })
       .selectOption(value);
     await expect(launch).toHaveAttribute('data-position', value);
     if (value === 'in-bar')
       await expect(bar.locator('.dev-launch')).toHaveCount(1);
     else
-      await expect(page.locator('#app-surface > .dev-launch')).toHaveCount(1);
+      await expect(page.locator('#app-surface > #studio-controls')).toHaveCount(
+        1,
+      );
   }
   await panel
-    .getByLabel('Developer button position', { exact: true })
+    .getByLabel('Studio Controls Position', { exact: true })
     .selectOption('in-bar');
   await page.reload();
-  await expect(page.locator('#control-bar > .dev-launch')).toBeVisible();
+  await expect(page.locator('#control-bar > #studio-controls')).toBeVisible();
   expect(errors).toEqual([]);
 });
 test('docks displace the complete app and close restores viewport', async ({

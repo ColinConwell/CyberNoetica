@@ -25,6 +25,7 @@ export interface ViewportCapabilities {
   pan: boolean;
   zoom: boolean;
   orbit: boolean;
+  rotate?: boolean;
 }
 
 export interface VisualizerInteractivity {

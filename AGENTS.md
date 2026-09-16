@@ -4,6 +4,10 @@
 
 **Cybernoetica** is a high-aesthetic, GPU-accelerated audio-reactive visualizer and knowledge portal. It delivers 71 registered visualizers across versioned families driven by real-time audio analysis, with a glass-morphism control interface, measured CPU/GPU performance monitoring, and formal playback state management.
 
+## UI Writing Preference
+
+Use Title Case for user-facing headings, panel names, buttons, tabs, menu items, and control labels (for example, “Developer Workbench” and “AI Studio”). Use sentence case for explanatory prose, tooltips, and log messages. Preserve this preference in future UI work and agent handoffs.
+
 ## Change documentation
 
 Record completed changes in new dated entries (`YYYY-MM-DD`) in `CHANGELOG.md`, newest first. Include the resulting behavior, validation performed and known limitations; preserve historical entries. For dense updates, add a dated Markdown report at `reports/YYYY-MM-DD-topic.md`, index it with a dated link and summary in `reports/README.md`, and link it from a concise changelog entry. Do not recreate `IMPLEMENTATION.md` or introduce a separate root-level implementation ledger. Keep secrets and raw generated evidence out of reports.

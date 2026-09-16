@@ -1,4 +1,4 @@
-import { getAppSurface } from '../ui/surface.js';
+import { getAppSurface, getStudioControls } from '../ui/surface.js';
 import { field, selectControl } from '../ui/journey-controls.js';
 import { el } from '../ui/components.js';
 
@@ -25,6 +25,8 @@ export function mountWorkbenchLayout(
   save: () => void,
 ) {
   const surface = getAppSurface();
+  const group = getStudioControls();
+  group.prepend(launch);
   const layouts = [
     ['dock', 'Overlay'],
     ['wide', 'Wide Overlay'],
@@ -67,7 +69,7 @@ export function mountWorkbenchLayout(
       save();
     },
   );
-  position.setAttribute('aria-label', 'Developer button position');
+  position.setAttribute('aria-label', 'Studio Controls Position');
   const size = el(
     'input',
     {},
@@ -86,9 +88,9 @@ export function mountWorkbenchLayout(
   function placeLauncher() {
     const place = root.dataset.launcher!;
     surface.dataset.devLauncher = place;
-    launch.dataset.position = place;
+    group.dataset.position = place;
     const bar = document.getElementById('control-bar');
-    (place === 'in-bar' && bar ? bar : surface).append(launch);
+    (place === 'in-bar' && bar ? bar : surface).append(group);
     window.dispatchEvent(new Event('cybernoetica:layout'));
   }
   function apply() {
@@ -137,7 +139,9 @@ export function mountWorkbenchLayout(
       window.removeEventListener('resize', apply);
       for (const edge of ['left', 'right', 'top', 'bottom'] as const)
         surface.style[edge] = '0px';
-      delete surface.dataset.devLauncher;
+      group.dataset.position = 'above';
+      surface.dataset.devLauncher = 'above';
+      surface.append(group);
       delete surface.dataset.displaced;
       window.dispatchEvent(new Event('cybernoetica:layout'));
     },

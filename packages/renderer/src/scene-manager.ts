@@ -1,3 +1,5 @@
+import { dragMode, wheelZoom } from './viewport-navigation.js';
+import type { NavigationMode } from './viewport-navigation.js';
 import * as THREE from 'three';
 import { FrameStatistics } from './frame-statistics.js';
 import { GpuTimer } from './gpu-timer.js';
@@ -88,7 +90,11 @@ const CURSOR_SCULPT_ACTIVE = `url("data:image/svg+xml,${encodeURIComponent(
     `</svg>`,
 )}") 12 12, crosshair`;
 
-export type ViewportDragHandler = (dx: number, dy: number) => void;
+export type ViewportDragHandler = (
+  dx: number,
+  dy: number,
+  mode?: NavigationMode,
+) => void;
 export type ViewportZoomHandler = (delta: number) => void;
 export type ViewportResetHandler = () => void;
 export type ContextRestoredHandler = () => void;
@@ -266,105 +272,116 @@ export class SceneManager {
       canvas.style.cursor = getIdleCursor();
     };
 
-    // ── Pointer events (unified mouse + touch) ────────────────────
-    const onPointerDown = (e: PointerEvent) => {
-      if (e.button !== 0 && e.pointerType === 'mouse') return;
-      if (
-        !this.viewportCaps.pan &&
-        !this.viewportCaps.orbit &&
-        !this.viewportCaps.zoom
-      )
+    // Track each contact separately so pinching never also triggers a one-finger drag.
+    let activePointer: number | null = null;
+    let mode: NavigationMode | null = null;
+    const touches = new Map<number, { x: number; y: number }>();
+    const pinch = () => {
+      const [a, b] = [...touches.values()];
+      return a && b
+        ? {
+            x: (a.x + b.x) / 2,
+            y: (a.y + b.y) / 2,
+            distance: Math.hypot(a.x - b.x, a.y - b.y),
+          }
+        : null;
+    };
+    canvas.style.touchAction = 'none';
+    canvas.tabIndex = 0;
+    canvas.setAttribute('aria-label', 'Visualizer Viewport');
+    canvas.addEventListener('pointerdown', (e) => {
+      canvas.focus({ preventScroll: true });
+      if (e.pointerType === 'touch')
+        touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touches.size > 1) {
+        activePointer = null;
+        this.dragging = true;
+        canvas.setPointerCapture(e.pointerId);
         return;
+      }
+      mode = dragMode(e, this.viewportCaps, this.cursorMode === 'sculpt');
+      if (!mode || activePointer !== null) return;
+      activePointer = e.pointerId;
       this.dragging = true;
       this.lastPointerX = e.clientX;
       this.lastPointerY = e.clientY;
       canvas.style.cursor = getActiveCursor();
       canvas.setPointerCapture(e.pointerId);
       e.preventDefault();
-    };
-
-    const onPointerMove = (e: PointerEvent) => {
-      if (!this.dragging) return;
+    });
+    canvas.addEventListener('pointermove', (e) => {
+      if (touches.has(e.pointerId)) {
+        const before = pinch();
+        touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        const after = pinch();
+        if (before && after) {
+          if (
+            this.viewportCaps.zoom &&
+            before.distance > 0 &&
+            after.distance > 0
+          )
+            this._onZoom?.(Math.log(after.distance / before.distance));
+          if (this.viewportCaps.pan)
+            this._onDrag?.(
+              (after.x - before.x) / this.width,
+              (after.y - before.y) / this.height,
+              'pan',
+            );
+          return;
+        }
+      }
+      if (activePointer !== e.pointerId || !mode) return;
       const dx = (e.clientX - this.lastPointerX) / this.width;
       const dy = (e.clientY - this.lastPointerY) / this.height;
       this.lastPointerX = e.clientX;
       this.lastPointerY = e.clientY;
-
-      if (this._onDrag && (this.viewportCaps.pan || this.viewportCaps.orbit)) {
-        this._onDrag(dx, dy);
-      }
-    };
-
-    const onPointerUp = (e: PointerEvent) => {
-      if (!this.dragging) return;
-      this.dragging = false;
+      if (mode === 'zoom') this._onZoom?.(-dy * 3);
+      else this._onDrag?.(dx, dy, mode);
+    });
+    const end = (e: PointerEvent) => {
+      touches.delete(e.pointerId);
+      if (activePointer === e.pointerId) activePointer = null;
+      this.dragging = activePointer !== null || touches.size > 1;
+      if (canvas.hasPointerCapture(e.pointerId))
+        canvas.releasePointerCapture(e.pointerId);
       updateIdleCursor();
-      canvas.releasePointerCapture(e.pointerId);
     };
-
-    canvas.addEventListener('pointerdown', onPointerDown);
-    canvas.addEventListener('pointermove', onPointerMove);
-    canvas.addEventListener('pointerup', onPointerUp);
-    canvas.addEventListener('pointercancel', onPointerUp);
-
-    // ── Double-click to reset ─────────────────────────────────────
+    canvas.addEventListener('pointerup', end);
+    canvas.addEventListener('pointercancel', end);
+    canvas.addEventListener('lostpointercapture', end);
+    canvas.addEventListener('auxclick', (e) => {
+      if (e.button === 1) e.preventDefault();
+    });
     canvas.addEventListener('dblclick', (e) => {
       e.preventDefault();
-      if (this._onReset) this._onReset();
+      this._onReset?.();
     });
-
-    // ── Scroll to zoom ────────────────────────────────────────────
     canvas.addEventListener(
       'wheel',
       (e) => {
-        if (!this.viewportCaps.zoom) return;
-        e.preventDefault();
-        const delta = e.deltaY > 0 ? -0.1 : 0.1;
-        if (this._onZoom) this._onZoom(delta);
+        const caps = this.viewportCaps;
+        // Browser trackpad pinch arrives as Ctrl+wheel; use event magnitude, never device guessing.
+        if (!e.ctrlKey && (e.shiftKey || e.altKey)) {
+          const action = e.shiftKey ? 'pan' : 'orbit';
+          if (
+            (action === 'pan' && !caps.pan) ||
+            (action === 'orbit' && !caps.orbit && !caps.rotate)
+          )
+            return;
+          e.preventDefault();
+          const scale =
+            e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? this.height : 1;
+          this._onDrag?.(
+            (e.deltaX * scale) / this.width,
+            (e.deltaY * scale) / this.height,
+            action,
+          );
+        } else if (caps.zoom && e.deltaY !== 0) {
+          e.preventDefault();
+          this._onZoom?.(wheelZoom(e.deltaY, e.deltaMode, this.height));
+        }
       },
       { passive: false },
-    );
-
-    // ── Touch pinch-to-zoom ───────────────────────────────────────
-    let lastPinchDist = 0;
-    canvas.addEventListener(
-      'touchstart',
-      (e) => {
-        if (e.touches.length === 2) {
-          const t = e.touches;
-          lastPinchDist = Math.hypot(
-            t[0].clientX - t[1].clientX,
-            t[0].clientY - t[1].clientY,
-          );
-        }
-      },
-      { passive: true },
-    );
-
-    canvas.addEventListener(
-      'touchmove',
-      (e) => {
-        if (e.touches.length === 2 && this.viewportCaps.zoom) {
-          const t = e.touches;
-          const dist = Math.hypot(
-            t[0].clientX - t[1].clientX,
-            t[0].clientY - t[1].clientY,
-          );
-          if (lastPinchDist > 0 && this._onZoom) {
-            const scale = dist / lastPinchDist;
-            this._onZoom(scale - 1.0);
-          }
-          lastPinchDist = dist;
-        }
-      },
-      { passive: true },
-    );
-    canvas.addEventListener(
-      'touchend',
-      () => {
-        lastPinchDist = 0;
-      },
-      { passive: true },
     );
 
     // ── WebGL Context Loss Handling ───────────────────────────────
@@ -456,9 +473,16 @@ export class SceneManager {
     return this.dragging;
   }
 
-  setCameraPosition(x: number, y: number, z: number): void {
-    this.perspCamera.position.set(x, y, z);
-    this.perspCamera.lookAt(0, 0, 0);
+  setCameraPosition(
+    x: number,
+    y: number,
+    z: number,
+    targetX = 0,
+    targetY = 0,
+    targetZ = 0,
+  ): void {
+    this.perspCamera.position.set(x + targetX, y + targetY, z + targetZ);
+    this.perspCamera.lookAt(targetX, targetY, targetZ);
   }
 
   onRender(callback: (time: number) => void): () => void {

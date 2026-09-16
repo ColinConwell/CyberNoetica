@@ -66,9 +66,9 @@ async function open(page: Page, mockConfig = true) {
       page.evaluate(() => window.__cybernoetica?.vizManager?.getActiveType()),
     )
     .toBe('orbital');
-  await page.getByRole('button', { name: '✦ AI studio', exact: true }).click();
+  await page.getByRole('button', { name: '✦ AI Studio', exact: true }).click();
   const panel = page.getByRole('complementary', {
-    name: 'AI studio',
+    name: 'AI Studio',
     exact: true,
   });
   await expect(

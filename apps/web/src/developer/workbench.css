@@ -365,34 +365,34 @@
 #app-surface .standard-panel :is(input, select, textarea) {
   box-sizing: border-box;
 }
-#app-surface .dev-launch {
+#app-surface #studio-controls {
   position: absolute;
   top: auto;
   left: auto;
   right: auto;
   bottom: auto;
 }
-#app-surface .dev-launch[data-position='above'] {
+#app-surface #studio-controls[data-position='above'] {
   left: 50%;
   bottom: var(--controls-top, 100px);
   translate: -50% 0;
 }
-#app-surface .dev-launch[data-position='in-bar'] {
+#app-surface #studio-controls[data-position='in-bar'] {
   position: static;
 }
-#app-surface .dev-launch[data-position='top-left'] {
+#app-surface #studio-controls[data-position='top-left'] {
   top: 16px;
   left: 16px;
 }
-#app-surface .dev-launch[data-position='top-right'] {
+#app-surface #studio-controls[data-position='top-right'] {
   top: 16px;
   right: 16px;
 }
-#app-surface .dev-launch[data-position='bottom-left'] {
+#app-surface #studio-controls[data-position='bottom-left'] {
   bottom: 16px;
   left: 16px;
 }
-#app-surface .dev-launch[data-position='bottom-right'] {
+#app-surface #studio-controls[data-position='bottom-right'] {
   bottom: 16px;
   right: 16px;
 }
@@ -806,4 +806,27 @@
 }
 #app-surface .app-title {
   width: calc(100% - 28px);
+}
+
+#studio-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: max-content;
+  max-width: calc(100% - 24px);
+  flex-wrap: wrap;
+  transition: opacity 0.3s ease;
+}
+#studio-controls:empty {
+  display: none;
+}
+#studio-controls :is(.dev-launch, .ai-launch) {
+  position: static;
+  margin: 0;
+  translate: none;
+  flex-shrink: 0;
+}
+#studio-controls[data-position='in-bar'] {
+  max-width: 100%;
 }

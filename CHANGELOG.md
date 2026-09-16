@@ -2,6 +2,12 @@
 
 Changes are recorded in dated entries, newest first. Detailed reports are indexed in [reports/README.md](reports/README.md).
 
+## 2026-09-16 — Shared Studio Controls and viewport navigation
+
+- Grouped Developer and AI Studio under shared placement and visibility controls. Development keeps controls visible by default; Always Visible/Hover & Fade preferences persist. Saved the Title Case UI preference in AGENTS.md.
+- Added middle-button and Alt-left orbit/pan/zoom, proportional mouse/trackpad zoom, touch pinch/pan, supported 2D rotation and recordable 3D camera targets, preserving sculpting and keyboard reset.
+- Validation: 594 unit tests, repository typecheck/build, 23 development browser cases and two production cases passed. Physical input devices and other engines remain untested; an extra standalone renderer typecheck encounters an existing test typing issue. See the [navigation report](reports/2026-09-16-studio-controls-navigation.md).
+
 ## 2026-09-16 — Flexible Developer Workbench layouts
 
 - Added a Developer launcher centered above the controls by default, with an in-bar variant and four corner positions. Added displacing left/right sidebars and top/bottom docks with adjustable size, resizable/reorderable grids, drag grips and keyboard alternatives.

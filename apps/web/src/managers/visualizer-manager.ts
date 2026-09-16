@@ -1,3 +1,4 @@
+import { installCameraPan } from './camera-pan.js';
 import { JourneyVisualizer } from '@cybernoetica/renderer';
 import type { JourneyDefinition } from '@cybernoetica/renderer';
 import type { MessageBus } from '@cybernoetica/core';
@@ -52,7 +53,7 @@ export class VisualizerManager {
     options: VisualizerManagerOptions = {},
   ) {
     this.resetGovernor = options.resetGovernor ?? null;
-    scene.onViewportDrag((dx, dy) => this.handleDrag(dx, dy));
+    scene.onViewportDrag((dx, dy, mode) => this.handleDrag(dx, dy, mode));
     scene.onViewportZoom((delta) => this.handleZoom(delta));
     scene.onViewportReset(() => this.handleReset());
     scene.onContextLost(() => {
@@ -122,6 +123,7 @@ export class VisualizerManager {
     try {
       this.activeType = type;
       this.activeViz = entry.create(this.bus);
+      installCameraPan(this.activeViz);
 
       const renderer = this.scene.getRenderer();
       if (renderer) {
@@ -143,7 +145,12 @@ export class VisualizerManager {
       this.scene.activeCamera = this.activeViz.metadata.usesPerspective
         ? this.scene.perspCamera
         : this.scene.camera;
-      this.scene.setViewportCapabilities(this.activeViz.metadata.viewport);
+      this.scene.setViewportCapabilities({
+        ...this.activeViz.metadata.viewport,
+        rotate: this.activeViz.metadata.viewStateFields.some(
+          (f) => f.key === 'rotation' && !f.readOnly,
+        ),
+      });
       this.scene.setCursorMode(this.activeViz.getCursorMode?.() ?? 'default');
       this.driftEnabled = this.activeViz.metadata.autoOrbit !== false;
       this.applyPerspectiveCamera();
@@ -333,15 +340,48 @@ export class VisualizerManager {
       Math.sin(angle) * Math.cos(elev) * dist,
       Math.sin(elev) * dist,
       Math.cos(angle) * Math.cos(elev) * dist,
+      vs.targetX ?? 0,
+      vs.targetY ?? 0,
+      vs.targetZ ?? 0,
     );
   }
 
-  private handleDrag(dx: number, dy: number): void {
+  private handleDrag(
+    dx: number,
+    dy: number,
+    mode?: 'pan' | 'orbit' | 'zoom',
+  ): void {
     if (!this.activeViz) return;
     const meta = this.activeViz.metadata;
     const vs = this.activeViz.getViewState();
 
-    if (meta.viewport.orbit) {
+    if (mode === 'orbit' && !meta.viewport.orbit && 'rotation' in vs) {
+      const field = meta.viewStateFields.find(
+        (f) => f.key === 'rotation' && !f.readOnly,
+      );
+      if (field) {
+        const period = field.max - field.min;
+        const value = vs.rotation + (dx + dy) * period;
+        this.activeViz.setViewState({
+          rotation:
+            ((((value - field.min) % period) + period) % period) + field.min,
+        });
+      }
+    } else if (mode === 'pan' && meta.usesPerspective && 'targetX' in vs) {
+      const a = vs.orbitAngle ?? 0,
+        e = vs.elevation ?? 0;
+      const scale =
+        2 *
+        (vs.distance ?? 12) *
+        Math.tan((this.scene.perspCamera.fov * Math.PI) / 360);
+      const x = -dx * scale * this.scene.perspCamera.aspect,
+        y = dy * scale;
+      this.activeViz.setViewState({
+        targetX: vs.targetX + x * Math.cos(a) - y * Math.sin(a) * Math.sin(e),
+        targetY: vs.targetY + y * Math.cos(e),
+        targetZ: vs.targetZ - x * Math.sin(a) - y * Math.cos(a) * Math.sin(e),
+      });
+    } else if (meta.viewport.orbit && mode !== 'pan') {
       this.activeViz.setViewState({
         orbitAngle: wrapAngle(
           (vs.orbitAngle ?? 0) + dx * 3.0,
@@ -371,6 +411,10 @@ export class VisualizerManager {
           seedReal: vs.seedReal - dx * scale * 0.5,
           seedImaginary: vs.seedImaginary + dy * scale * 0.5,
         });
+      } else if ('verticalShift' in vs) {
+        this.activeViz.setViewState({
+          verticalShift: vs.verticalShift + dy * scale,
+        });
       } else if ('panX' in vs && 'panY' in vs) {
         this.activeViz.setViewState({
           panX: vs.panX - dx * scale,
@@ -384,13 +428,15 @@ export class VisualizerManager {
     if (!this.activeViz) return;
     const vs = this.activeViz.getViewState();
 
-    if ('distance' in vs) {
-      const newDist = Math.max(4, Math.min(30, vs.distance * (1 - delta)));
-      this.activeViz.setViewState({ distance: newDist });
-    } else if ('zoom' in vs) {
-      const factor = 1 + delta;
-      this.activeViz.setViewState({ zoom: vs.zoom * factor });
-    }
+    const key = 'distance' in vs ? 'distance' : 'zoom' in vs ? 'zoom' : null;
+    if (!key || !Number.isFinite(delta)) return;
+    const field = this.activeViz.metadata.viewStateFields.find(
+      (f) => f.key === key,
+    );
+    const next = vs[key] * Math.exp(key === 'distance' ? -delta : delta);
+    this.activeViz.setViewState({
+      [key]: Math.max(field?.min ?? 0.001, Math.min(field?.max ?? 1e6, next)),
+    });
   }
 
   private handleReset(): void {

@@ -34,6 +34,7 @@ export interface AppState {
     quality: QualityMode;
     reducedMotion: boolean;
     reduceFlashes: boolean;
+    controlsVisibility: 'always' | 'auto';
   };
 }
 
@@ -56,6 +57,7 @@ const INITIAL_STATE: AppState = {
     quality: 'auto',
     reducedMotion: false,
     reduceFlashes: false,
+    controlsVisibility: import.meta.env.DEV ? 'always' : 'auto',
   },
 };
 
@@ -92,6 +94,7 @@ function saveToStorage(state: Readonly<AppState>): void {
         quality: state.ui.quality,
         reducedMotion: state.ui.reducedMotion,
         reduceFlashes: state.ui.reduceFlashes,
+        controlsVisibility: state.ui.controlsVisibility,
       },
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(persistable));
@@ -108,6 +111,7 @@ function loadFromStorage(): Partial<AppState> | null {
     const ui = value?.ui;
     if (!ui || typeof ui !== 'object') return null;
     const safe: Partial<AppState['ui']> = {};
+    if (ui.controlsVisibility === 'always' || ui.controlsVisibility === 'auto') safe.controlsVisibility = ui.controlsVisibility;
     for (const key of [
       'autoPlay',
       'shuffle',

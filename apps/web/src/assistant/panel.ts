@@ -1,4 +1,5 @@
 import './studio.css';
+import { getStudioControls } from '../ui/surface.js';
 import { el, glassButton } from '../ui/components.js';
 import { field, selectControl } from '../ui/journey-controls.js';
 import { Z_INDEX } from '../ui/constants.js';
@@ -52,12 +53,12 @@ export function mountAssistant(): () => void {
   const root = el(
     'aside',
     {},
-    { 'aria-label': 'AI studio', 'data-debug-scope': 'ai-studio' },
+    { 'aria-label': 'AI Studio', 'data-debug-scope': 'ai-studio' },
   );
   root.className = 'dev-workbench ai-studio';
   root.style.zIndex = String(Z_INDEX.agentPanel);
   root.hidden = true;
-  const launch = button('✦ AI studio', () => {
+  const launch = button('✦ AI Studio', () => {
     root.hidden = false;
     enable.focus();
   });
@@ -68,7 +69,7 @@ export function mountAssistant(): () => void {
   const title = el('div', {});
   title.className = 'dev-title';
   const h = el('h2', {});
-  h.textContent = 'AI studio';
+  h.textContent = 'AI Studio';
   title.append(
     h,
     button('Close', () => {
@@ -98,7 +99,8 @@ export function mountAssistant(): () => void {
   status.setAttribute('role', 'status');
   body.append(off, content);
   root.append(header, body, status);
-  document.body.append(launch, root);
+  getStudioControls().append(launch);
+  document.body.append(root);
   let config: Config | undefined,
     history: AgentMessage[] = [],
     controller: AbortController | null = null,

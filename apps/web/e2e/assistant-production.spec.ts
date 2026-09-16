@@ -16,15 +16,16 @@ test('production assistant starts off, has no server keys, and requires BYOK', a
   await expect(page).toHaveTitle(/Cybern(?:oe|œ|ɶ)tica/i);
   await expect(page.locator('vite-error-overlay')).toHaveCount(0);
   await expect(
-    page.getByRole('button', { name: '✦ AI studio', exact: true }),
+    page.getByRole('button', { name: '✦ AI Studio', exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole('button', { name: '◈ Developer', exact: true }),
   ).toHaveCount(0);
   expect(configRequests).toBe(0);
-  await page.getByRole('button', { name: '✦ AI studio', exact: true }).click();
+  expect(await page.evaluate(() => window.__cybernoetica!.store.getState().ui.controlsVisibility)).toBe('auto');
+  await page.getByRole('button', { name: '✦ AI Studio', exact: true }).click();
   const panel = page.getByRole('complementary', {
-    name: 'AI studio',
+    name: 'AI Studio',
     exact: true,
   });
   await expect(
