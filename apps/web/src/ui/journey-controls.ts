@@ -1,5 +1,6 @@
 import {
   createJourney,
+  loadVisualizer,
   createStop,
   createLayer,
   parseJourney,
@@ -197,6 +198,96 @@ export function renderJourneyControls(
       ),
     ),
   );
+  const transition = disclosure('Transition motion');
+  transition.append(
+    field(
+      'Point matching',
+      bound(
+        selectControl(
+          [
+            ['auto', 'Refined proximity'],
+            ['projection', 'Projected proximity'],
+            ['polar', 'Angular order'],
+            ['identity', 'Sample order'],
+          ],
+          controller.definition.transport,
+          (v) =>
+            controller.update({
+              ...controller.definition,
+              transport: v as typeof controller.definition.transport,
+            }),
+        ),
+        () => controller.definition.transport,
+      ),
+    ),
+  );
+  for (const [key, label, options] of [
+    [
+      'path',
+      'Flight path',
+      [
+        ['direct', 'Direct'],
+        ['arc', 'Arcs'],
+        ['vortex', 'Vortex'],
+      ],
+    ],
+    [
+      'rendering',
+      'Transition marks',
+      [
+        ['particles', 'Particles'],
+        ['streaks', 'Streaks'],
+        ['traces', 'Particles + traces'],
+      ],
+    ],
+  ] as const)
+    transition.append(
+      field(
+        label,
+        bound(
+          selectControl(
+            options.map(([value, title]) => [value, title]),
+            controller.definition.transitionLook[key],
+            (v) =>
+              controller.update({
+                ...controller.definition,
+                transitionLook: {
+                  ...controller.definition.transitionLook,
+                  [key]: v,
+                },
+              }),
+          ),
+          () => controller.definition.transitionLook[key],
+        ),
+      ),
+    );
+  for (const [key, label, min, max, step] of [
+    ['curvature', 'Path bend', 0, 1.5, 0.05],
+    ['traceLength', 'Trace length', 0.01, 0.4, 0.01],
+  ] as const)
+    transition.append(
+      field(
+        label,
+        bound(
+          numberControl(
+            controller.definition.transitionLook[key],
+            min,
+            max,
+            step,
+            (v) =>
+              controller.update({
+                ...controller.definition,
+                transitionLook: {
+                  ...controller.definition.transitionLook,
+                  [key]: v,
+                },
+              }),
+          ),
+          () => String(controller.definition.transitionLook[key]),
+        ),
+      ),
+    );
+  content.append(transition);
   const availability = el('p', { fontSize: '11px', color: TEXT_SECONDARY });
   availability.textContent =
     'Ten models support live geometry transitions. Other catalog entries are marked Individual only until their adapters are available.';
@@ -226,6 +317,7 @@ export function renderJourneyControls(
           (l.weight = controller.definition.stops[index].layers[i].weight),
       );
     controller.update(definition);
+    if (partial.type !== undefined) renderRoute();
   }
   function renderRoute(): void {
     const open = [...route.querySelectorAll('details')].map((d) => d.open),
@@ -356,6 +448,40 @@ export function renderJourneyControls(
               ),
             ),
           );
+        const audioControls = disclosure('Audio response');
+        details.append(audioControls);
+        void loadVisualizer(layer.type)
+          .then((entry) => {
+            if (!audioControls.isConnected || !entry) return;
+            for (const param of entry.metadata.params.filter(
+              (p) => p.category === 'audio-mapping',
+            )) {
+              audioControls.append(
+                field(
+                  param.label,
+                  numberControl(
+                    layer.params[param.key] ?? param.initial,
+                    param.min,
+                    param.max,
+                    param.step,
+                    (v) =>
+                      editLayer(index, li, {
+                        params: {
+                          ...controller.definition.stops[index].layers[li]
+                            .params,
+                          [param.key]: v,
+                        },
+                      }),
+                  ),
+                ),
+              );
+            }
+          })
+          .catch(() => {
+            audioControls.append(
+              document.createTextNode('Audio controls unavailable.'),
+            );
+          });
         const order = glassButton('Move contributor up');
         order.disabled = li === 0;
         order.onclick = () => {
@@ -412,6 +538,8 @@ export function renderJourneyControls(
     controller.update({
       ...createJourney(controller.definition.seed),
       style: controller.definition.style,
+      transport: controller.definition.transport,
+      transitionLook: controller.definition.transitionLook,
     });
     renderRoute();
   };
@@ -515,7 +643,7 @@ export function renderJourneyControls(
         ),
       );
       for (const [key, label, min, max, step] of [
-        ['amount', 'Amount', -1, 1, 0.01],
+        ['amount', 'Amount', -3, 3, 0.01],
         ['smoothing', 'Smoothing (s)', 0, 2, 0.01],
         ['min', 'Input minimum', -10, 10, 0.1],
         ['max', 'Input maximum', -10, 10, 0.1],

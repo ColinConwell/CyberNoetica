@@ -1,4 +1,5 @@
 import { validateSynthesis } from './validation-synthesis.js';
+import { createJourneyValidationView } from './validation-journey-view.js';
 import * as THREE from 'three';
 import { MessageBus } from '@cybernoetica/core';
 import type { AudioFeatures } from '@cybernoetica/core';
@@ -50,6 +51,7 @@ Object.assign(renderer.domElement.style, {
   inset: 'auto',
 });
 const status = document.querySelector('#status')!;
+const view = createJourneyValidationView();
 const bus = new MessageBus();
 const pixels = new Uint8Array(640 * 360 * 4);
 let shaderError = '';
@@ -72,7 +74,24 @@ export function journeyFixture(kind: string, frame: number): AudioFeatures {
     degraded: false,
   };
 }
-async function run(
+let activeRun: Promise<JourneyQAResult[]> | null = null;
+function run(
+  options: Parameters<typeof runMatrix>[0] = {},
+): Promise<JourneyQAResult[]> {
+  // A second caller joins the existing run instead of sharing its renderer concurrently.
+  if (activeRun) return activeRun;
+  activeRun = runMatrix(options)
+    .catch((error: unknown) => {
+      view.fail(error);
+      throw error;
+    })
+    .finally(() => {
+      activeRun = null;
+      view.release();
+    });
+  return activeRun;
+}
+async function runMatrix(
   options: {
     types?: string[];
     frames?: number;
@@ -82,19 +101,24 @@ async function run(
 ): Promise<JourneyQAResult[]> {
   const results: JourneyQAResult[] = [],
     types = options.types ?? [...JOURNEY_TYPES],
-    frames = options.frames ?? 40;
+    frames = options.frames ?? 40,
+    styles = options.styles ?? ['character', 'unified'],
+    fixtures = options.fixtures ?? ['silence', 'tones', 'transients'];
   window.__journeyQA!.done = false;
   window.__journeyQA!.results = results;
+  renderer.setSize(640, 360);
+  const pairs = types.reduce(
+    (count, source) =>
+      count + types.filter((target) => target !== source).length,
+    0,
+  );
+  view.start(pairs, styles.length, fixtures.length);
   for (const source of types)
     for (const target of types) {
       if (source === target) continue;
-      for (const style of options.styles ?? ['character', 'unified'])
-        for (const fixture of options.fixtures ?? [
-          'silence',
-          'tones',
-          'transients',
-        ]) {
-          status.textContent = `${results.length + 1}: ${source} → ${target}, ${style}, ${fixture}`;
+      for (const style of styles)
+        for (const fixture of fixtures) {
+          view.current(source, target, style, fixture);
           const definition = createJourney(12);
           definition.stops = [createStop(source), createStop(target, 'stop-1')];
           definition.style = style;
@@ -216,9 +240,10 @@ async function run(
             remainingGeometries: renderer.info.memory.geometries,
             remainingTextures: renderer.info.memory.textures,
           });
+          view.record(results[results.length - 1]);
         }
     }
-  status.textContent = JSON.stringify(results, null, 2);
+  view.finish();
   window.__journeyQA!.done = true;
   return results;
 }
@@ -228,9 +253,13 @@ window.__journeyQA = {
   results: [],
   done: false,
 };
-document.querySelector('#run')!.addEventListener('click', () => void run());
+document.querySelector('#run')!.addEventListener('click', () => {
+  // The view reports unexpected failures and offers a rerun.
+  void run().catch(() => {});
+});
 
 async function endurance(transitions = 100): Promise<Record<string, unknown>> {
+  view.showPreview();
   const definition = createJourney(77);
   definition.stops = JOURNEY_TYPES.map((type, i) => ({
     ...createStop(type, `stop-${i}`),
@@ -281,6 +310,7 @@ async function benchmark(
   samples = 2048,
   style: 'character' | 'unified' = 'character',
 ): Promise<Record<string, unknown>> {
+  view.showPreview();
   renderer.setSize(1280, 720);
   const d = createJourney(22);
   d.style = style;

@@ -1041,7 +1041,8 @@ const reviewed: Record<string, Partial<VisualizerDocumentation>> = {
   },
   lissajous: {
     summary:
-      'Sampled rational Lissajous curves, with confident pitch-to-ratio and dominant-bin stereo-phase controls.',
+      'An expressive harmonic weave: independent phase echoes, traveling trace heads, treble ripples and onset twists. Shape expression 0, Echo curves 1 and Trace travel 0 recover the unwarped harmonic view.',
+    math: 'Each echo starts with x=A sin(pt+phase), y=B sin(qt+phaseOffset), with integer p,q. The expressive layer adds bounded periodic phase modulation and display rotations; it is an artistic extension of Lissajous geometry. Every echo remains closed over 2π.',
     audioInputsUsed: [
       'pitch',
       'stereo',
@@ -1231,6 +1232,7 @@ const simulations = new Set([
   'caustics-beta',
 ]);
 const artistic = new Set([
+  'lissajous',
   'openastra',
   'apollonian',
   'clifford',

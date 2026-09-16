@@ -104,7 +104,7 @@ describe('Journey contracts', () => {
       max: 1,
       invert: false,
     };
-    expect(engine.evaluate([route], 0, 0.1).spread).toBe(0.5);
+    expect(engine.evaluate([route], 0, 0.1).spread).toBe(1);
     unregister();
     expect(engine.evaluate([route], 0, 0.1).spread).toBe(0);
   });

@@ -1,3 +1,5 @@
+import { createAgentRouter } from './server/agent-router.js';
+import { createDeveloperRouter } from './server/developer.js';
 import { defineConfig } from 'vite';
 import { createAudioRouter } from './server/audio-files.js';
 import express from 'express';
@@ -32,6 +34,21 @@ export default defineConfig({
     exclude: ['@cybernoetica/audio'],
   },
   plugins: [
+    {
+      name: 'developer-workbench',
+      configureServer(server) {
+        server.middlewares.use(
+          '/api/assistant',
+          express().use(
+            createAgentRouter({ developmentRoot: resolve(__dirname, '../..') }),
+          ),
+        );
+        server.middlewares.use(
+          '/__dev',
+          express().use(createDeveloperRouter(resolve(__dirname, '../..'))),
+        );
+      },
+    },
     VitePWA({
       registerType: 'autoUpdate',
       workbox: {
@@ -100,6 +117,10 @@ export default defineConfig({
         );
       },
       configurePreviewServer(server) {
+        server.middlewares.use(
+          '/api/assistant',
+          express().use(createAgentRouter()),
+        );
         server.middlewares.use(
           '/sample-music',
           express().use(

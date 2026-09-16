@@ -71,7 +71,7 @@ export class IcosahedralVisualizer extends ModelVisualizer {
       this.detail = detail;
     }
     this.mesh.scale.setScalar(
-      1 + this.audio.bass * this.params.bassResponse * 0.08,
+      1 + this.audio.bass * this.params.bassResponse * 0.35,
     );
     this.mesh.rotation.z = this.phase * 0.2;
     this.material.uniforms.hue.value =

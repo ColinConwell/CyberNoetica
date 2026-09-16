@@ -21,6 +21,10 @@ export const Z_INDEX = {
   startScreen: 200,
   logFloat: 200,
   errorToast: 300,
+  developerLauncher: 210,
+  developerPanel: 220,
+  developerHighlight: 225,
+  agentPanel: 230,
 } as const;
 
 // ---------------------------------------------------------------------------

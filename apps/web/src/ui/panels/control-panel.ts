@@ -3,6 +3,7 @@ import {
   sectionLabel,
   sectionDivider,
   toggleSwitch,
+  glassButton,
 } from '../components.js';
 import {
   ACCENT,
@@ -34,6 +35,9 @@ export function renderControlPanel(
 ): void {
   panel.innerHTML = '';
   const store = window.__cybernoetica?.store;
+  const agentButton = glassButton('Open AI studio');
+  agentButton.onclick = () => window.dispatchEvent(new Event('cybernoetica:assistant'));
+  panel.append(agentButton, sectionDivider());
   panel.appendChild(sectionLabel('Motion and flashes'));
   for (const [key, label] of [
     ['reducedMotion', 'Reduce motion'],

@@ -61,6 +61,13 @@ export function createJourney(
     version: 1,
     seed,
     style: 'character',
+    transport: 'auto',
+    transitionLook: {
+      path: 'arc',
+      rendering: 'traces',
+      curvature: 0.35,
+      traceLength: 0.12,
+    },
     loop: true,
     timing: 'seconds',
     bpm: 96,
@@ -72,8 +79,8 @@ export function createJourney(
         id: 'bass-spread',
         source: 'audio.bass',
         target: 'spread',
-        amount: 0.08,
-        smoothing: 0.15,
+        amount: 0.35,
+        smoothing: 0.06,
         min: 0,
         max: 1,
         invert: false,
@@ -82,8 +89,8 @@ export function createJourney(
         id: 'mid-swirl',
         source: 'audio.mid',
         target: 'swirl',
-        amount: 0.06,
-        smoothing: 0.2,
+        amount: 0.25,
+        smoothing: 0.08,
         min: 0,
         max: 1,
         invert: false,
@@ -179,7 +186,7 @@ export function parseJourney(value: unknown): JourneyDefinition {
             id: `guidance-${i}`,
             source: g.source,
             target: g.target as GuidanceMapping['target'],
-            amount: finite(g.amount, 0, -1, 1),
+            amount: finite(g.amount, 0, -3, 3),
             smoothing: finite(g.smoothing, 0.1, 0, 2),
             min: finite(g.min, 0, -10, 10),
             max: finite(g.max, 1, -10, 10),
@@ -187,8 +194,27 @@ export function parseJourney(value: unknown): JourneyDefinition {
           };
         })
     : defaults.guidance;
+  const look =
+    raw.transitionLook && typeof raw.transitionLook === 'object'
+      ? (raw.transitionLook as Record<string, unknown>)
+      : {};
   return {
     version: 1,
+    transport: ['projection', 'polar', 'identity'].includes(
+      String(raw.transport),
+    )
+      ? (raw.transport as JourneyDefinition['transport'])
+      : 'auto',
+    transitionLook: {
+      path: ['arc', 'vortex'].includes(String(look.path))
+        ? (look.path as JourneyDefinition['transitionLook']['path'])
+        : 'direct',
+      rendering: ['streaks', 'traces'].includes(String(look.rendering))
+        ? (look.rendering as JourneyDefinition['transitionLook']['rendering'])
+        : 'particles',
+      curvature: finite(look.curvature, 0.35, 0, 1.5),
+      traceLength: finite(look.traceLength, 0.12, 0.01, 0.4),
+    },
     seed: Math.trunc(finite(raw.seed, defaults.seed, 0, 0xffffffff)),
     stops,
     style: raw.style === 'unified' ? 'unified' : 'character',

@@ -17,6 +17,24 @@ const harmonographMetadata: VisualizerMetadata = {
   description: 'Damped pendulum spirograph patterns',
   usesPerspective: false,
   params: [
+    {
+      key: 'midToSwing',
+      label: 'Mid → Pendulum swing',
+      min: 0,
+      max: 4,
+      step: 0.1,
+      initial: 1.2,
+      category: 'audio-mapping',
+    },
+    {
+      key: 'highToDrift',
+      label: 'Treble → Pendulum drift',
+      min: 0,
+      max: 3,
+      step: 0.1,
+      initial: 1,
+      category: 'audio-mapping',
+    },
     // Appearance
     {
       key: 'freqRatio',
@@ -129,7 +147,10 @@ const harmonographMetadata: VisualizerMetadata = {
 export class HarmonographVisualizer extends CurveVisualizer {
   constructor(bus: MessageBus) {
     super(harmonographMetadata, bus, {
-      speed: (c) => 0.02,
+      speed: (c) => 0.2 + c.audio.mid * c.params.midToSwing * 2,
+      phaseRates: (c) => ({
+        pendulum: 0.13 + c.audio.high * c.params.highToDrift * 1.5,
+      }),
       width: (c) => 1.25 + c.params.lineGlow,
       layers: (c) => {
         const p = c.params,
@@ -144,7 +165,8 @@ export class HarmonographVisualizer extends CurveVisualizer {
         const damping = p.damping / (1 + a.mid * p.midToDamping);
         // Finite-age trace; onset re-excitation changes the envelope, never absolute-time underflow.
         const age = Math.min(c.age, 15),
-          phase = a.spectralCentroid * p.spectralToPhase + Math.PI / 4;
+          phase =
+            a.spectralCentroid * p.spectralToPhase + Math.PI / 4 + c.phase;
         return [
           {
             period: 30,
@@ -155,7 +177,7 @@ export class HarmonographVisualizer extends CurveVisualizer {
               const decay = Math.exp(-damping * (t + age) * 5),
                 angle = p.rotaryFreq * t * 0.1;
               const x = 0.31 * Math.sin(2 * t + phase) * decay,
-                y = 0.31 * Math.sin(2 * ratio * t) * decay;
+                y = 0.31 * Math.sin(2 * ratio * t + c.phases.pendulum) * decay;
               return [
                 x * Math.cos(angle) - y * Math.sin(angle),
                 x * Math.sin(angle) + y * Math.cos(angle),

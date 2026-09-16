@@ -1,3 +1,7 @@
+import { applyMenuPreferences } from './ui/menu-layout.js';
+import './developer/workbench.css';
+import { restoreCreations } from './assistant/recipe.js';
+import { mountAssistant } from './assistant/panel.js';
 import { JourneyController } from './managers/journey-controller.js';
 import { MessageBus } from '@cybernoetica/core';
 import { SceneManager, getVisualizerTypes } from '@cybernoetica/renderer';
@@ -132,6 +136,7 @@ export async function createApp(container: HTMLElement): Promise<void> {
           if (
             tag === 'INPUT' ||
             tag === 'TEXTAREA' ||
+            tag === 'SELECT' ||
             e.target.isContentEditable
           )
             return;
@@ -274,6 +279,15 @@ export async function createApp(container: HTMLElement): Promise<void> {
   cleanups.push(() => journey.dispose());
   ui.setJourneyController(journey);
   window.__cybernoetica!.journey = journey;
+  applyMenuPreferences();
+  restoreCreations();
+  cleanups.push(mountAssistant());
+  if (import.meta.env.DEV) {
+    const { mountDeveloperWorkbench } = await import(
+      './developer/workbench.js'
+    );
+    cleanups.push(mountDeveloperWorkbench());
+  }
   vizManager.onSwitch((type, state, error) => {
     if (state !== 'error') return;
     ui.showControls();
@@ -435,14 +449,20 @@ export async function createApp(container: HTMLElement): Promise<void> {
       });
   });
 
-  ui.onVisualizerChange((type) => {
-    void vizManager.switchTo(type).then((viz) => {
-      if (!viz || disposed) return;
-      updateAppearanceControls();
-      ui.setActiveVisualizer(type);
-      ui.updateKeyboardShortcuts();
-      store.setState({ visualizer: { type, userParams: {} } });
+  const selectVisualizer = async (type: string): Promise<boolean> => {
+    const viz = await vizManager.switchTo(type);
+    if (!viz || disposed) return false;
+    updateAppearanceControls();
+    ui.setActiveVisualizer(type);
+    ui.updateKeyboardShortcuts();
+    store.setState({
+      visualizer: { type, mode: 'individual', userParams: {} },
     });
+    return true;
+  };
+  window.__cybernoetica!.selectVisualizer = selectVisualizer;
+  ui.onVisualizerChange((type) => {
+    void selectVisualizer(type);
   });
 
   ui.onRandomVisualizer(() => {

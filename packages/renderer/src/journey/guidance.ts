@@ -55,8 +55,8 @@ export class GuidanceEngine {
       result[route.target] += value * route.amount;
     }
     return {
-      swirl: Math.max(-0.5, Math.min(0.5, result.swirl)),
-      spread: Math.max(-0.5, Math.min(0.5, result.spread)),
+      swirl: Math.max(-1.5, Math.min(1.5, result.swirl)),
+      spread: Math.max(-1.5, Math.min(1.5, result.spread)),
       light: Math.max(-0.8, Math.min(2, result.light)),
     };
   }

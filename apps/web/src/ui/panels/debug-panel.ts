@@ -26,6 +26,16 @@ import {
 import { getGlobals, getDebugInfo } from '../../globals.js';
 
 export function renderDebugPanel(container: HTMLElement): () => void {
+  if (import.meta.env.DEV) {
+    const button = glassButton("Open developer workbench");
+    button.onclick = () => window.dispatchEvent(new Event("cybernoetica:developer"));
+    container.append(button);
+    return () => button.remove();
+  }
+  return renderRuntimeDiagnostics(container);
+}
+
+export function renderRuntimeDiagnostics(container: HTMLElement): () => void {
   const globals = getGlobals();
   if (!globals) {
     const msg = el('div', { color: TEXT_DIM, fontSize: '11px' });
@@ -148,7 +158,7 @@ export function renderDebugPanel(container: HTMLElement): () => void {
   function updateStateDisplay(state: any) {
     stateContainer.innerHTML = '';
     if (stateViewMode === 'json') {
-      stateBox.innerHTML = syntaxHighlightJSON(JSON.stringify(state, null, 2));
+      stateBox.innerHTML = syntaxHighlightJSON(JSON.stringify(state, null, 2).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"));
       stateContainer.appendChild(stateBox);
     } else {
       const tree = buildPropertyTree(state, 0, true);

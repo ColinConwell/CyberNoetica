@@ -46,12 +46,21 @@ export interface TransitionAdapter {
   read(camera: Camera, deltaSeconds?: number): SampleFrame;
   dispose(): void;
 }
+export type TransportAlgorithm = 'auto' | 'projection' | 'polar' | 'identity';
+export type TransitionPath = 'direct' | 'arc' | 'vortex';
+export type TransitionRendering = 'particles' | 'streaks' | 'traces';
+export interface TransitionLook {
+  path: TransitionPath;
+  rendering: TransitionRendering;
+  curvature: number;
+  traceLength: number;
+}
 export interface TransportMap {
   indices: Uint32Array;
   cost: number;
   baselineCost: number;
   residual: number;
-  backend: 'projection' | 'sparse-sinkhorn';
+  backend: 'projection' | 'sparse-sinkhorn' | 'polar' | 'identity';
   milliseconds: number;
 }
 export interface TransportSolver {
@@ -60,6 +69,7 @@ export interface TransportSolver {
     target: Float32Array,
     seed: number,
     signal?: AbortSignal,
+    algorithm?: TransportAlgorithm,
   ): Promise<TransportMap>;
   dispose(): void;
 }
@@ -106,6 +116,8 @@ export interface JourneyDefinition {
   version: 1;
   seed: number;
   style: 'character' | 'unified';
+  transport: TransportAlgorithm;
+  transitionLook: TransitionLook;
   loop: boolean;
   timing: 'seconds' | 'onset' | 'beats' | 'cues';
   bpm: number;

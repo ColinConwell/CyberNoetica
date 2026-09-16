@@ -178,9 +178,17 @@ export class JourneyVisualizer implements Visualizer {
     this.reduceMotion = reduceMotion;
   }
   setDefinition(definition: JourneyDefinition): void {
-    this.definition = parseJourney(
-      retainJourneyWeights(definition, this.definition),
-    );
+    const previous = this.definition;
+    this.definition = parseJourney(retainJourneyWeights(definition, previous));
+    // Presentation and guidance edits can update the live uniforms without solving another map.
+    if (
+      previous.seed === this.definition.seed &&
+      previous.transport === this.definition.transport &&
+      JSON.stringify(previous.stops) === JSON.stringify(this.definition.stops)
+    ) {
+      this.notify();
+      return;
+    }
     const stop = this.definition.stops[this.state.index];
     if (!stop || !this.current?.setStop(stop)) {
       void this.prepareCurrent(
@@ -286,6 +294,7 @@ export class JourneyVisualizer implements Visualizer {
           destination.positions,
           this.definition.seed + index,
           signal,
+          this.definition.transport,
         );
       }
       if (this.disposed || signal.aborted || gen !== this.generation) {
@@ -377,6 +386,7 @@ export class JourneyVisualizer implements Visualizer {
         prepared.positions,
         this.definition.seed + this.state.index,
         signal,
+        this.definition.transport,
       );
       if (this.disposed || gen !== this.generation || signal.aborted) {
         prepared.dispose();
@@ -387,7 +397,8 @@ export class JourneyVisualizer implements Visualizer {
       this.state.preparationMs = performance.now() - started;
       this.state.solver = map.backend;
       this.state.solverJobs++;
-      if (map.backend === 'projection') this.state.fallbacks++;
+      if (this.definition.transport === 'auto' && map.backend === 'projection')
+        this.state.fallbacks++;
     } catch (error) {
       prepared?.dispose();
       if (!signal.aborted && !this.disposed && gen === this.generation) {
@@ -516,6 +527,8 @@ export class JourneyVisualizer implements Visualizer {
         this.definition.style,
         dt,
         this.view,
+        this.definition.transitionLook,
+        this.reduceMotion,
       );
     }
   }

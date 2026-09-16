@@ -1,5 +1,5 @@
 import { seededRandom } from '../timing.js';
-import type { TransportMap } from './types.js';
+import type { TransportAlgorithm, TransportMap } from './types.js';
 
 const distance = (
   a: Float32Array,
@@ -28,6 +28,60 @@ export function isPermutation(map: Uint32Array, n = map.length): boolean {
   }
   return true;
 }
+function validateClouds(a: Float32Array, b: Float32Array): void {
+  const n = a.length / 3;
+  if (
+    !Number.isInteger(n) ||
+    n < 1 ||
+    n > 8192 ||
+    a.length !== b.length ||
+    !a.every(Number.isFinite) ||
+    !b.every(Number.isFinite)
+  )
+    throw new Error('Transport needs equal finite clouds of 1–8192 samples');
+}
+
+/** Angular rank preserves circular ordering; identity preserves the adapter sample order. */
+export function initialTransport(
+  a: Float32Array,
+  b: Float32Array,
+  seed = 1,
+  algorithm: TransportAlgorithm = 'auto',
+): TransportMap {
+  if (algorithm === 'auto' || algorithm === 'projection')
+    return projectionTransport(a, b, seed);
+  validateClouds(a, b);
+  const started = performance.now(),
+    n = a.length / 3;
+  const indices = Uint32Array.from({ length: n }, (_, i) => i);
+  if (algorithm === 'polar') {
+    const order = (p: Float32Array) => {
+      let x = 0,
+        y = 0;
+      for (let i = 0; i < n; i++) {
+        x += p[i * 3] / n;
+        y += p[i * 3 + 1] / n;
+      }
+      const angles = Float64Array.from({ length: n }, (_, i) =>
+        Math.atan2(p[i * 3 + 1] - y, p[i * 3] - x),
+      );
+      return indices.slice().sort((i, j) => angles[i] - angles[j] || i - j);
+    };
+    const source = order(a),
+      target = order(b);
+    for (let i = 0; i < n; i++) indices[source[i]] = target[i];
+  }
+  const cost = assignmentCost(a, b, indices);
+  return {
+    indices,
+    cost,
+    baselineCost: cost,
+    residual: 0,
+    backend: algorithm,
+    milliseconds: performance.now() - started,
+  };
+}
+
 export function projectionTransport(
   a: Float32Array,
   b: Float32Array,
@@ -35,15 +89,7 @@ export function projectionTransport(
 ): TransportMap {
   const started = performance.now(),
     n = a.length / 3;
-  if (
-    !Number.isInteger(n) ||
-    n < 1 ||
-    a.length !== b.length ||
-    n > 8192 ||
-    !a.every(Number.isFinite) ||
-    !b.every(Number.isFinite)
-  )
-    throw new Error('Transport needs equal finite clouds of 1–8192 samples');
+  validateClouds(a, b);
   const random = seededRandom(seed),
     av = new Float64Array(n),
     bv = new Float64Array(n);

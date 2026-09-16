@@ -49,3 +49,11 @@ These checks cover this computer's in-app browser. Mobile viewport emulation doe
 ## Journey validation (2026-09-13)
 
 Journey adds the committed Playwright suite (`pnpm test:e2e`), directed rendering matrix (`pnpm test:journey`), and catalog runner (`pnpm test:catalog`). Browser suites use installed Chrome by default and accept `JOURNEY_QA_URL` / `PLAYWRIGHT_CHANNEL`. The matrix covers 90 directed pairs, two styles and three audio fixtures; endpoint comparisons hold model time fixed. Production-budget timing and 100-transition endurance are separate runner options. See the [dated Journey report](../reports/2026-09-13-journey.md) for commands, measurements and unqualified hardware targets. Normal production builds exclude both validation pages.
+
+## Audio motion and transition options (2026-09-15)
+
+`pnpm test:motion` measures sound-specific geometric movement against deterministic silent trajectories for all ten Journey-compatible models. It checks per-component centroid/spread changes, attack, recovery, sensitivity headroom, a brightness-only negative control and 30/60/120 Hz agreement. `MOTION_REPORT=1 pnpm test:motion` prints the measured ratios. These shape summaries do not identify every material particle or estimate perceptual loudness.
+
+The new Journey Playwright flow checks transport selection, contributor sensitivity, persistence and nine distinct path/rendering combinations at a fixed transition midpoint. The existing full rendering matrix now exercises the new-route arcs/traces defaults. See the [dated motion report](../reports/2026-09-15-journey-motion.md) for results and limitations.
+
+`pnpm test:motion` also includes the expressive-curve suite: normalized pairwise geometry excludes translation, rotation and uniform scaling from the Lissajous shape response. Independent mid/treble/onset fixtures must change internal geometry within 250 ms, and disabling each mapping must recover the silent trajectory. Additional checks cover cadence, closure, parameter extremes and stable live Journey sample identities. See the [expressive curves report](../reports/2026-09-15-expressive-curves.md) for thresholds and the limits of these geometric proxies.

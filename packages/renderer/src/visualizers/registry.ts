@@ -40,6 +40,30 @@ export function registerVisualizer(entry: VisualizerEntry): void {
       .replace(/\bBeats\b/g, 'Onsets')
       .replace(/\bbeat\b/g, 'onset');
   }
+  if (manifest?.transition) {
+    entry.metadata.params = entry.metadata.params.map((p) => ({
+      ...p,
+      max:
+        p.category === 'audio-mapping' &&
+        p.step < 1 &&
+        /Amplitude|Drive|Speed|Rotation|Radius|Kick|Freq|Pen|Amp|Damping|bassResponse/.test(
+          p.key,
+        )
+          ? p.max * 2
+          : p.max,
+    }));
+    entry.metadata.params.push({
+      key: 'audioSensitivity',
+      label: 'Audio sensitivity',
+      min: 0,
+      max: 8,
+      step: 0.1,
+      initial: 2.5,
+      category: 'audio-mapping',
+      description:
+        'Boost quiet band motion with a bounded response; 1 restores linear levels. Pitch, spectrum and onset detection stay calibrated.',
+    });
+  }
   const create = entry.create;
   entries.set(entry.metadata.type, {
     ...entry,
@@ -109,7 +133,7 @@ export function listVisualizers(): VisualizerMetadata[] {
     zoom: true,
     orbit: true,
   };
-  return VISUALIZER_MANIFEST.map((m) => {
+  const builtins = VISUALIZER_MANIFEST.map((m) => {
     const loaded = entries.get(m.type);
     if (loaded) return loaded.metadata;
     return {
@@ -122,11 +146,20 @@ export function listVisualizers(): VisualizerMetadata[] {
       viewStateFields: [],
     };
   });
+  return [
+    ...builtins,
+    ...Array.from(entries.values())
+      .filter((e) => e.metadata.type.startsWith('studio-'))
+      .map((e) => e.metadata),
+  ];
 }
 
 export function getVisualizerTypes(): string[] {
   // Stable order from the manifest; loaded state doesn't affect identity.
-  return listManifestTypes();
+  return [
+    ...listManifestTypes(),
+    ...Array.from(entries.keys()).filter((type) => type.startsWith('studio-')),
+  ];
 }
 
 /**

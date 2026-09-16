@@ -1,3 +1,4 @@
+import { visualLevel } from '../../audio-mapping.js';
 import { SegmentBatch } from '../../geometry/segment-batch.js';
 import { frameDelta, takeAudioFrame, PhaseClock } from '../../timing.js';
 import * as THREE from 'three';
@@ -73,6 +74,17 @@ export const FLOW_SHARED_PARAMS: VisualizerParam[] = [
     initial: 1.0,
     category: 'appearance',
     description: 'RK4 integration rate',
+  },
+  {
+    key: 'bassToScale',
+    label: 'Bass → Expansion',
+    min: 0,
+    max: 1.5,
+    step: 0.05,
+    initial: 0.3,
+    category: 'audio-mapping',
+    description:
+      'Expand the displayed attractor with bass without changing its integration coordinates',
   },
   {
     key: 'bassToDrive',
@@ -250,7 +262,11 @@ export class FlowVisualizer implements Visualizer {
   ) {
     this.config = config;
     this.metadata = config.metadata;
-    this.userParams = { ...config.defaultParams };
+    this.userParams = {
+      ...config.defaultParams,
+      audioSensitivity: 2.5,
+      bassToScale: 0.3,
+    };
     this.trailCount = config.trailCount ?? DEFAULT_TRAIL_COUNT;
     this.maxPoints = config.maxPoints ?? DEFAULT_MAX_POINTS;
     this.stepsPerFrame = config.stepsPerFrame ?? DEFAULT_STEPS;
@@ -304,10 +320,22 @@ export class FlowVisualizer implements Visualizer {
 
     if (this.latestFeatures) {
       const f = takeAudioFrame(this.latestFeatures);
-      this.smoothers.bass.update(f.bass, this.deltaSeconds);
-      this.smoothers.mid.update(f.mid, this.deltaSeconds);
-      this.smoothers.high.update(f.high, this.deltaSeconds);
-      this.smoothers.rms.update(f.rms, this.deltaSeconds);
+      this.smoothers.bass.update(
+        visualLevel(f.bass, this.userParams.audioSensitivity ?? 2.5),
+        this.deltaSeconds,
+      );
+      this.smoothers.mid.update(
+        visualLevel(f.mid, this.userParams.audioSensitivity ?? 2.5),
+        this.deltaSeconds,
+      );
+      this.smoothers.high.update(
+        visualLevel(f.high, this.userParams.audioSensitivity ?? 2.5),
+        this.deltaSeconds,
+      );
+      this.smoothers.rms.update(
+        visualLevel(f.rms, this.userParams.audioSensitivity ?? 2.5),
+        this.deltaSeconds,
+      );
       this.smoothers.spectralCentroid.update(
         f.spectralCentroid,
         this.deltaSeconds,
@@ -373,6 +401,7 @@ export class FlowVisualizer implements Visualizer {
     }
 
     if (this.batch) {
+      this.batch.object.scale.setScalar(1 + bass * this.userParams.bassToScale);
       const glow =
         (0.55 + rms * 0.9 * this.userParams.rmsToGlow) *
         this.userParams.brightness;

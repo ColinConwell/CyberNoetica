@@ -1,3 +1,4 @@
+import { visualLevel } from '../../audio-mapping.js';
 import type { ComponentFrame } from '../../journey/types.js';
 import {
   frameDelta,
@@ -425,10 +426,22 @@ export class OrbitalVisualizer implements Visualizer {
     const f = takeAudioFrame(this.latestFeatures ?? IDLE_FEATURES);
 
     // Smooth the audio parameters
-    const bass = this.smoothBass.update(f.bass, this.deltaSeconds);
-    const mid = this.smoothMid.update(f.mid, this.deltaSeconds);
-    const high = this.smoothHigh.update(f.high, this.deltaSeconds);
-    const rms = this.smoothRms.update(f.rms, this.deltaSeconds);
+    const bass = this.smoothBass.update(
+      visualLevel(f.bass, this.userParams.audioSensitivity ?? 2.5),
+      this.deltaSeconds,
+    );
+    const mid = this.smoothMid.update(
+      visualLevel(f.mid, this.userParams.audioSensitivity ?? 2.5),
+      this.deltaSeconds,
+    );
+    const high = this.smoothHigh.update(
+      visualLevel(f.high, this.userParams.audioSensitivity ?? 2.5),
+      this.deltaSeconds,
+    );
+    const rms = this.smoothRms.update(
+      visualLevel(f.rms, this.userParams.audioSensitivity ?? 2.5),
+      this.deltaSeconds,
+    );
     const centroid = this.smoothCentroid.update(
       f.spectralCentroid,
       this.deltaSeconds,
@@ -648,7 +661,7 @@ export class OrbitalVisualizer implements Visualizer {
   }
 
   setUserParam(key: string, value: number): void {
-    if (key in this.userParams) {
+    if (key in this.userParams || key === 'audioSensitivity') {
       this.userParams[key] = value;
     }
   }

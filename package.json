@@ -10,6 +10,7 @@
     "lint": "pnpm -r lint",
     "test:e2e": "playwright test",
     "test:journey": "node scripts/run-journey-qa.mjs --full",
+    "test:motion": "pnpm --filter @cybernoetica/renderer exec vitest run src/__tests__/motion-response.test.ts src/__tests__/curve-dynamics.test.ts",
     "test:catalog": "node scripts/run-catalog-qa.mjs"
   },
   "engines": {

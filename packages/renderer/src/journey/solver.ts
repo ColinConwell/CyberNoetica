@@ -1,10 +1,15 @@
-import { projectionTransport } from './transport.js';
-import type { TransportMap, TransportSolver } from './types.js';
+import { initialTransport } from './transport.js';
+import type {
+  TransportAlgorithm,
+  TransportMap,
+  TransportSolver,
+} from './types.js';
 interface Job {
   id: number;
   source: Float32Array;
   target: Float32Array;
   seed: number;
+  algorithm: TransportAlgorithm;
   resolve: (map: TransportMap) => void;
   reject: (error: Error) => void;
   cleanup: () => void;
@@ -45,6 +50,7 @@ export class WorkerTransportSolver implements TransportSolver {
     target: Float32Array,
     seed: number,
     signal?: AbortSignal,
+    algorithm: TransportAlgorithm = 'auto',
   ): Promise<TransportMap> {
     if (this.disposed || signal?.aborted) return Promise.reject(cancelled());
     return new Promise((resolve, reject) => {
@@ -53,6 +59,7 @@ export class WorkerTransportSolver implements TransportSolver {
         source: source.slice(),
         target: target.slice(),
         seed,
+        algorithm,
         resolve,
         reject,
         cleanup: () => signal?.removeEventListener('abort', abort),
@@ -91,12 +98,15 @@ export class WorkerTransportSolver implements TransportSolver {
         source: job.source,
         target: job.target,
         seed: job.seed,
+        algorithm: job.algorithm,
       });
     else
       setTimeout(() => {
         if (this.active !== job) return;
         try {
-          this.finish(projectionTransport(job.source, job.target, job.seed));
+          this.finish(
+            initialTransport(job.source, job.target, job.seed, job.algorithm),
+          );
         } catch (error) {
           this.finish(undefined, error as Error);
         }

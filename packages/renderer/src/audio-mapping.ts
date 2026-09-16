@@ -1,5 +1,18 @@
 import type { AudioFeatures } from '@cybernoetica/core';
 
+/** Visual envelope gain: zero stays silent, unity is linear, full scale stays bounded.
+ * Keep this downstream of analysis; never apply to calibrated spectra or pitch. */
+export function visualLevel(level: number, gain = 2.5): number {
+  const x = Number.isFinite(level) ? Math.max(0, Math.min(1, level)) : 0;
+  const g = Number.isFinite(gain) ? Math.max(0, Math.min(8, gain)) : 2.5;
+  return g === 0 ? 0 : (g * x) / (1 + (g - 1) * x);
+}
+export function motionLevel(key: string, level: number, gain: number): number {
+  return ['bass', 'mid', 'high', 'rms'].includes(key)
+    ? visualLevel(level, gain)
+    : level;
+}
+
 /** Interpolate linear amplitudes at a physical frequency; no dB arithmetic. */
 export function spectrumAt(
   features: AudioFeatures,

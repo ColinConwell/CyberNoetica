@@ -1,3 +1,4 @@
+import { motionLevel } from '../../audio-mapping.js';
 import type { ComponentFrame } from '../../journey/types.js';
 import * as THREE from 'three';
 import type {
@@ -167,7 +168,7 @@ export class TorusKnotVisualizer implements Visualizer {
   private smooth = Object.fromEntries(
     ['bass', 'mid', 'high', 'rms', 'spectralCentroid'].map((key) => [
       key,
-      new EMASmoothing(0.06),
+      new EMASmoothing(0.3, 0.12),
     ]),
   );
   private pulse = new EventEnvelope();
@@ -266,7 +267,11 @@ export class TorusKnotVisualizer implements Visualizer {
       a: Record<string, number> = {};
     for (const key of Object.keys(this.smooth))
       a[key] = this.smooth[key].update(
-        (f?.[key as keyof AudioFeatures] as number) ?? 0,
+        motionLevel(
+          key,
+          (f?.[key as keyof AudioFeatures] as number) ?? 0,
+          p.audioSensitivity ?? 2.5,
+        ),
         dt,
       );
     const pulse = this.pulse.update(f?.beatOnset ? 1 : 0, dt);
@@ -277,7 +282,7 @@ export class TorusKnotVisualizer implements Visualizer {
     const u = this.material.uniforms;
     u.radius.value =
       p.tubeRadius *
-      (1 + 0.3 * a.bass * p.bassToRadius + 0.08 * pulse * p.beatToPulse);
+      (1 + 0.65 * a.bass * p.bassToRadius + 0.08 * pulse * p.beatToPulse);
     u.major.value = p.torusRadius;
     u.hue.value = a.spectralCentroid * p.centroidToHue;
     u.sheen.value = p.iridescence + a.high * p.highToIridescence;

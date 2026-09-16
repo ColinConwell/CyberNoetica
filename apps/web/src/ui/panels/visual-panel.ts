@@ -1,3 +1,4 @@
+import { menuLayoutPicker } from '../menu-layout.js';
 import { renderJourneyControls } from '../journey-controls.js';
 import type { JourneyController } from '../../managers/journey-controller.js';
 import {
@@ -45,6 +46,7 @@ export function renderVisualPanel(
 ): void {
   (panel as VisualPanelElement).__viewStateCleanup?.();
   panel.innerHTML = '';
+  panel.dataset.debugScope = 'visual-menu';
   const root = panel,
     legacy = el('div', {}),
     extension = el('div', {});
@@ -70,6 +72,7 @@ export function renderVisualPanel(
     },
   );
   panel.appendChild(vizHeader);
+  panel.appendChild(menuLayoutPicker());
 
   const fateBtn = glassButton('Let Fate Decide', { accent: true });
   fateBtn.style.width = '100%';
@@ -129,11 +132,14 @@ export function renderVisualPanel(
         ['pattern', 'Patterns'],
         ['3d', '3D forms'],
         ['wave', 'Waves'],
+        ['studio', 'Studio creations'],
       ] as const;
       for (const [group, label] of groups) {
         const entries = vizOptions.filter(
           (v) =>
-            VISUALIZER_MANIFEST.find((m) => m.type === v.type)?.group ===
+            (v.type.startsWith('studio-')
+              ? 'studio'
+              : VISUALIZER_MANIFEST.find((m) => m.type === v.type)?.group) ===
               group &&
             `${v.label} ${v.description} ${v.type}`
               .toLocaleLowerCase()
@@ -161,11 +167,14 @@ export function renderVisualPanel(
           flexWrap: 'wrap',
           paddingTop: '10px',
         });
+        grid.classList.add('choice-menu');
+        grid.dataset.controlId = `visualizer-menu:${group}`;
         for (const viz of entries) {
           const button = glassButton(viz.label, {
             active: viz.type === opts.currentVizType,
           });
           button.title = viz.description;
+          button.dataset.controlId = `visualizer:${viz.type}`;
           button.setAttribute(
             'aria-pressed',
             String(viz.type === opts.currentVizType),

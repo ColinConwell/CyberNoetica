@@ -1,3 +1,4 @@
+import { motionLevel } from '../audio-mapping.js';
 import { Group } from 'three';
 import type { Scene, Mesh, Material } from 'three';
 import type {
@@ -101,7 +102,7 @@ export abstract class ModelVisualizer implements Visualizer {
   protected width = 1920;
   protected height = 1080;
   private smooth = Object.fromEntries(
-    Object.keys(this.audio).map((key) => [key, new EMASmoothing(0.04)]),
+    Object.keys(this.audio).map((key) => [key, new EMASmoothing(0.25, 0.1)]),
   );
   private pulse = new EventEnvelope();
   private unsub: Unsubscribe;
@@ -132,7 +133,11 @@ export abstract class ModelVisualizer implements Visualizer {
     const f = this.features ? takeAudioFrame(this.features) : null;
     for (const key of Object.keys(this.audio))
       this.audio[key] = this.smooth[key].update(
-        (f?.[key as keyof AudioFeatures] as number) ?? 0,
+        motionLevel(
+          key,
+          (f?.[key as keyof AudioFeatures] as number) ?? 0,
+          this.params.audioSensitivity ?? 1,
+        ),
         dt,
       );
     this.beat = this.pulse.update(f?.beatOnset ? 1 : 0, dt);

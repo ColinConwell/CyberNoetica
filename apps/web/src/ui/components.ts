@@ -1,3 +1,4 @@
+import { controlHelp } from './control-help.js';
 import {
   FONT,
   GLASS_BORDER,
@@ -384,7 +385,9 @@ export function paramSlider(opts: ParamSliderOpts): HTMLElement {
   });
   const label = el('span', {});
   label.textContent = opts.label;
-  if (opts.description) label.title = opts.description;
+  row.dataset.controlId = `param:${opts.key}`;
+  row.dataset.search = `${opts.key} ${opts.label} ${opts.description ?? ''}`;
+  if (opts.description) label.append(' ', controlHelp(opts.label, opts.description, opts.key));
   const right = el('div', {
     display: 'flex',
     alignItems: 'center',
@@ -410,6 +413,7 @@ export function paramSlider(opts: ParamSliderOpts): HTMLElement {
     minWidth: '36px',
     textAlign: 'right',
   });
+  num.dataset.valueDisplay = '';
   num.textContent = String(opts.initial);
   slider.addEventListener('input', () => {
     const val = Number((slider as HTMLInputElement).value);

@@ -1,3 +1,4 @@
+import { createAgentRouter } from './agent-router.js';
 import express from 'express';
 import compression from 'compression';
 import cookieSession from 'cookie-session';
@@ -88,6 +89,7 @@ export function createWebServer(options: ServerOptions): express.Express {
       sameSite: 'lax',
     }),
   );
+  app.use('/api/assistant', express.json({ limit: '256kb' }));
   app.use(express.json({ limit: '16kb' }));
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok' });
@@ -213,6 +215,7 @@ export function createWebServer(options: ServerOptions): express.Express {
       res.sendFile(options.authPage);
     else res.status(401).json({ error: 'Not authenticated' });
   });
+  app.use('/api/assistant', createAgentRouter());
   app.use('/sample-music', createAudioRouter(options.audioDir));
   app.use(
     express.static(options.distDir, {

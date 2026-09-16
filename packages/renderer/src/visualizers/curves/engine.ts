@@ -7,7 +7,7 @@ import type {
 } from '@cybernoetica/core';
 import { EMASmoothing, EventEnvelope } from '../../smoothing.js';
 import { frameDelta, PhaseClock, takeAudioFrame } from '../../timing.js';
-import { topologyValue } from '../../audio-mapping.js';
+import { topologyValue, motionLevel } from '../../audio-mapping.js';
 import { SegmentBatch } from '../../geometry/segment-batch.js';
 import { sampleCurve, TAU } from '../../geometry/curves.js';
 import type { Point2 } from '../../geometry/curves.js';
@@ -18,6 +18,10 @@ export interface CurveLayer {
   seeds: number;
   hue: number;
   brightness?: number;
+  /** A stable identity and uniform partition keep Journey samples attached during deformation. */
+  id?: string;
+  sampling?: 'uniform';
+  intensity?: (t: number) => number;
 }
 export interface CurveContext {
   params: Record<string, number>;
@@ -50,6 +54,7 @@ export class CurveVisualizer implements Visualizer {
   private latest: AudioFeatures | null = null;
   private unsub: Unsubscribe;
   private batch: SegmentBatch | null = null;
+  private components: Array<{ id: string; start: number; count: number }> = [];
   private width = 1920;
   private height = 1080;
   private time = 0;
@@ -60,7 +65,7 @@ export class CurveVisualizer implements Visualizer {
   private smooth = Object.fromEntries(
     ['bass', 'mid', 'high', 'rms', 'spectralCentroid'].map((key) => [
       key,
-      new EMASmoothing(0.06),
+      new EMASmoothing(0.3, 0.12),
     ]),
   );
   private pulse = new EventEnvelope();
@@ -91,7 +96,14 @@ export class CurveVisualizer implements Visualizer {
     if (event) this.age = 0;
     const audio = {} as CurveContext['audio'];
     for (const key of Object.keys(this.smooth) as (keyof typeof audio)[])
-      audio[key] = this.smooth[key].update(features?.[key] ?? 0, dt);
+      audio[key] = this.smooth[key].update(
+        motionLevel(
+          key,
+          features?.[key] ?? 0,
+          this.params.audioSensitivity ?? 1,
+        ),
+        dt,
+      );
     const context: CurveContext = {
       params: this.params,
       audio,
@@ -137,37 +149,60 @@ export class CurveVisualizer implements Visualizer {
       ((2 * Math.min(this.width, this.height)) / this.height) * this.state.zoom;
     const color = new Color();
     let count = 0;
-    for (const layer of layers) {
-      sampleCurve(
-        layer.point,
-        0,
-        layer.period,
-        layer.seeds,
-        0.4 / Math.min(this.width, this.height) / this.state.zoom,
-        capacity,
-        (a, b, t) => {
-          const offset = count * 6;
-          batch.positions.set(
-            [
-              (a[0] - this.state.centerX) * scaleX,
-              (a[1] - this.state.centerY) * scaleY,
-              -0.5,
-              (b[0] - this.state.centerX) * scaleX,
-              (b[1] - this.state.centerY) * scaleY,
-              -0.5,
-            ],
-            offset,
+    this.components = [];
+    for (const [layerIndex, layer] of layers.entries()) {
+      const start = count;
+      const emit = (a: Point2, b: Point2, t: number) => {
+        const offset = count * 6;
+        batch.positions.set(
+          [
+            (a[0] - this.state.centerX) * scaleX,
+            (a[1] - this.state.centerY) * scaleY,
+            -0.5,
+            (b[0] - this.state.centerX) * scaleX,
+            (b[1] - this.state.centerY) * scaleY,
+            -0.5,
+          ],
+          offset,
+        );
+        color
+          .setHSL((layer.hue + (t / layer.period) * 0.15) % 1, 0.7, 0.55)
+          .multiplyScalar(
+            (layer.brightness ?? 1) * (layer.intensity?.(t) ?? 1),
           );
-          color
-            .setHSL((layer.hue + (t / layer.period) * 0.15) % 1, 0.7, 0.55)
-            .multiplyScalar(layer.brightness ?? 1);
-          batch.colors.set(
-            [color.r, color.g, color.b, color.r, color.g, color.b],
-            offset,
-          );
-          count++;
-        },
-      );
+        batch.colors.set(
+          [color.r, color.g, color.b, color.r, color.g, color.b],
+          offset,
+        );
+        count++;
+      };
+      if (layer.sampling === 'uniform') {
+        const segments = Math.max(
+          8,
+          Math.min(capacity, Math.ceil(layer.seeds)),
+        );
+        let previous = layer.point(0);
+        for (let i = 1; i <= segments; i++) {
+          const t = (layer.period * i) / segments,
+            next = layer.point(t);
+          emit(previous, next, t - layer.period / segments / 2);
+          previous = next;
+        }
+      } else
+        sampleCurve(
+          layer.point,
+          0,
+          layer.period,
+          layer.seeds,
+          0.4 / Math.min(this.width, this.height) / this.state.zoom,
+          capacity,
+          emit,
+        );
+      this.components.push({
+        id: layer.id ?? `${this.metadata.type}-${layerIndex}`,
+        start,
+        count: count - start,
+      });
     }
     batch.material.linewidth = Math.max(
       0.5,
@@ -205,12 +240,22 @@ export class CurveVisualizer implements Visualizer {
     this.accumulator = 1;
   }
   getTransitionComponents() {
-    return this.batch ? [this.batch.component(this.metadata.type)] : [];
+    const batch = this.batch;
+    return batch
+      ? this.components.map(({ id, start, count }) => ({
+          ...batch.component(id),
+          count,
+          revision: count,
+          positions: batch.positions.subarray(start * 6, (start + count) * 6),
+          colors: batch.colors.subarray(start * 6, (start + count) * 6),
+        }))
+      : [];
   }
 
   dispose(): void {
     this.unsub();
     this.batch?.dispose();
     this.batch = null;
+    this.components = [];
   }
 }

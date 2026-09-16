@@ -10,7 +10,7 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 export type LogDisplayMode = 'stream' | 'floating' | 'fixed';
 export type LogStyle = 'raw' | 'clean';
 
-interface LogEntry {
+export interface LogEntry {
   level: LogLevel;
   message: string;
   timestamp: number;
@@ -54,7 +54,7 @@ function pushLog(level: LogLevel, message: string) {
   }
 }
 
-function onLog(fn: (entry: LogEntry) => void): () => void {
+export function onLog(fn: (entry: LogEntry) => void): () => void {
   logListeners.push(fn);
   return () => {
     const idx = logListeners.indexOf(fn);
@@ -403,3 +403,5 @@ export function createLogDisplay(
 export function getLogBuffer(): ReadonlyArray<LogEntry> {
   return logBuffer;
 }
+
+export function getLogEntries(): LogEntry[] { return logBuffer.map(entry => ({ ...entry })); }

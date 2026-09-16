@@ -420,7 +420,7 @@ export function createUI(): UIControls {
         trackListExpanded,
         expandedFolders,
         activeSource: activeAudioSource,
-        soundscapeParams,
+        soundscapeParams: journeyController?.source.getSoundscapeParams() ?? soundscapeParams,
         analysisGain,
         onAnalysisGainChange: (gain) => {
           analysisGain = gain;

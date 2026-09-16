@@ -11,6 +11,24 @@ const spirographMetadata: VisualizerMetadata = {
   usesPerspective: false,
   params: [
     {
+      key: 'midToRoll',
+      label: 'Mid → Rolling motion',
+      min: 0,
+      max: 4,
+      step: 0.1,
+      initial: 1.2,
+      category: 'audio-mapping',
+    },
+    {
+      key: 'highToPen',
+      label: 'Treble → Pen sweep',
+      min: 0,
+      max: 3,
+      step: 0.1,
+      initial: 1,
+      category: 'audio-mapping',
+    },
+    {
       key: 'bigRadius',
       label: 'Fixed radius R',
       min: 2,
@@ -140,8 +158,11 @@ const spirographMetadata: VisualizerMetadata = {
 export class SpirographVisualizer extends CurveVisualizer {
   constructor(bus: MessageBus) {
     super(spirographMetadata, bus, {
-      speed: (c) => c.params.rotationSpeed,
-      phaseRates: (c) => ({ morph: c.params.morphSpeed }),
+      speed: (c) =>
+        c.params.rotationSpeed + c.audio.mid * c.params.midToRoll * 0.8,
+      phaseRates: (c) => ({
+        morph: c.params.morphSpeed + c.audio.high * c.params.highToPen * 2,
+      }),
       width: (c) => c.params.lineWidth,
       layers: (c) => {
         const p = c.params,
@@ -162,10 +183,11 @@ export class SpirographVisualizer extends CurveVisualizer {
           const d =
             r *
             (0.5 +
-              0.2 * Math.sin(c.phases.morph) +
+              (0.2 + 0.25 * a.high * p.highToPen) *
+                Math.sin(c.phases.morph + i * 0.8) +
               0.25 * a.bass * p.bassToPen) *
             (1 - i * 0.08);
-          const angle = c.phase + i * 0.2,
+          const angle = c.phase * (i % 2 === 0 ? 1 : -0.7) + i * 0.2,
             scale = 0.38 / (R + r + d);
           return {
             period: roulettePeriod(R, r),

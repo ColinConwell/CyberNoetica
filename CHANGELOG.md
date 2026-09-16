@@ -2,6 +2,32 @@
 
 Changes are recorded in dated entries, newest first. Detailed reports are indexed in [reports/README.md](reports/README.md).
 
+## 2026-09-15 — Live AI studio and visualizer creation
+
+- Added opt-in AI assistance with Astra as the default, provider adapters, reviewable live edits, undo/cancellation, local source/test tools and annotated state handoffs. Added bounded procedural visualizer generation with preview, recipe save/import/export and catalog integration. Development uses authorized local keys server-side; production remains off by default and BYOK only.
+- Validation: 589 unit tests, TypeScript/build checks, 15 development browser cases, two production browser cases, one live Astra creation case and four live provider tool loops passed. Cursor model discovery passed; direct Kimi calls and Cursor task launch remain untested. See the [AI studio report](reports/2026-09-15-ai-studio.md) for provider details, research and boundaries.
+
+## 2026-09-15 — Developer workbench and handoff capture
+
+- Added a development-only workbench with metadata-driven visualizer controls, active Soundscape/Journey editors, scoped control and canvas annotations, versioned configuration/Markdown handoff exports, local source lookup/Finder reveal, searchable/foldable/reorderable sections, themes and a filtered logbook. Added Rows/Constellation menu variants, bubble layout controls and accessible schematic help.
+- Validation: 574 unit tests, TypeScript checks, production build and eight desktop/mobile browser cases passed. Recordings capture configurations rather than simulation replay; live agents, provider adapters and BYOK were completed in the subsequent AI studio entry above. See the [developer workbench report](reports/2026-09-15-developer-workbench.md) for research, workflow and limits.
+
+## 2026-09-15 — Expressive curve motion
+
+- Reworked Lissajous into a configurable harmonic weave with four default phase echoes, traveling highlights, independent mid-driven flow, treble ripples and onset twists. Added pendulum, pen and layer motion to Harmonograph, Spirograph and Rose Curve. Updated geometry reaches both Individual and Journey modes, with stable Lissajous sample identities during deformation.
+- Added shape-response tests that ignore translation, rotation and uniform scaling, verify independent mapping controls, and check cadence, closure and live Journey continuity. Validation: all 568 unit tests, TypeScript/QA build, 540 Journey browser cases and six shared-renderer catalog checks passed. Physical-device performance and perceptual calibration across the remaining catalog remain unmeasured. See the [expressive curves report](reports/2026-09-15-expressive-curves.md).
+
+## 2026-09-15 — Journey motion and audio responsiveness
+
+- Added four transition matching choices, direct/arc/vortex paths and particles/streaks/curved traces, with bounded bend/length controls and backward-compatible saved routes. Presentation edits no longer rerun correspondence preparation.
+- Added 0–8 audio sensitivity (default 2.5) to all ten Journey-compatible models in both modes, exposed contributor audio controls, expanded movement ranges and strengthened quiet-audio response, attack timing, bass deformation and Lorenz-family expansion.
+- Added geometric motion tests that compare against silent trajectories, separate brightness from movement, measure attack/release and sensitivity headroom, and check frame-rate consistency. Validation: 560 unit tests, TypeScript/build, 18 existing plus two new desktop/mobile browser cases, 540 Journey rendering cases and all 72 catalog entries passed. Physical-device performance and perceptual calibration across the remaining catalog remain unmeasured; existing build warnings remain. See the [motion report](reports/2026-09-15-journey-motion.md) for measured ratios, algorithm limits and validation details.
+
+## 2026-09-14 — Focused Journey validation interface
+
+- Replaced the bare validation page and JSON dump with a compact dark layout, responsive transition preview, live progress and pass/issue counts, expandable results with flagged checks first, and JSON export. Added clear completion/failure states and rerun protection while preserving the matrix checks and programmatic QA API.
+- Validation: all 540 matrix cases passed with no retained GPU resources; Chrome desktop/mobile checks verified keyboard and touch controls, exact JSON export, reruns, focus preservation, failure recovery, and layouts without horizontal overflow. TypeScript, production and QA builds, and both existing desktop/mobile offline-synthesis tests passed. QA assets remain excluded from the normal production build; physical devices and other browser engines were not tested. Existing bundle-size and Browserslist warnings remain.
+
 ## 2026-09-13 — Journey transitions, musical routes and Soundscape synthesis
 
 - Added Individual / Journey modes with Character and Unified presentation, live adapters for ten particle/curve/surface visualizers, bounded sparse transport, adaptive shared geometry budgets, editable seeded routes, layered stops and displacement blends. The original 72-entry catalog remains available through a clustered picker.

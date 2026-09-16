@@ -1,6 +1,7 @@
 import type { JourneyController } from './managers/journey-controller.js';
 import type { MessageBus, Store } from '@cybernoetica/core';
 import type { SceneManager, QualityTier } from '@cybernoetica/renderer';
+import type { Visualizer } from '@cybernoetica/renderer';
 import type { QualityMode } from './store.js';
 
 // ---------------------------------------------------------------------------
@@ -22,10 +23,11 @@ export interface CyberNoeticaGlobals {
     isPaused: boolean;
   };
   vizManager?: {
-    getActive(): any;
+    getActive(): Visualizer | null;
     getActiveType(): string;
     switchTo(type: string): Promise<any>;
   };
+  selectVisualizer?: (type: string) => Promise<boolean>;
   powerSaver: boolean;
   setPowerSaver: (enabled: boolean) => void;
   quality?: {

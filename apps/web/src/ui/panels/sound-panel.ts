@@ -1,3 +1,4 @@
+import { menuLayoutPicker } from '../menu-layout.js';
 import { renderSoundscapeControls } from '../soundscape-controls.js';
 import { renderTrackTimeline, disclosure } from '../journey-controls.js';
 import type { JourneyController } from '../../managers/journey-controller.js';
@@ -58,6 +59,7 @@ export function renderSoundPanel(
   opts: SoundPanelOpts,
 ): void {
   panel.innerHTML = '';
+  panel.dataset.debugScope = 'sound-menu';
 
   const trackSettings = getSetting('track_display', {
     format: 'track-number' as const,
@@ -93,6 +95,7 @@ export function renderSoundPanel(
   panel.appendChild(fateBtn);
 
   panel.appendChild(sectionLabel('Sources'));
+  panel.appendChild(menuLayoutPicker());
   const sourceRow = el('div', {
     display: 'flex',
     gap: '8px',
@@ -138,6 +141,8 @@ export function renderSoundPanel(
   );
   sampleToggle.addEventListener('click', () => opts.onToggleTrackList());
 
+  sourceRow.classList.add('choice-menu');
+  sourceRow.dataset.controlId = 'sound:sources';
   sourceRow.append(sysBtn, loadBtn, micBtn, loopBtn, noneBtn, sampleToggle);
   panel.appendChild(sourceRow);
 

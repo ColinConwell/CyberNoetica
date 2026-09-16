@@ -17,6 +17,24 @@ const roseMetadata: VisualizerMetadata = {
   description: 'Rhodonea polar rose family with harmonics',
   usesPerspective: false,
   params: [
+    {
+      key: 'midToWeave',
+      label: 'Mid → Petal weave',
+      min: 0,
+      max: 4,
+      step: 0.1,
+      initial: 1.2,
+      category: 'audio-mapping',
+    },
+    {
+      key: 'highToBreathe',
+      label: 'Treble → Petal breathing',
+      min: 0,
+      max: 3,
+      step: 0.1,
+      initial: 1,
+      category: 'audio-mapping',
+    },
     // Appearance
     {
       key: 'numerator',
@@ -161,7 +179,13 @@ const roseMetadata: VisualizerMetadata = {
 export class RoseCurveVisualizer extends CurveVisualizer {
   constructor(bus: MessageBus) {
     super(roseMetadata, bus, {
-      speed: (c) => c.params.spin + c.beat * 0.5 * c.params.beatToSpin,
+      speed: (c) =>
+        c.params.spin +
+        c.beat * 0.5 * c.params.beatToSpin +
+        c.audio.mid * c.params.midToWeave,
+      phaseRates: (c) => ({
+        petals: 0.5 + c.audio.high * c.params.highToBreathe * 3,
+      }),
       width: (c) =>
         (c.params.thickness * 100) /
         (1 + c.audio.high * c.params.highToSharpness),
@@ -172,12 +196,17 @@ export class RoseCurveVisualizer extends CurveVisualizer {
           d = Math.round(p.denominator);
         return Array.from({ length: Math.round(p.layers) }, (_, i) => {
           const numerator = n + i * d,
-            angle = c.phase + i * 0.15,
+            angle = c.phase * (i % 2 === 0 ? 1 : -0.65) + i * 0.15,
             amp =
               p.amplitude *
               0.4 *
               (1 + a.bass * 0.2 * p.bassToAmp) *
-              (1 - i * 0.04);
+              (1 - i * 0.04) *
+              (1 +
+                a.high *
+                  p.highToBreathe *
+                  0.18 *
+                  Math.sin(c.phases.petals + i * 1.5));
           return {
             period: rosePeriod(numerator, d),
             seeds: 64 * (numerator + d),

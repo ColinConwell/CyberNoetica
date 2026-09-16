@@ -1,12 +1,36 @@
 import * as THREE from 'three';
 import type { JourneyEndpoint } from './endpoint.js';
+import type { TransitionLook } from './types.js';
 import { quintic } from './definition.js';
+
+// Shared by heads and traces: fixed correspondence, live endpoints, zero endpoint displacement/velocity.
+const flightShader = `
+float ease(float p){return p*p*p*(p*(p*6.-15.)+10.);}
+float envelopeAt(float p){return 16.*p*p*(1.-p)*(1.-p);}
+vec3 flight(float p){
+  float s=ease(p), e=envelopeAt(p), id=float(gl_InstanceID);
+  vec3 q=mix(sourcePosition,targetPosition,s);
+  vec2 d=(targetPosition.xy-sourcePosition.xy)*vec2(aspect,1.);
+  if(pathMode>0.5 && pathMode<1.5) q.xy+=e*curvature*vec2(-d.y/aspect,d.x)*.5;
+  if(pathMode>1.5){
+    float angle=e*curvature*3.14159;
+    vec2 v=q.xy*vec2(aspect,1.);
+    q.xy=vec2(cos(angle)*v.x-sin(angle)*v.y,sin(angle)*v.x+cos(angle)*v.y)/vec2(aspect,1.);
+  }
+  vec2 v=q.xy;
+  q.xy+=e*(swirl*vec2(-v.y/aspect,v.x*aspect)+spread*vec2(cos(id*2.39996+time)/aspect,sin(id*2.39996+time))*.35);
+  q.x+=e*spread*sin(time*.7+q.y*3.)*.08/aspect;
+  return q;
+}`;
 
 export class JourneyPresentation {
   private scene = new THREE.Scene();
   private camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private geometry: THREE.BufferGeometry;
   private material: THREE.ShaderMaterial;
+  private traceGeometry: THREE.InstancedBufferGeometry;
+  private traceMaterial: THREE.ShaderMaterial;
+  private traces: THREE.Mesh;
   private targetPositions: Float32Array;
   private targetColors: Float32Array;
   private quadScene = new THREE.Scene();
@@ -59,6 +83,10 @@ export class JourneyPresentation {
       depthWrite: false,
       blending: THREE.AdditiveBlending,
       uniforms: {
+        pathMode: { value: 0 },
+        curvature: { value: 0.35 },
+        renderMode: { value: 0 },
+        traceLength: { value: 0.12 },
         progress: { value: 0 },
         opacity: { value: 1 },
         time: { value: 0 },
@@ -72,22 +100,64 @@ export class JourneyPresentation {
         zoom: { value: 1 },
       },
       vertexShader: `attribute vec3 sourcePosition,targetPosition;attribute vec4 sourceColor,targetColor;attribute vec3 tangent,targetTangent;
-      uniform float progress,opacity,time,swirl,spread,light,pointSize,aspect,zoom;uniform vec2 pan,resolution;varying vec4 color;varying vec2 sprite;
-      void main(){float p=clamp(progress,0.,1.);float s=p*p*p*(p*(p*6.-15.)+10.);float envelope=16.*p*p*(1.-p)*(1.-p);
-      vec3 q=mix(sourcePosition,targetPosition,s);vec2 v=q.xy;float id=float(gl_InstanceID);
-      q.xy+=envelope*(swirl*vec2(-v.y,v.x)+spread*vec2(cos(id*2.39996+time),sin(id*2.39996+time))*.35);
-      q.x+=(envelope*spread*sin(time*.7+q.y*3.))*.08/aspect;
-      color=mix(sourceColor,targetColor,s);color.a*=opacity; color.rgb*=1.+light;
+      uniform float progress,opacity,time,swirl,spread,light,pointSize,aspect,zoom,pathMode,curvature,renderMode,traceLength;uniform vec2 pan,resolution;varying vec4 color;varying vec2 sprite;
+      ${flightShader}
+      void main(){float p=clamp(progress,0.,1.);float s=ease(p);vec3 q=flight(p);
+      color=mix(sourceColor,targetColor,s);color.a*=opacity;color.rgb*=1.+light;
       vec2 direction=mix(tangent.xy,targetTangent.xy,s);float ribbon=clamp(length(direction),0.,1.);
+      vec2 velocity=(flight(min(1.,p+.005)).xy-flight(max(0.,p-.005)).xy)*resolution*zoom;
+      float stretch=0.;
+      if(renderMode>.5 && renderMode<1.5){direction=velocity/resolution;stretch=min(40.,length(velocity)*traceLength*5.);}
       direction=length(direction)>.001?normalize(direction*resolution):vec2(1.,0.);vec2 perpendicular=vec2(-direction.y,direction.x);
-      vec2 size=vec2(mix(pointSize,12.,ribbon),pointSize);
+      vec2 size=vec2(mix(pointSize,12.,ribbon)+stretch,pointSize);
       vec2 offset=(direction*position.x*size.x+perpendicular*position.y*size.y)*2./resolution;
       sprite=position.xy;gl_Position=vec4((q.xy+pan)*zoom+offset,0.,1.);}`,
       fragmentShader: `varying vec4 color;varying vec2 sprite;void main(){float r=dot(sprite,sprite);if(r>1.)discard;float glow=exp(-r*4.);gl_FragColor=vec4(color.rgb,color.a*glow*.55);}`,
     });
     const points = new THREE.Mesh(this.geometry, this.material);
     points.frustumCulled = false;
-    this.scene.add(points);
+    this.traceGeometry = new THREE.InstancedBufferGeometry();
+    this.traceGeometry.instanceCount = count;
+    // Eight ribbon segments per sample; no per-frame history allocation or extra target textures.
+    const vertices: number[] = [];
+    for (let i = 0; i < 8; i++) {
+      const a = i / 8,
+        b = (i + 1) / 8;
+      vertices.push(a, -1, 0, b, -1, 0, b, 1, 0, a, -1, 0, b, 1, 0, a, 1, 0);
+    }
+    this.traceGeometry.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute(vertices, 3),
+    );
+    for (const [name, attribute] of Object.entries(this.geometry.attributes))
+      if (name !== 'position') this.traceGeometry.setAttribute(name, attribute);
+    this.traceMaterial = new THREE.ShaderMaterial({
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: this.material.uniforms,
+      vertexShader: `attribute vec3 sourcePosition,targetPosition;attribute vec4 sourceColor,targetColor;
+      uniform float progress,opacity,time,swirl,spread,light,pointSize,aspect,zoom,pathMode,curvature,traceLength;
+      uniform vec2 pan,resolution;varying vec4 color;varying vec2 ribbon;
+      ${flightShader}
+      void main(){
+        float p=clamp(progress-position.x*traceLength,0.,1.);
+        vec2 q=flight(p).xy;
+        vec2 velocity=(flight(min(1.,p+.001)).xy-flight(max(0.,p-.001)).xy)*resolution;
+        vec2 direction=length(velocity)>.00001?normalize(velocity):vec2(1.,0.);
+        vec2 offset=vec2(-direction.y,direction.x)*position.y*pointSize*.55*2./resolution;
+        color=mix(sourceColor,targetColor,ease(p));
+        color.rgb*=1.+light;
+        color.a*=opacity*envelopeAt(progress)*(1.-position.x)*.3;
+        ribbon=position.xy;gl_Position=vec4((q+pan)*zoom+offset,0.,1.);
+      }`,
+      fragmentShader: `varying vec4 color;varying vec2 ribbon;void main(){gl_FragColor=vec4(color.rgb,color.a*exp(-ribbon.y*ribbon.y*3.));}`,
+    });
+    this.traces = new THREE.Mesh(this.traceGeometry, this.traceMaterial);
+    this.traces.frustumCulled = false;
+    this.traces.visible = false;
+    this.scene.add(this.traces, points);
     this.quadMaterial = new THREE.ShaderMaterial({
       transparent: true,
       depthTest: false,
@@ -133,7 +203,19 @@ export class JourneyPresentation {
     style: 'character' | 'unified',
     dt: number,
     view: { panX: number; panY: number; zoom: number },
+    look?: TransitionLook,
+    reduceMotion = false,
   ): void {
+    this.material.uniforms.pathMode.value =
+      look?.path === 'arc' ? 1 : look?.path === 'vortex' ? 2 : 0;
+    this.material.uniforms.curvature.value =
+      (look?.curvature ?? 0) * (reduceMotion ? 0.25 : 1);
+    this.material.uniforms.renderMode.value =
+      look?.rendering === 'streaks' ? 1 : 0;
+    this.material.uniforms.traceLength.value =
+      (look?.traceLength ?? 0.12) * (reduceMotion ? 0.25 : 1);
+    this.traces.visible =
+      look?.rendering === 'traces' && progress > 0 && progress < 1;
     this.handoffRemaining = Math.max(0, this.handoffRemaining - dt);
     if (this.handoffRemaining === 0 && this.handoff) {
       this.handoff.dispose();
@@ -301,6 +383,8 @@ export class JourneyPresentation {
   }
   dispose(): void {
     this.handoff?.dispose();
+    this.traceGeometry.dispose();
+    this.traceMaterial.dispose();
     this.geometry.dispose();
     this.material.dispose();
     this.quad.geometry.dispose();
