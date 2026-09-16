@@ -1,3 +1,4 @@
+import { getAppSurface } from './surface.js';
 export interface FadeManagerOpts {
   controlBar: HTMLElement;
   panel: HTMLElement;
@@ -45,7 +46,12 @@ export function createFadeManager(opts: FadeManagerOpts): FadeManager {
   }
 
   const onMouseMove = (e: MouseEvent) => {
-    if (e.clientY > window.innerHeight * 0.82) show();
+    const bounds = getAppSurface().getBoundingClientRect();
+    if (
+      e.clientY > bounds.top + bounds.height * 0.82 &&
+      e.clientY < bounds.bottom
+    )
+      show();
   };
   const onClick = () => {
     if (!barVisible && opts.controlBar.style.display === 'flex') show();

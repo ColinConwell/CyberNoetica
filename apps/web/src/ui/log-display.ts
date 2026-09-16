@@ -1,6 +1,21 @@
+import { getAppSurface } from './surface.js';
 import { el } from './components.js';
-import { FONT, GLASS_BG, GLASS_BORDER, TEXT_DIM, TEXT_PRIMARY, TEXT_SECONDARY, ACCENT } from './styles.js';
-import { Z_INDEX, DIMENSIONS, SPACING, POSITIONS, TIMING } from './constants.js';
+import {
+  FONT,
+  GLASS_BG,
+  GLASS_BORDER,
+  TEXT_DIM,
+  TEXT_PRIMARY,
+  TEXT_SECONDARY,
+  ACCENT,
+} from './styles.js';
+import {
+  Z_INDEX,
+  DIMENSIONS,
+  SPACING,
+  POSITIONS,
+  TIMING,
+} from './constants.js';
 
 // ---------------------------------------------------------------------------
 // Log Types
@@ -50,7 +65,11 @@ function pushLog(level: LogLevel, message: string) {
   logBuffer.push(entry);
   if (logBuffer.length > MAX_ENTRIES) logBuffer.shift();
   for (const fn of logListeners) {
-    try { fn(entry); } catch { /* swallow */ }
+    try {
+      fn(entry);
+    } catch {
+      /* swallow */
+    }
   }
 }
 
@@ -123,31 +142,44 @@ function formatTimestamp(ts: number): string {
 function appendLogLine(parent: HTMLElement, entry: LogEntry, style: LogStyle) {
   if (style === 'clean') {
     const line = el('div', {
-      padding: '3px 6px', marginBottom: '2px',
+      padding: '3px 6px',
+      marginBottom: '2px',
       borderRadius: '4px',
       background: LOG_BG_COLORS[entry.level],
-      display: 'flex', alignItems: 'baseline', gap: '8px',
+      display: 'flex',
+      alignItems: 'baseline',
+      gap: '8px',
     });
 
     const badge = el('span', {
-      fontSize: '9px', fontWeight: '600', letterSpacing: '0.05em',
-      padding: '1px 5px', borderRadius: '3px',
+      fontSize: '9px',
+      fontWeight: '600',
+      letterSpacing: '0.05em',
+      padding: '1px 5px',
+      borderRadius: '3px',
       color: LOG_COLORS[entry.level],
       background: LOG_BG_COLORS[entry.level],
       border: `1px solid ${LOG_COLORS[entry.level]}`,
-      fontFamily: 'monospace', flexShrink: '0',
+      fontFamily: 'monospace',
+      flexShrink: '0',
     });
     badge.textContent = LEVEL_LABELS[entry.level];
 
     const ts = el('span', {
-      fontSize: '9px', color: TEXT_DIM, fontFamily: 'monospace', flexShrink: '0',
+      fontSize: '9px',
+      color: TEXT_DIM,
+      fontFamily: 'monospace',
+      flexShrink: '0',
     });
     ts.textContent = formatTimestamp(entry.timestamp);
 
     const msg = el('span', {
       color: LOG_COLORS[entry.level],
-      whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-      fontSize: '11px', fontFamily: 'monospace', lineHeight: '1.4',
+      whiteSpace: 'pre-wrap',
+      wordBreak: 'break-word',
+      fontSize: '11px',
+      fontFamily: 'monospace',
+      lineHeight: '1.4',
     });
     msg.textContent = entry.message;
 
@@ -155,10 +187,14 @@ function appendLogLine(parent: HTMLElement, entry: LogEntry, style: LogStyle) {
     parent.appendChild(line);
   } else {
     const line = el('div', {
-      padding: '2px 0', color: LOG_COLORS[entry.level] || TEXT_DIM,
+      padding: '2px 0',
+      color: LOG_COLORS[entry.level] || TEXT_DIM,
       borderBottom: '1px solid rgba(255,255,255,0.03)',
-      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-      fontFamily: 'monospace', fontSize: '11px',
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      fontFamily: 'monospace',
+      fontSize: '11px',
     });
     line.textContent = `${formatTimestamp(entry.timestamp)} [${entry.level}] ${entry.message}`;
     parent.appendChild(line);
@@ -173,36 +209,67 @@ function matches(entry: LogEntry, filter: LogLevel | 'all'): boolean {
 // Floating Modal Display
 // ---------------------------------------------------------------------------
 
-function createFloatingDisplay(filter: LogLevel | 'all', style: LogStyle): { element: HTMLElement; cleanup: () => void } {
+function createFloatingDisplay(
+  filter: LogLevel | 'all',
+  style: LogStyle,
+): { element: HTMLElement; cleanup: () => void } {
   const container = el('div', {
-    position: 'fixed', top: `${POSITIONS.floatLogTop}px`, right: `${POSITIONS.floatLogRight}px`,
-    width: `${DIMENSIONS.floatLogWidth}px`, maxHeight: DIMENSIONS.floatLogMaxHeight,
-    background: GLASS_BG, backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-    border: `1px solid ${GLASS_BORDER}`, borderRadius: '12px',
-    zIndex: String(Z_INDEX.logFloat), overflow: 'hidden',
-    fontFamily: 'monospace', fontSize: '11px',
+    position: 'fixed',
+    top: `${POSITIONS.floatLogTop}px`,
+    right: `${POSITIONS.floatLogRight}px`,
+    width: `${DIMENSIONS.floatLogWidth}px`,
+    maxHeight: DIMENSIONS.floatLogMaxHeight,
+    background: GLASS_BG,
+    backdropFilter: 'blur(20px)',
+    WebkitBackdropFilter: 'blur(20px)',
+    border: `1px solid ${GLASS_BORDER}`,
+    borderRadius: '12px',
+    zIndex: String(Z_INDEX.logFloat),
+    overflow: 'hidden',
+    fontFamily: 'monospace',
+    fontSize: '11px',
   });
 
   const header = el('div', {
-    padding: '8px 12px', display: 'flex', justifyContent: 'space-between',
-    alignItems: 'center', borderBottom: `1px solid ${GLASS_BORDER}`,
-    cursor: 'move', userSelect: 'none',
+    padding: '8px 12px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderBottom: `1px solid ${GLASS_BORDER}`,
+    cursor: 'move',
+    userSelect: 'none',
   });
-  const headerText = el('span', { color: TEXT_DIM, fontSize: '10px', letterSpacing: '0.15em', textTransform: 'uppercase' });
+  const headerText = el('span', {
+    color: TEXT_DIM,
+    fontSize: '10px',
+    letterSpacing: '0.15em',
+    textTransform: 'uppercase',
+  });
   headerText.textContent = 'Log';
-  const closeBtn = el('span', { color: TEXT_DIM, cursor: 'pointer', fontSize: '14px', padding: '2px 4px' });
+  const closeBtn = el('span', {
+    color: TEXT_DIM,
+    cursor: 'pointer',
+    fontSize: '14px',
+    padding: '2px 4px',
+  });
   closeBtn.textContent = '\u00d7';
-  closeBtn.addEventListener('mouseenter', () => { closeBtn.style.color = TEXT_PRIMARY; });
-  closeBtn.addEventListener('mouseleave', () => { closeBtn.style.color = TEXT_DIM; });
+  closeBtn.addEventListener('mouseenter', () => {
+    closeBtn.style.color = TEXT_PRIMARY;
+  });
+  closeBtn.addEventListener('mouseleave', () => {
+    closeBtn.style.color = TEXT_DIM;
+  });
   header.append(headerText, closeBtn);
   container.appendChild(header);
 
   const logList = el('div', {
-    maxHeight: 'calc(50vh - 40px)', overflowY: 'auto', padding: '6px 10px',
+    maxHeight: 'calc(50vh - 40px)',
+    overflowY: 'auto',
+    padding: '6px 10px',
   });
   container.appendChild(logList);
 
-  for (const e of logBuffer.filter(en => matches(en, filter))) {
+  for (const e of logBuffer.filter((en) => matches(en, filter))) {
     appendLogLine(logList, e, style);
   }
   logList.scrollTop = logList.scrollHeight;
@@ -211,10 +278,13 @@ function createFloatingDisplay(filter: LogLevel | 'all', style: LogStyle): { ele
     if (!matches(entry, filter)) return;
     appendLogLine(logList, entry, style);
     logList.scrollTop = logList.scrollHeight;
-    while (logList.children.length > MAX_ENTRIES) logList.removeChild(logList.firstChild!);
+    while (logList.children.length > MAX_ENTRIES)
+      logList.removeChild(logList.firstChild!);
   });
 
-  let dragging = false, dx = 0, dy = 0;
+  let dragging = false,
+    dx = 0,
+    dy = 0;
   header.addEventListener('pointerdown', (e) => {
     dragging = true;
     const rect = container.getBoundingClientRect();
@@ -224,13 +294,17 @@ function createFloatingDisplay(filter: LogLevel | 'all', style: LogStyle): { ele
   });
   header.addEventListener('pointermove', (e) => {
     if (!dragging) return;
-    container.style.left = `${e.clientX - dx}px`;
-    container.style.top = `${e.clientY - dy}px`;
+    const bounds = getAppSurface().getBoundingClientRect();
+    container.style.left = `${Math.max(0, Math.min(bounds.width - container.offsetWidth, e.clientX - dx - bounds.left))}px`;
+    container.style.top = `${Math.max(0, Math.min(bounds.height - 40, e.clientY - dy - bounds.top))}px`;
     container.style.right = 'auto';
   });
-  header.addEventListener('pointerup', () => { dragging = false; });
+  header.addEventListener('pointerup', () => {
+    dragging = false;
+  });
 
-  document.body.appendChild(container);
+  container.classList.add('app-log');
+  getAppSurface().appendChild(container);
 
   const cleanup = () => {
     unsub();
@@ -246,38 +320,63 @@ function createFloatingDisplay(filter: LogLevel | 'all', style: LogStyle): { ele
 // Fixed Panel Display (below control panel)
 // ---------------------------------------------------------------------------
 
-function createFixedDisplay(filter: LogLevel | 'all', style: LogStyle): { element: HTMLElement; cleanup: () => void } {
+function createFixedDisplay(
+  filter: LogLevel | 'all',
+  style: LogStyle,
+): { element: HTMLElement; cleanup: () => void } {
   const container = el('div', {
-    position: 'fixed', bottom: '0', left: '50%',
+    position: 'fixed',
+    bottom: '0',
+    left: '50%',
     transform: 'translateX(-50%)',
-    width: `${DIMENSIONS.fixedLogWidth}px`, maxWidth: '90vw',
+    width: `${DIMENSIONS.fixedLogWidth}px`,
+    maxWidth: '90vw',
     height: `${DIMENSIONS.fixedLogHeight}px`,
-    background: GLASS_BG, backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-    border: `1px solid ${GLASS_BORDER}`, borderRadius: '12px 12px 0 0',
-    zIndex: String(Z_INDEX.logFixed), overflow: 'hidden',
-    fontFamily: 'monospace', fontSize: '11px',
+    background: GLASS_BG,
+    backdropFilter: 'blur(20px)',
+    WebkitBackdropFilter: 'blur(20px)',
+    border: `1px solid ${GLASS_BORDER}`,
+    borderRadius: '12px 12px 0 0',
+    zIndex: String(Z_INDEX.logFixed),
+    overflow: 'hidden',
+    fontFamily: 'monospace',
+    fontSize: '11px',
     transition: 'opacity 0.3s ease',
-    display: 'flex', flexDirection: 'column',
+    display: 'flex',
+    flexDirection: 'column',
   });
   container.setAttribute('data-log-fixed', 'true');
-  container.setAttribute('data-log-fixed-height', String(DIMENSIONS.fixedLogHeight));
+  container.setAttribute(
+    'data-log-fixed-height',
+    String(DIMENSIONS.fixedLogHeight),
+  );
 
   const headerRow = el('div', {
-    padding: '5px 12px', display: 'flex', justifyContent: 'space-between',
-    alignItems: 'center', borderBottom: `1px solid ${GLASS_BORDER}`,
+    padding: '5px 12px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderBottom: `1px solid ${GLASS_BORDER}`,
     flexShrink: '0',
   });
-  const headerText = el('span', { color: TEXT_DIM, fontSize: '9px', letterSpacing: '0.15em', textTransform: 'uppercase' });
+  const headerText = el('span', {
+    color: TEXT_DIM,
+    fontSize: '9px',
+    letterSpacing: '0.15em',
+    textTransform: 'uppercase',
+  });
   headerText.textContent = 'Log Output';
   headerRow.appendChild(headerText);
   container.appendChild(headerRow);
 
   const logList = el('div', {
-    flex: '1', overflowY: 'auto', padding: '4px 10px',
+    flex: '1',
+    overflowY: 'auto',
+    padding: '4px 10px',
   });
   container.appendChild(logList);
 
-  for (const e of logBuffer.filter(en => matches(en, filter))) {
+  for (const e of logBuffer.filter((en) => matches(en, filter))) {
     appendLogLine(logList, e, style);
   }
   logList.scrollTop = logList.scrollHeight;
@@ -286,14 +385,19 @@ function createFixedDisplay(filter: LogLevel | 'all', style: LogStyle): { elemen
     if (!matches(entry, filter)) return;
     appendLogLine(logList, entry, style);
     logList.scrollTop = logList.scrollHeight;
-    while (logList.children.length > MAX_ENTRIES) logList.removeChild(logList.firstChild!);
+    while (logList.children.length > MAX_ENTRIES)
+      logList.removeChild(logList.firstChild!);
   });
 
-  document.body.appendChild(container);
+  container.classList.add('app-log');
+  getAppSurface().appendChild(container);
 
   return {
     element: container,
-    cleanup() { unsub(); container.remove(); },
+    cleanup() {
+      unsub();
+      container.remove();
+    },
   };
 }
 
@@ -301,16 +405,28 @@ function createFixedDisplay(filter: LogLevel | 'all', style: LogStyle): { elemen
 // Stream Overlay Display (Star Wars style)
 // ---------------------------------------------------------------------------
 
-function createStreamDisplay(filter: LogLevel | 'all', style: LogStyle): { element: HTMLElement; cleanup: () => void } {
+function createStreamDisplay(
+  filter: LogLevel | 'all',
+  style: LogStyle,
+): { element: HTMLElement; cleanup: () => void } {
   const container = el('div', {
-    position: 'fixed', bottom: '100px', left: '50%', transform: 'translateX(-50%)',
-    width: `${DIMENSIONS.streamLogWidth}px`, maxWidth: '80vw',
-    pointerEvents: 'none', zIndex: String(Z_INDEX.logStream),
-    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: `${SPACING.smallGap}px`,
+    position: 'fixed',
+    bottom: '100px',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    width: `${DIMENSIONS.streamLogWidth}px`,
+    maxWidth: '80vw',
+    pointerEvents: 'none',
+    zIndex: String(Z_INDEX.logStream),
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: `${SPACING.smallGap}px`,
     transition: `bottom ${TIMING.bottomSlide}`,
   });
   container.setAttribute('data-log-stream', 'true');
-  document.body.appendChild(container);
+  container.classList.add('app-log');
+  getAppSurface().appendChild(container);
 
   if (!document.getElementById('log-stream-keyframes')) {
     const styleEl = document.createElement('style');
@@ -329,22 +445,29 @@ function createStreamDisplay(filter: LogLevel | 'all', style: LogStyle): { eleme
   function addStreamLine(entry: LogEntry) {
     const isClean = style === 'clean';
     const line = el('div', {
-      fontFamily: 'monospace', fontSize: '11px',
+      fontFamily: 'monospace',
+      fontSize: '11px',
       color: LOG_COLORS[entry.level] || TEXT_DIM,
-      opacity: '0', textAlign: 'center',
-      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+      opacity: '0',
+      textAlign: 'center',
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
       maxWidth: '100%',
       animation: 'logStreamFade 4s ease-out forwards',
-      ...(isClean ? {
-        padding: '2px 10px',
-        borderRadius: '4px',
-        background: LOG_BG_COLORS[entry.level],
-      } : {}),
+      ...(isClean
+        ? {
+            padding: '2px 10px',
+            borderRadius: '4px',
+            background: LOG_BG_COLORS[entry.level],
+          }
+        : {}),
     });
     if (isClean) {
       const badge = document.createElement('span');
       Object.assign(badge.style, {
-        fontSize: '9px', fontWeight: '600',
+        fontSize: '9px',
+        fontWeight: '600',
         color: LOG_COLORS[entry.level],
         marginRight: '6px',
       });
@@ -355,12 +478,17 @@ function createStreamDisplay(filter: LogLevel | 'all', style: LogStyle): { eleme
       line.textContent = entry.message;
     }
     container.appendChild(line);
-    setTimeout(() => { line.remove(); }, TIMING.streamRemoveMs);
-    while (container.children.length > TIMING.streamMaxLines) container.removeChild(container.firstChild!);
+    setTimeout(() => {
+      line.remove();
+    }, TIMING.streamRemoveMs);
+    while (container.children.length > TIMING.streamMaxLines)
+      container.removeChild(container.firstChild!);
   }
 
   // Replay recent buffer entries with staggered animation
-  const recent = logBuffer.filter(en => matches(en, filter)).slice(-TIMING.streamReplayCount);
+  const recent = logBuffer
+    .filter((en) => matches(en, filter))
+    .slice(-TIMING.streamReplayCount);
   recent.forEach((entry, i) => {
     setTimeout(() => addStreamLine(entry), i * TIMING.streamReplayStaggerMs);
   });
@@ -372,7 +500,10 @@ function createStreamDisplay(filter: LogLevel | 'all', style: LogStyle): { eleme
 
   return {
     element: container,
-    cleanup() { unsub(); container.remove(); },
+    cleanup() {
+      unsub();
+      container.remove();
+    },
   };
 }
 
@@ -404,4 +535,6 @@ export function getLogBuffer(): ReadonlyArray<LogEntry> {
   return logBuffer;
 }
 
-export function getLogEntries(): LogEntry[] { return logBuffer.map(entry => ({ ...entry })); }
+export function getLogEntries(): LogEntry[] {
+  return logBuffer.map((entry) => ({ ...entry }));
+}

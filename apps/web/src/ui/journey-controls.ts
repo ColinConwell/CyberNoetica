@@ -21,9 +21,11 @@ export function field(label: string, input: HTMLElement): HTMLElement {
     justifyContent: 'space-between',
     fontSize: '11px',
     color: TEXT_SECONDARY,
-    margin: '7px 0',
+    margin: '10px 0',
+    flexWrap: 'wrap',
   });
-  const text = el('span', {});
+  row.classList.add('control-field');
+  const text = el('span', { minWidth: '0', lineHeight: '1.5' });
   text.textContent = label;
   input.setAttribute('aria-label', label);
   row.append(text, input);

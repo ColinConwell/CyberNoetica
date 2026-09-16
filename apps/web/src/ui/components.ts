@@ -383,11 +383,14 @@ export function paramSlider(opts: ParamSliderOpts): HTMLElement {
     fontSize: '12px',
     color: 'rgba(255,255,255,0.5)',
   });
-  const label = el('span', {});
+  row.classList.add('param-row');
+  row.style.gap = '12px';
+  const label = el('span', { minWidth: '0', lineHeight: '1.5' });
   label.textContent = opts.label;
   row.dataset.controlId = `param:${opts.key}`;
   row.dataset.search = `${opts.key} ${opts.label} ${opts.description ?? ''}`;
-  if (opts.description) label.append(' ', controlHelp(opts.label, opts.description, opts.key));
+  if (opts.description)
+    label.append(' ', controlHelp(opts.label, opts.description, opts.key));
   const right = el('div', {
     display: 'flex',
     alignItems: 'center',
@@ -421,6 +424,7 @@ export function paramSlider(opts: ParamSliderOpts): HTMLElement {
       val < 0.01 ? val.toExponential(1) : String(Math.round(val * 1000) / 1000);
     opts.onChange(opts.key, val);
   });
+  right.style.flexShrink = '0';
   right.append(slider, num);
   row.append(label, right);
   return row;

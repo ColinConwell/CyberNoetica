@@ -1,3 +1,4 @@
+import { getAppSurface } from './surface.js';
 import type { JourneyController } from '../managers/journey-controller.js';
 import { el } from './components.js';
 import { setButtonActive } from './components.js';
@@ -152,7 +153,7 @@ export function createUI(): UIControls {
     { display: 'none' },
     { type: 'file', accept: 'audio/*' },
   );
-  document.body.appendChild(fileInput);
+  getAppSurface().appendChild(fileInput);
   fileInput.addEventListener('change', () => {
     if (fileInput.files && fileInput.files[0] && fileSelectHandler) {
       fileSelectHandler(fileInput.files[0]);
@@ -180,7 +181,8 @@ export function createUI(): UIControls {
   });
   title.textContent = appTitle;
   document.title = appTitle;
-  document.body.appendChild(title);
+  title.classList.add('app-title');
+  getAppSurface().appendChild(title);
 
   // Interactivity hint (below title)
   const interactivityHint = el('div', {
@@ -199,7 +201,7 @@ export function createUI(): UIControls {
     transition: `opacity ${TIMING.hintFade}`,
     opacity: '0',
   });
-  document.body.appendChild(interactivityHint);
+  getAppSurface().appendChild(interactivityHint);
   let interactivityHintTimer: ReturnType<typeof setTimeout> | null = null;
   let showInteractivityHints = true;
 
@@ -244,7 +246,7 @@ export function createUI(): UIControls {
     zIndex: String(Z_INDEX.panelBackdrop),
     display: 'none',
   });
-  document.body.appendChild(panelBackdrop);
+  getAppSurface().appendChild(panelBackdrop);
 
   const panel = el('div', {
     position: 'fixed',
@@ -268,7 +270,8 @@ export function createUI(): UIControls {
     fontFamily: FONT,
     color: TEXT_PRIMARY,
   });
-  document.body.appendChild(panel);
+  panel.classList.add('standard-panel');
+  getAppSurface().appendChild(panel);
 
   // ── Vertical Layout Coordinator ─────────────────────────────────
   // Stacks bottom-up: fixed log -> keyboard overlay -> control bar -> panel/stream
@@ -299,10 +302,16 @@ export function createUI(): UIControls {
       keyOverlay.element.style.bottom = `${kbBottom}px`;
     }
     const kbVisible = keyOverlay?.isVisible() ?? false;
-    cursor = kbVisible ? kbBottom + KEYBOARD_BAR_HEIGHT + LAYOUT_GAP : kbBottom;
+    cursor = kbVisible
+      ? kbBottom +
+        (keyOverlay?.element.offsetHeight || KEYBOARD_BAR_HEIGHT) +
+        LAYOUT_GAP
+      : kbBottom;
 
     cbar.bar.style.bottom = `${cursor}px`;
-    cursor += CONTROL_BAR_HEIGHT + LAYOUT_GAP;
+    cursor += (cbar.bar.offsetHeight || CONTROL_BAR_HEIGHT) + LAYOUT_GAP;
+    getAppSurface().style.setProperty('--controls-top', `${cursor}px`);
+    if (getAppSurface().dataset.devLauncher === 'above') cursor += 40;
 
     panel.style.bottom = `${cursor}px`;
 
@@ -331,7 +340,7 @@ export function createUI(): UIControls {
     maxWidth: `${DIMENSIONS.errorMaxWidth}px`,
     textAlign: 'center',
   });
-  document.body.appendChild(errorEl);
+  getAppSurface().appendChild(errorEl);
   let errorTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Fade manager
@@ -420,7 +429,8 @@ export function createUI(): UIControls {
         trackListExpanded,
         expandedFolders,
         activeSource: activeAudioSource,
-        soundscapeParams: journeyController?.source.getSoundscapeParams() ?? soundscapeParams,
+        soundscapeParams:
+          journeyController?.source.getSoundscapeParams() ?? soundscapeParams,
         analysisGain,
         onAnalysisGainChange: (gain) => {
           analysisGain = gain;
@@ -541,13 +551,18 @@ export function createUI(): UIControls {
     recalcFixedLogHeight();
     updateBottomLayout();
   });
-  layoutObserver.observe(document.body, { childList: true });
+  layoutObserver.observe(getAppSurface(), { childList: true });
+
+  const barObserver = new ResizeObserver(updateBottomLayout);
+  barObserver.observe(cbar.bar);
+  window.addEventListener('cybernoetica:layout', updateBottomLayout);
 
   // Initial layout
   updateBottomLayout();
 
   // Keyboard shortcut overlay
   keyOverlay = createKeyboardOverlay();
+  barObserver.observe(keyOverlay.element);
   const isDevMode =
     typeof import.meta !== 'undefined' && !!(import.meta as any).env?.DEV;
   keyOverlay.setShortcuts([
@@ -721,6 +736,8 @@ export function createUI(): UIControls {
       fade.destroy();
       keyOverlay?.destroy();
       layoutObserver.disconnect();
+      barObserver.disconnect();
+      window.removeEventListener('cybernoetica:layout', updateBottomLayout);
       cleanupViewStatePolling();
       if (errorTimer) clearTimeout(errorTimer);
       if (standaloneLogDisplay) {

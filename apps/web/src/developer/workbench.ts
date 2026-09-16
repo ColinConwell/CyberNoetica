@@ -1,3 +1,5 @@
+import { mountWorkbenchLayout, sectionGestures } from './layout.js';
+import type { LayoutPreferences } from './layout.js';
 import { setAgentAnnotationsProvider } from '../assistant/panel.js';
 import { describeTarget } from './target.js';
 import './workbench.css';
@@ -48,6 +50,21 @@ function button(label: string, action: () => void): HTMLButtonElement {
   return b;
 }
 
+function buttonGroup(label: string, ...buttons: HTMLElement[]) {
+  const group = el('div', {}, { role: 'group', 'aria-label': label });
+  group.className = 'dev-button-group';
+  group.append(...buttons);
+  return group;
+}
+function cluster(label: string, ...children: HTMLElement[]) {
+  const group = el('div', {});
+  group.className = 'dev-cluster';
+  const title = el('h3', {});
+  title.textContent = label;
+  group.append(title, ...children);
+  return group;
+}
+
 export function mountDeveloperWorkbench(): () => void {
   applyMenuPreferences();
   const globals = getGlobals();
@@ -73,7 +90,7 @@ export function mountDeveloperWorkbench(): () => void {
   const title = el('div', {});
   title.className = 'dev-title';
   const heading = el('h2', {});
-  heading.textContent = 'Developer workbench';
+  heading.textContent = 'Developer Workbench';
   const close = button('Close', () => hide());
   title.append(heading, close);
   const subtitle = paragraph(
@@ -131,10 +148,10 @@ export function mountDeveloperWorkbench(): () => void {
   highlight.style.zIndex = String(Z_INDEX.developerHighlight);
   highlight.hidden = true;
   document.body.append(highlight);
-  let preferences: {
+  let layoutControls: ReturnType<typeof mountWorkbenchLayout> | undefined;
+  let preferences: LayoutPreferences & {
     order?: string[];
     closed?: string[];
-    layout?: string;
     theme?: string;
   } = {};
   try {
@@ -144,6 +161,9 @@ export function mountDeveloperWorkbench(): () => void {
   } catch {
     /* defaults */
   }
+  if (!preferences || typeof preferences !== 'object') preferences = {};
+  if (!Array.isArray(preferences.closed)) preferences.closed = [];
+  if (!Array.isArray(preferences.order)) preferences.order = [];
   function persist() {
     if (search.value) return;
     try {
@@ -155,6 +175,20 @@ export function mountDeveloperWorkbench(): () => void {
           ),
           closed: [...sections].filter(([, e]) => !e.open).map(([k]) => k),
           layout: root.dataset.layout,
+          ...layoutControls?.values(),
+          sizes: Object.fromEntries(
+            [...sections].map(([id, d]) => [
+              id,
+              {
+                span:
+                  Number(d.style.getPropertyValue('--section-span')) ||
+                  undefined,
+                height:
+                  parseFloat(d.style.getPropertyValue('--section-height')) ||
+                  undefined,
+              },
+            ]),
+          ),
           theme: root.dataset.theme,
         }),
       );
@@ -162,22 +196,17 @@ export function mountDeveloperWorkbench(): () => void {
       /* optional */
     }
   }
-  root.dataset.layout = preferences.layout === 'wide' ? 'wide' : 'dock';
   root.dataset.theme = ['amber', 'paper'].includes(preferences.theme ?? '')
     ? preferences.theme
     : 'night';
-  const layout = selectControl(
-    [
-      ['dock', 'Dock'],
-      ['wide', 'Workbench'],
-    ],
-    root.dataset.layout,
-    (v) => {
-      root.dataset.layout = v;
-      persist();
-    },
+  layoutControls = mountWorkbenchLayout(
+    root,
+    launch,
+    toolbar,
+    preferences,
+    persist,
   );
-  layout.setAttribute('aria-label', 'Workbench layout');
+  cleanups.push(() => layoutControls?.destroy());
   const theme = selectControl(
     [
       ['night', 'Midnight'],
@@ -192,16 +221,18 @@ export function mountDeveloperWorkbench(): () => void {
   );
   theme.setAttribute('aria-label', 'Workbench theme');
   toolbar.append(
-    layout,
     theme,
-    button('Unfold all', () => {
-      sections.forEach((d) => (d.open = true));
-      persist();
-    }),
-    button('Fold all', () => {
-      sections.forEach((d) => (d.open = false));
-      persist();
-    }),
+    buttonGroup(
+      'Section Folding',
+      button('Unfold all', () => {
+        sections.forEach((d) => (d.open = true));
+        persist();
+      }),
+      button('Fold all', () => {
+        sections.forEach((d) => (d.open = false));
+        persist();
+      }),
+    ),
   );
   function section(id: string, name: string): HTMLElement {
     const d = el('details', {});
@@ -210,9 +241,13 @@ export function mountDeveloperWorkbench(): () => void {
     d.dataset.controlId = `developer:${id}`;
     d.open = !(preferences.closed ?? []).includes(id);
     const summary = el('summary', {});
-    summary.textContent = name;
+    const summaryLabel = el('span', {});
+    summaryLabel.textContent = name;
+    summary.append(summaryLabel);
     const order = el('span', {});
-    order.className = 'dev-order';
+    order.className = 'dev-order dev-button-group';
+    order.setAttribute('role', 'group');
+    order.setAttribute('aria-label', `${name} order`);
     const up = button('↑', () => {
       if (d.previousElementSibling)
         body.insertBefore(d, d.previousElementSibling);
@@ -224,20 +259,50 @@ export function mountDeveloperWorkbench(): () => void {
       persist();
     });
     down.setAttribute('aria-label', `Move ${name} down`);
-    for (const b of [up, down])
+    const drag = button('⠿', () => {});
+    drag.setAttribute('aria-label', `Drag ${name} to reorder`);
+    drag.title = 'Drag to reorder; use arrow keys when focused';
+    drag.className = 'dev-drag-handle';
+    const resize = button('↘', () => {});
+    resize.className = 'dev-resize-handle';
+    resize.setAttribute('aria-label', `Resize ${name}`);
+    resize.title = 'Drag to resize; use arrow keys when focused';
+    const saved = preferences.sizes?.[id];
+    if (saved && Number.isFinite(saved.span))
+      d.style.setProperty(
+        '--section-span',
+        String(Math.max(3, Math.min(12, saved.span))),
+      );
+    if (saved && Number.isFinite(saved.height))
+      d.style.setProperty(
+        '--section-height',
+        `${Math.max(160, Math.min(900, saved.height))}px`,
+      );
+    cleanups.push(
+      sectionGestures(
+        d,
+        drag,
+        resize,
+        body,
+        root,
+        persist,
+        (message) => (status.textContent = message),
+      ),
+    );
+    for (const b of [up, down, drag, resize])
       b.addEventListener('click', (e) => e.stopPropagation());
-    order.append(up, down);
+    order.append(up, down, drag);
     summary.append(order);
     const content = el('div', {});
     content.dataset.debugScope = id;
     content.className = 'dev-section-body';
-    d.append(summary, content);
+    d.append(summary, content, resize);
     body.append(d);
     sections.set(id, d);
     d.addEventListener('toggle', persist);
     return content;
   }
-  const capture = section('capture', '01 / Record & annotate');
+  const capture = section('capture', 'Record & Annotate');
   capture.append(
     paragraph(
       'Capture a configuration, mark a control or canvas region, and export a concrete change request.',
@@ -312,7 +377,7 @@ export function mountDeveloperWorkbench(): () => void {
     root.hidden = true;
     pickerHint.hidden = false;
   });
-  const targetLabel = paragraph('Target: active visualizer');
+  const targetLabel = paragraph('Target: active visualizer', 'dev-state-chip');
   const intent = selectControl(
     [
       ['issue', 'Issue'],
@@ -360,6 +425,8 @@ export function mountDeveloperWorkbench(): () => void {
           renderAnnotations();
         }),
       );
+      const rowButtons = [...row.querySelectorAll('button')];
+      row.append(buttonGroup('Edit saved annotation', ...rowButtons));
       annotationList.append(row);
     });
   }
@@ -382,21 +449,38 @@ export function mountDeveloperWorkbench(): () => void {
     status.textContent =
       'Annotation saved for this session. Export to keep it.';
   });
+  const [recordButton, jsonButton, handoffButton, copyButton, restoreButton] = [
+    ...actions.children,
+  ] as HTMLButtonElement[];
   capture.append(
-    actions,
-    pick,
-    canvasPick,
-    targetLabel,
-    intent,
-    note,
-    add,
-    annotationList,
-    preview,
+    cluster(
+      'Configuration',
+      buttonGroup('Configuration actions', recordButton, restoreButton),
+      preview,
+    ),
+    cluster(
+      'Annotation',
+      buttonGroup('Choose annotation target', pick, canvasPick),
+      targetLabel,
+      field('Annotation intent', intent),
+      note,
+      buttonGroup('Annotation actions', add),
+      annotationList,
+    ),
+    cluster(
+      'Share & Handoff',
+      buttonGroup(
+        'Export configuration and handoff',
+        jsonButton,
+        handoffButton,
+        copyButton,
+      ),
+    ),
   );
-  const visual = section('visual', '02 / Visualizer controls');
-  const sound = section('sound', '03 / Soundscape');
-  const journey = section('journey', '04 / Journey');
-  const appearance = section('appearance', '05 / Menus & appearance');
+  const visual = section('visual', 'Visualizer Controls');
+  const sound = section('sound', 'Soundscape');
+  const journey = section('journey', 'Journey');
+  const appearance = section('appearance', 'Menus & Appearance');
   appearance.append(menuLayoutPicker());
   const prefs = getMenuPreferences();
   for (const [key, label, min, max] of [
@@ -417,7 +501,7 @@ export function mountDeveloperWorkbench(): () => void {
       'Bubbles wrap naturally. Rows stack. Constellation arranges offset-shaped tiles in the selected number of columns.',
     ),
   );
-  const logbook = section('logs', '06 / Logbook');
+  const logbook = section('logs', 'Logbook');
   const logFilters = el('div', {});
   logFilters.className = 'dev-toolbar';
   const levels = new Set<LogLevel>(['info', 'warn', 'error']);
@@ -468,9 +552,16 @@ export function mountDeveloperWorkbench(): () => void {
   logQuery.oninput = renderLogs;
   logbook.append(logFilters, logQuery, entries);
   cleanups.push(onLog(renderLogs));
-  const agents = section('agents','08 / AI studio');
-  agents.append(paragraph('Inspect and improve with an assistant, or create a new procedural visualizer. Source edits become handoffs.'),button('Open AI studio',()=>window.dispatchEvent(new Event('cybernoetica:assistant'))));
-  const source = section('source', '07 / Source & diagnostics');
+  const agents = section('agents', 'AI Studio');
+  agents.append(
+    paragraph(
+      'Inspect and improve with an assistant, or create a new procedural visualizer. Source edits become handoffs.',
+    ),
+    button('Open AI studio', () =>
+      window.dispatchEvent(new Event('cybernoetica:assistant')),
+    ),
+  );
+  const source = section('source', 'Source & Diagnostics');
   const sourceResult = el('pre', {});
   let sourceInfo: { path: string; line: number } | null = null;
   function sourceTarget() {
@@ -496,27 +587,34 @@ export function mountDeveloperWorkbench(): () => void {
     }
   }
   source.append(
-    button('Locate visualizer source', () => void locate()),
-    button('Copy path:line', () => {
-      void (async () => {
-        if (!sourceInfo) await locate();
-        if (sourceInfo)
-          await navigator.clipboard.writeText(
-            `${sourceInfo.path}:${sourceInfo.line}`,
-          );
-      })().catch(() => (status.textContent = 'Clipboard unavailable.'));
-    }),
-    button('Reveal in Finder', () => {
-      void (async () => {
-        const r = await fetch('/__dev/reveal', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ target: sourceTarget() }),
-        });
-        if (!r.ok) throw new Error('Reveal requires local macOS development.');
-        status.textContent = 'Revealed source file.';
-      })().catch((e) => (status.textContent = String(e)));
-    }),
+    paragraph(
+      'Find the implementation behind the selected control and inspect current rendering diagnostics.',
+    ),
+    buttonGroup(
+      'Source file actions',
+      button('Locate visualizer source', () => void locate()),
+      button('Copy path:line', () => {
+        void (async () => {
+          if (!sourceInfo) await locate();
+          if (sourceInfo)
+            await navigator.clipboard.writeText(
+              `${sourceInfo.path}:${sourceInfo.line}`,
+            );
+        })().catch(() => (status.textContent = 'Clipboard unavailable.'));
+      }),
+      button('Reveal in Finder', () => {
+        void (async () => {
+          const r = await fetch('/__dev/reveal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target: sourceTarget() }),
+          });
+          if (!r.ok)
+            throw new Error('Reveal requires local macOS development.');
+          status.textContent = 'Revealed source file.';
+        })().catch((e) => (status.textContent = String(e)));
+      }),
+    ),
     sourceResult,
   );
   const diagnostics = el('pre', {});
@@ -533,8 +631,9 @@ export function mountDeveloperWorkbench(): () => void {
     }
     const viz = active;
     visual.append(
+      paragraph(viz.metadata.label, 'dev-state-chip'),
       paragraph(
-        `${viz.metadata.label} · ${viz.metadata.params.length} appearance/audio controls`,
+        'Tune the visual form, audio response, and camera of the active visualizer.',
       ),
     );
     for (const param of viz.metadata.params) {
@@ -757,6 +856,7 @@ export function mountDeveloperWorkbench(): () => void {
   }
   const key = (event: KeyboardEvent) => {
     if (event.key === 'Escape') {
+      if (root.querySelector('.dev-dragging')) return;
       if (
         event.target instanceof Element &&
         event.target.closest('.control-help[open]')

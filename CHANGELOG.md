@@ -2,6 +2,12 @@
 
 Changes are recorded in dated entries, newest first. Detailed reports are indexed in [reports/README.md](reports/README.md).
 
+## 2026-09-16 — Flexible Developer Workbench layouts
+
+- Added a Developer launcher centered above the controls by default, with an in-bar variant and four corner positions. Added displacing left/right sidebars and top/bottom docks with adjustable size, resizable/reorderable grids, drag grips and keyboard alternatives.
+- Grouped recording, annotation, export, folding and source actions; removed section indices/control counts; added highlighted visualizer context and title case. Shared viewport sizing, control wrapping and spacing keep the standard app usable beside the workbench.
+- Validation: 589 unit tests, TypeScript/build checks and 43 distinct desktop/mobile browser cases passed. Physical touch devices, screen readers and other engines remain untested. See the [layout report](reports/2026-09-16-workbench-layouts.md) for the annotation checklist and layout limits.
+
 ## 2026-09-15 — Live AI studio and visualizer creation
 
 - Added opt-in AI assistance with Astra as the default, provider adapters, reviewable live edits, undo/cancellation, local source/test tools and annotated state handoffs. Added bounded procedural visualizer generation with preview, recipe save/import/export and catalog integration. Development uses authorized local keys server-side; production remains off by default and BYOK only.

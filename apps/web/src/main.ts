@@ -1,7 +1,9 @@
+import { getAppSurface } from './ui/surface.js';
 import { loadDevSettings } from './settings-loader.js';
 import { createApp } from './app.js';
 import { Z_INDEX } from './ui/constants.js';
 
+getAppSurface();
 const container = document.getElementById('app')!;
 
 loadDevSettings()

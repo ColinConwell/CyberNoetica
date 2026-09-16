@@ -92,7 +92,7 @@ export async function createApp(container: HTMLElement): Promise<void> {
     bus,
     applyTier: (tier) => {
       scene.setQualityTier(tier);
-      vizManager.resize(window.innerWidth, window.innerHeight);
+      vizManager.resize(container.clientWidth, container.clientHeight);
     },
     getDebugInfo: () => scene.getRendererDebugInfo(),
   });
@@ -527,16 +527,18 @@ export async function createApp(container: HTMLElement): Promise<void> {
     ui.setSoundscapeParams(audio.source.getSoundscapeParams());
   });
 
-  window.addEventListener(
-    'resize',
-    () => {
-      const w = window.innerWidth;
-      const h = window.innerHeight;
-      scene.resize(w, h);
-      vizManager.resize(w, h);
-    },
-    { signal: listeners.signal },
-  );
+  const resizeViewport = () => {
+    const w = Math.max(1, container.clientWidth);
+    const h = Math.max(1, container.clientHeight);
+    scene.resize(w, h);
+    vizManager.resize(w, h);
+  };
+  const viewportObserver = new ResizeObserver(resizeViewport);
+  viewportObserver.observe(container);
+  cleanups.push(() => viewportObserver.disconnect());
+  window.addEventListener('resize', resizeViewport, {
+    signal: listeners.signal,
+  });
 
   // Render loop. Frame cadence is owned by QualityManager — it decides when to
   // skip frames (60 Hz cap, auto governor stepping). The gate below short-circuits

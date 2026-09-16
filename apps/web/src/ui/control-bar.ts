@@ -1,3 +1,4 @@
+import { getAppSurface } from './surface.js';
 import { el, glassButton } from './components.js';
 import { GLASS_BG, GLASS_BLUR, GLASS_BORDER } from './styles.js';
 import { Z_INDEX, SPACING, TIMING } from './constants.js';
@@ -30,22 +31,32 @@ export function createControlBar(): ControlBarAPI {
     transition: `opacity ${TIMING.fadeTransition}, bottom ${TIMING.bottomSlide}`,
     opacity: '1',
   });
-  document.body.appendChild(bar);
+  bar.id = 'control-bar';
+  bar.setAttribute('role', 'toolbar');
+  bar.setAttribute('aria-label', 'Main controls');
+  getAppSurface().appendChild(bar);
 
   const pauseBtn = glassButton('Pause');
   const visualBtn = glassButton('Visual');
   const soundBtn = glassButton('Sound');
   const controlBtn = glassButton('Control');
 
-  const divider = () => el('div', {
-    width: '1px', height: '20px',
-    background: 'rgba(255, 255, 255, 0.1)', margin: '0 2px',
-  });
+  const divider = () =>
+    el('div', {
+      width: '1px',
+      height: '20px',
+      background: 'rgba(255, 255, 255, 0.1)',
+      margin: '0 2px',
+    });
 
   bar.append(pauseBtn, divider(), visualBtn, soundBtn, divider(), controlBtn);
 
   return {
-    bar, pauseBtn, visualBtn, soundBtn, controlBtn,
+    bar,
+    pauseBtn,
+    visualBtn,
+    soundBtn,
+    controlBtn,
     show() {
       bar.style.display = 'flex';
       bar.style.opacity = '1';
